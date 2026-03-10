@@ -1,0 +1,29 @@
+import os
+import pyodbc
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from fastapi.concurrency import run_in_threadpool
+
+from src.core.config import settings
+from src.core.logging_config import get_logger
+logger = get_logger(__name__)
+
+if not settings.POSTGRES_URL_DATABASE:
+    raise RuntimeError("DATABASE_URL no está definido en variables de entorno")
+if not settings.SQLSERVER_URL_DATABASE:
+    raise RuntimeError("SQLSERVER_URL_DATABASE no está definido en variables de entorno")
+
+engine = create_async_engine(settings.POSTGRES_URL_DATABASE, echo=False)
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+async def get_db():
+    async with SessionLocal() as session:
+        yield session
+
+async def get_sqlserver_db():
+    conn = await run_in_threadpool(pyodbc.connect, settings.SQLSERVER_URL_DATABASE)
+    try:
+        yield conn
+    finally:
+        await run_in_threadpool(conn.close)
+
+

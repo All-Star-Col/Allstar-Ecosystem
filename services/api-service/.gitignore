@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+api_env/
+.python-version
+build/
+dist/
+*.egg-info/
+
+# Tests / Linters
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Secrets
+.env
+*.env
+*.env.*
+.envrc
+keys.env
+src/keys.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
+
+# Allow safe env templates
+!.env.example
+!.env.template
+
+# Local Docker/Azure overrides
+docker-compose.override.yml
+docker-compose.local.yml
+allstar-fastapi.local.yml

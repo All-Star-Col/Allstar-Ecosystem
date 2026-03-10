@@ -1,0 +1,45 @@
+services:
+    n8n:
+        image: n8nio/n8n
+        container_name: n8n
+        ports:
+            - "5678:5678"
+        volumes:
+            - documents_n8n_data:/home/node/.n8n
+        networks:
+            - allstar
+
+    app:
+        container_name: api-vm
+
+        build:
+            context: .
+            dockerfile: Dockerfile
+
+        image: api-vm:latest
+
+        ports:
+            - "80:8000"
+
+        restart: unless-stopped
+
+        env_file:
+            - ./src/keys.env
+
+        environment:
+            DEBUG: "true"
+            BW_ACCESS_TOKEN: ${BW_ACCESS_TOKEN}
+        volumes:
+            - ./src:/app/src
+        networks:
+            - allstar
+
+        command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+networks:
+    allstar:
+        driver: bridge
+
+volumes:
+    documents_n8n_data:
+        external: true
