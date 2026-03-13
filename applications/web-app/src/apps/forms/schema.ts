@@ -99,14 +99,26 @@ export function mapAPICategory(apiCategory: CategoriesFormsAPI): Category {
  * Map API Column to UI ColumnSchema
  */
 export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
+    const nullable =
+        apiColumn.nullable ?? !(apiColumn.required ?? false);
+    const required = !nullable || Boolean(apiColumn.required);
+    const enumValues =
+        apiColumn.enum_values?.filter((value) => value.trim() !== "") ?? [];
+
     return {
         name: apiColumn.name,
         displayName: apiColumn.name
             .replace(/_/g, " ")
             .replace(/\b\w/g, (l) => l.toUpperCase()),
-        type: mapDatabaseTypeToDataType(apiColumn.type),
-        required: false, // Default, can be enhanced later
-        nullable: true, // Default, can be enhanced later
+        type:
+            enumValues.length > 0
+                ? "enum"
+                : mapDatabaseTypeToDataType(apiColumn.type),
+        required,
+        nullable,
+        maxLength: apiColumn.max_length ?? undefined,
+        defaultValue: apiColumn.default_value ?? undefined,
+        enumValues: enumValues.length > 0 ? enumValues : undefined,
     };
 }
 

@@ -10,6 +10,11 @@ export interface CategoriesFormsAPI {
 export interface ColumnTableAPI {
     name: string;
     type: string;
+    nullable?: boolean | null;
+    required?: boolean | null;
+    max_length?: number | null;
+    default_value?: any;
+    enum_values?: string[] | null;
 }
 
 export interface TableFormsAPI {

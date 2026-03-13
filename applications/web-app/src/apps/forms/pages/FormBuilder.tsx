@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useTables } from "../store";
 import { DynamicFormField } from "../components/DynamicFormField";
@@ -21,6 +21,11 @@ import type { SubmitFormAPI } from "../api";
 import { getCategoryBreadcrumbLabel } from "./categoryLabel";
 import NotFound from "@/shared/components/NotFound";
 
+function isSystemManagedColumn(columnName: string): boolean {
+    const normalizedName = columnName.toLowerCase();
+    return normalizedName === "id" || normalizedName === "timestamp";
+}
+
 export default function FormBuilder() {
     const navigate = useNavigate();
     const { tableId } = useParams();
@@ -35,6 +40,13 @@ export default function FormBuilder() {
 
     const table = tableId ? getTableById(tableId) : undefined;
     const category = table ? getCategoryById(table.category) : undefined;
+    const editableColumns = useMemo(
+        () =>
+            table?.columns.filter(
+                (column) => !isSystemManagedColumn(column.name),
+            ) ?? [],
+        [table],
+    );
 
     useEffect(() => {
         // Simulate loading
@@ -45,7 +57,7 @@ export default function FormBuilder() {
             // Initialize form with default values
             if (table) {
                 const initialData: Record<string, any> = {};
-                table.columns.forEach((column) => {
+                editableColumns.forEach((column) => {
                     if (column.defaultValue !== undefined) {
                         initialData[column.name] = column.defaultValue;
                     }
@@ -55,7 +67,7 @@ export default function FormBuilder() {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [tableId, table]);
+    }, [tableId, table, editableColumns]);
 
     const handleFieldChange = (fieldName: string, value: any) => {
         setFormData((prev) => ({ ...prev, [fieldName]: value }));
@@ -74,7 +86,7 @@ export default function FormBuilder() {
 
         const newErrors: Record<string, string> = {};
 
-        table.columns.forEach((column) => {
+        editableColumns.forEach((column) => {
             const value = formData[column.name];
             const isRequired = column.required && !column.nullable;
 
@@ -112,10 +124,12 @@ export default function FormBuilder() {
             // Format data for the API
             const payload: SubmitFormAPI = {
                 table_name: table.name,
-                data: Object.entries(formData).map(([column, value]) => ({
-                    column,
-                    value,
-                })),
+                data: Object.entries(formData)
+                    .filter(([column]) => !isSystemManagedColumn(column))
+                    .map(([column, value]) => ({
+                        column,
+                        value,
+                    })),
             };
 
             const result = await submitFormData(payload);
@@ -144,7 +158,7 @@ export default function FormBuilder() {
     const handleClearForm = () => {
         if (table) {
             const clearedData: Record<string, any> = {};
-            table.columns.forEach((column) => {
+            editableColumns.forEach((column) => {
                 if (column.defaultValue !== undefined) {
                     clearedData[column.name] = column.defaultValue;
                 }
@@ -225,7 +239,7 @@ export default function FormBuilder() {
                         ) : (
                             <form onSubmit={handleSubmit} className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {table.columns.map((column) => (
+                                    {editableColumns.map((column) => (
                                         <div
                                             key={column.name}
                                             className={
