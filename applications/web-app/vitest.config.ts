@@ -9,7 +9,10 @@ export default defineConfig({
         },
     },
     test: {
-        include: ["src/apps/forms/**/*.spec.ts"],
+        include: [
+            "src/apps/forms/**/*.spec.ts",
+            "src/apps/data-viewer/**/*.spec.ts",
+        ],
         environment: "node",
     },
 });

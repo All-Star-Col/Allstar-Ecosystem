@@ -1,22 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import * as Switch from "@radix-ui/react-switch";
 import { getColumnType, humanizeColumnName } from "../data/columnUtils";
-import type { DataViewerRow } from "../types";
+import type { DataViewerRow, DataViewerSort } from "../types";
 
 interface DataGridProps {
-    data: DataViewerRow[];
-    tableName: string;
-    globalFilter: string;
-    visibleColumns: Set<string>;
-    onFilteredCountChange?: (count: number) => void;
-}
-
-type SortDirection = "asc" | "desc" | null;
-
-interface SortState {
-    columnKey: string | null;
-    direction: SortDirection;
+    rows: DataViewerRow[];
+    tableLabel: string;
+    visibleColumnKeys: string[];
+    sort: DataViewerSort | null;
+    onSortChange: (sort: DataViewerSort | null) => void;
 }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
@@ -24,20 +16,6 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
     month: "short",
     year: "numeric",
 });
-
-function asComparableValue(value: unknown): number | string {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "number") return value;
-    if (typeof value === "boolean") return value ? 1 : 0;
-    if (typeof value === "string") {
-        const possibleDate = Date.parse(value);
-        if (!Number.isNaN(possibleDate) && /^\d{4}-\d{2}-\d{2}T/.test(value)) {
-            return possibleDate;
-        }
-        return value.toLowerCase();
-    }
-    return String(value).toLowerCase();
-}
 
 function CellRenderer({ value }: { value: unknown }) {
     const cellType = getColumnType(value);
@@ -95,101 +73,65 @@ function CellRenderer({ value }: { value: unknown }) {
     );
 }
 
-function SortIcon({ direction }: { direction: SortDirection }) {
-    if (!direction) {
+function SortIcon({
+    column,
+    sort,
+}: {
+    column: string;
+    sort: DataViewerSort | null;
+}) {
+    if (!sort || sort.column !== column) {
         return <ArrowUpDown className="w-3.5 h-3.5 text-white/60" />;
     }
-    if (direction === "asc") {
+
+    if (sort.direction === "asc") {
         return <ArrowUp className="w-3.5 h-3.5 text-[#b69559]" />;
     }
+
     return <ArrowDown className="w-3.5 h-3.5 text-[#b69559]" />;
 }
 
-export function DataGrid({
-    data,
-    tableName,
-    globalFilter,
-    visibleColumns,
-    onFilteredCountChange,
-}: DataGridProps) {
-    const [sortState, setSortState] = useState<SortState>({
-        columnKey: null,
-        direction: null,
-    });
+function getStableRowKey(row: DataViewerRow, rowIndex: number, tableLabel: string): string {
+    const preferredKeys = ["id", "uuid", "code"];
 
-    const columnKeys = useMemo(() => {
-        if (data.length === 0) return [];
-        return Object.keys(data[0]).filter((key) =>
-            visibleColumns.has(humanizeColumnName(key)),
-        );
-    }, [data, visibleColumns]);
-
-    const rows = useMemo(() => {
-        let nextRows = data;
-        const query = globalFilter.trim().toLowerCase();
-
-        if (query.length > 0) {
-            nextRows = nextRows.filter((row) =>
-                columnKeys.some((columnKey) => {
-                    const value = row[columnKey];
-                    if (value === null || value === undefined) return false;
-                    return String(value).toLowerCase().includes(query);
-                }),
-            );
+    for (const key of preferredKeys) {
+        const value = row[key];
+        if (typeof value === "string" || typeof value === "number") {
+            return `${tableLabel}-${key}-${value}`;
         }
-
-        if (!sortState.columnKey || !sortState.direction) {
-            return nextRows;
-        }
-
-        const orderedRows = [...nextRows].sort((a, b) => {
-            const left = asComparableValue(a[sortState.columnKey as string]);
-            const right = asComparableValue(b[sortState.columnKey as string]);
-
-            if (left < right) return sortState.direction === "asc" ? -1 : 1;
-            if (left > right) return sortState.direction === "asc" ? 1 : -1;
-            return 0;
-        });
-
-        return orderedRows;
-    }, [columnKeys, data, globalFilter, sortState.columnKey, sortState.direction]);
-
-    useEffect(() => {
-        onFilteredCountChange?.(rows.length);
-    }, [onFilteredCountChange, rows.length]);
-
-    const toggleSort = (columnKey: string) => {
-        setSortState((current) => {
-            if (current.columnKey !== columnKey) {
-                return { columnKey, direction: "asc" };
-            }
-            if (current.direction === "asc") {
-                return { columnKey, direction: "desc" };
-            }
-            return { columnKey: null, direction: null };
-        });
-    };
-
-    if (data.length === 0) {
-        return (
-            <div className="flex items-center justify-center h-full bg-white rounded-lg">
-                <div className="text-center">
-                    <h3 className="text-lg font-semibold mb-2">No hay registros</h3>
-                    <p className="text-sm text-gray-500">
-                        La tabla {tableName || "seleccionada"} no contiene datos.
-                    </p>
-                </div>
-            </div>
-        );
     }
+
+    return `${tableLabel}-${rowIndex}`;
+}
+
+export function DataGrid({
+    rows,
+    tableLabel,
+    visibleColumnKeys,
+    sort,
+    onSortChange,
+}: DataGridProps) {
+    const handleSortToggle = (column: string) => {
+        if (!sort || sort.column !== column) {
+            onSortChange({ column, direction: "asc" });
+            return;
+        }
+
+        if (sort.direction === "asc") {
+            onSortChange({ column, direction: "desc" });
+            return;
+        }
+
+        onSortChange(null);
+    };
 
     if (rows.length === 0) {
         return (
             <div className="flex items-center justify-center h-full bg-white rounded-lg">
                 <div className="text-center">
-                    <h3 className="text-lg font-semibold mb-2">Sin resultados</h3>
+                    <h3 className="text-lg font-semibold mb-2">No hay registros</h3>
                     <p className="text-sm text-gray-500">
-                        Ajusta el filtro global para encontrar informacion.
+                        La tabla {tableLabel || "seleccionada"} no contiene datos.
                     </p>
                 </div>
             </div>
@@ -202,23 +144,17 @@ export function DataGrid({
                 <table className="min-w-full border-collapse">
                     <thead className="sticky top-0 z-10 bg-[#122337] text-white">
                         <tr>
-                            {columnKeys.map((columnKey) => (
+                            {visibleColumnKeys.map((columnKey) => (
                                 <th
                                     key={columnKey}
                                     className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap"
                                 >
                                     <button
-                                        onClick={() => toggleSort(columnKey)}
+                                        onClick={() => handleSortToggle(columnKey)}
                                         className="flex items-center gap-2 hover:text-[#b69559] transition-colors"
                                     >
                                         <span>{humanizeColumnName(columnKey)}</span>
-                                        <SortIcon
-                                            direction={
-                                                sortState.columnKey === columnKey
-                                                    ? sortState.direction
-                                                    : null
-                                            }
-                                        />
+                                        <SortIcon column={columnKey} sort={sort} />
                                     </button>
                                 </th>
                             ))}
@@ -228,10 +164,10 @@ export function DataGrid({
                     <tbody>
                         {rows.map((row, rowIndex) => (
                             <tr
-                                key={`${tableName}-${rowIndex}`}
+                                key={getStableRowKey(row, rowIndex, tableLabel)}
                                 className="border-b border-gray-100 hover:bg-[#b69559]/10 transition-colors"
                             >
-                                {columnKeys.map((columnKey) => (
+                                {visibleColumnKeys.map((columnKey) => (
                                     <td
                                         key={`${rowIndex}-${columnKey}`}
                                         className="px-4 py-3 text-[13px] text-gray-800 whitespace-nowrap"
