@@ -14,19 +14,29 @@ import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { DataToolbar } from "./DataToolbar";
 import { LoadingSkeleton } from "./LoadingSkeleton";
+import { RowEditSheet } from "./RowEditSheet";
 import {
     DataViewerApiError,
     exportDataViewerCsv,
     fetchDataViewerTables,
     queryDataViewer,
+    updateDataViewerRow,
 } from "../api";
 import { humanizeColumnName } from "../data/columnUtils";
+import {
+    buildRowChanges,
+    canEditRow,
+    getEditableColumns,
+    getQueryColumnKeys,
+    getTableEditDisabledReason,
+} from "../data/editing";
 import type {
     DataViewerFilter,
     DataViewerFilterOperator,
     DataViewerModuleProps,
     DataViewerQueryRequest,
     DataViewerQueryResponse,
+    DataViewerRow,
     DataViewerSort,
     DataViewerTable,
 } from "../types";
@@ -137,6 +147,22 @@ function getCodeMessage(code?: string): string {
             return "El operador de filtro no esta soportado por el backend.";
         case "INVALID_IDENTIFIER":
             return "Se envio un identificador invalido de tabla o columna.";
+        case "TABLE_NOT_EDITABLE":
+            return "La tabla no permite edicion de filas.";
+        case "NO_PK_DEFINED":
+            return "La tabla no tiene PK definida para actualizar filas.";
+        case "PK_REQUIRED":
+            return "No se envio la llave primaria completa de la fila.";
+        case "ROW_NOT_FOUND":
+            return "La fila que intentas actualizar ya no existe.";
+        case "COLUMN_NOT_EDITABLE":
+            return "Hay columnas no editables en los cambios enviados.";
+        case "VALIDATION_ERROR":
+            return "Hay errores de validacion en los datos del formulario.";
+        case "CONFLICT_VERSION":
+            return "La fila fue modificada por otro usuario. Recarga y vuelve a intentar.";
+        case "CONCURRENCY_NOT_SUPPORTED":
+            return "La tabla no soporta concurrencia optimista en backend.";
         default:
             return "No fue posible completar la operacion con Data Viewer.";
     }
@@ -249,6 +275,15 @@ export function DataViewerProModule({
     });
 
     const [uiError, setUiError] = useState<UiErrorState | null>(null);
+    const [rowSaveError, setRowSaveError] = useState<UiErrorState | null>(null);
+    const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
+    const [selectedRow, setSelectedRow] = useState<DataViewerRow | null>(null);
+    const [isSavingRow, setIsSavingRow] = useState(false);
+    const [pendingRetryDraftValues, setPendingRetryDraftValues] = useState<
+        Record<string, unknown> | null
+    >(null);
+
+    const [tablesReloadCounter, setTablesReloadCounter] = useState(0);
     const [refreshCounter, setRefreshCounter] = useState(0);
     const manualRefreshPendingRef = useRef(false);
 
@@ -262,6 +297,16 @@ export function DataViewerProModule({
     const activeTable = useMemo(
         () => tables.find((table) => table.table_id === activeTableId),
         [activeTableId, tables],
+    );
+
+    const tableEditDisabledReason = useMemo(
+        () => getTableEditDisabledReason(activeTable),
+        [activeTable],
+    );
+
+    const editableColumns = useMemo(
+        () => getEditableColumns(activeTable),
+        [activeTable],
     );
 
     const visibleColumnKeys = useMemo(() => {
@@ -284,6 +329,21 @@ export function DataViewerProModule({
         () => visibleColumnKeys.join("|"),
         [visibleColumnKeys],
     );
+
+    const queryColumnKeys = useMemo(() => {
+        const baseColumns = getQueryColumnKeys(activeTable, visibleColumnKeys);
+        const sortColumn = sort?.column;
+        const defaultOrderColumn =
+            activeTable?.default_order_column ?? activeTable?.stable_order_column;
+
+        const mergedColumns = [
+            ...baseColumns,
+            sortColumn,
+            defaultOrderColumn,
+        ].filter((columnName): columnName is string => Boolean(columnName));
+
+        return [...new Set(mergedColumns)];
+    }, [activeTable, sort, visibleColumnKeys]);
 
     const firstVisibleColumn = activeTable?.columns[0]?.name ?? "";
 
@@ -323,9 +383,24 @@ export function DataViewerProModule({
 
         setVisibleColumns(getDefaultVisibleColumns(activeTable));
         setFilters([]);
-        setSort(null);
+        setSort(() => {
+            const defaultSortColumn =
+                activeTable.default_order_column ?? activeTable.stable_order_column;
+            if (!defaultSortColumn) {
+                return null;
+            }
+
+            return {
+                column: defaultSortColumn,
+                direction: "asc",
+            };
+        });
         setGlobalFilterInput("");
         setGlobalFilter("");
+        setIsEditSheetOpen(false);
+        setSelectedRow(null);
+        setRowSaveError(null);
+        setPendingRetryDraftValues(null);
         setDraftFilter({
             column: firstVisibleColumn,
             operator: "eq",
@@ -379,7 +454,7 @@ export function DataViewerProModule({
         return () => {
             ignore = true;
         };
-    }, [initialTableId]);
+    }, [initialTableId, tablesReloadCounter]);
 
     useEffect(() => {
         if (!activeTable) {
@@ -414,7 +489,7 @@ export function DataViewerProModule({
         const controller = new AbortController();
         const queryPayload = buildQueryPayload({
             tableId: activeTable.table_id,
-            columns: visibleColumnKeys,
+            columns: queryColumnKeys,
             filters,
             sort,
             q: globalFilter,
@@ -485,7 +560,7 @@ export function DataViewerProModule({
         includeTotal,
         visibleColumnsFingerprint,
         refreshCounter,
-        visibleColumnKeys,
+        queryColumnKeys,
     ]);
 
     const handleToggleColumn = (columnId: string) => {
@@ -514,6 +589,108 @@ export function DataViewerProModule({
 
     const handleTableSelect = (tableId: string) => {
         setActiveTableId(tableId);
+    };
+
+    const handleRetryView = () => {
+        if (!activeTable) {
+            toast.info("Reintentando carga de tablas...");
+            setTablesReloadCounter((previous) => previous + 1);
+            return;
+        }
+
+        handleRefresh();
+    };
+
+    const getGridRowEditState = (row: DataViewerRow) => {
+        const rowEditState = canEditRow(activeTable, row);
+        return {
+            enabled: rowEditState.allowed,
+            reason: rowEditState.reason,
+        };
+    };
+
+    const handleEditRow = (row: DataViewerRow) => {
+        const rowEditState = canEditRow(activeTable, row);
+        if (!rowEditState.allowed) {
+            toast.warning("No se puede editar esta fila", {
+                description: rowEditState.reason,
+            });
+            return;
+        }
+
+        setSelectedRow(row);
+        setRowSaveError(null);
+        setPendingRetryDraftValues(null);
+        setIsEditSheetOpen(true);
+    };
+
+    const persistRowEdition = async (draftValues: Record<string, unknown>) => {
+        if (!activeTable || !selectedRow) {
+            return;
+        }
+
+        const rowEditState = canEditRow(activeTable, selectedRow);
+        if (!rowEditState.allowed || !rowEditState.pk) {
+            const reason = rowEditState.reason ?? "No se pudo validar la fila para actualizar.";
+            setRowSaveError({
+                detail: reason,
+            });
+            toast.error("No se pudo guardar la fila", {
+                description: reason,
+            });
+            return;
+        }
+
+        const changes = buildRowChanges({
+            row: selectedRow,
+            editableColumns,
+            draftValues,
+        });
+
+        if (Object.keys(changes).length === 0) {
+            toast.info("No hay cambios para guardar");
+            return;
+        }
+
+        setIsSavingRow(true);
+        setRowSaveError(null);
+        setPendingRetryDraftValues(draftValues);
+
+        try {
+            const { requestId } = await updateDataViewerRow({
+                table_id: activeTable.table_id,
+                pk: rowEditState.pk,
+                changes,
+            });
+
+            toast.success("Fila actualizada correctamente", {
+                description: `request_id: ${requestId}`,
+            });
+
+            setIsEditSheetOpen(false);
+            setSelectedRow(null);
+            setPendingRetryDraftValues(null);
+            setRowSaveError(null);
+            setRefreshCounter((previous) => previous + 1);
+        } catch (error) {
+            const normalized = normalizeError(error);
+            setRowSaveError(normalized);
+            toast.error("No se pudo guardar la fila", {
+                description: normalized.requestId
+                    ? `${normalized.detail} (request_id: ${normalized.requestId})`
+                    : normalized.detail,
+            });
+        } finally {
+            setIsSavingRow(false);
+        }
+    };
+
+    const handleRetryRowEdition = () => {
+        if (!pendingRetryDraftValues) {
+            return;
+        }
+
+        void persistRowEdition(pendingRetryDraftValues);
     };
 
     const handleAddFilter = () => {
@@ -665,6 +842,22 @@ export function DataViewerProModule({
 
                             <div className="flex items-center gap-3 mt-1">
                                 <p className="text-sm text-gray-500">{technicalStatusText}</p>
+                                {activeTable && (
+                                    <div
+                                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 border rounded-full ${
+                                            tableEditDisabledReason
+                                                ? "bg-amber-50 border-amber-200 text-amber-700"
+                                                : "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                        }`}
+                                        title={tableEditDisabledReason ?? "Tabla editable"}
+                                    >
+                                        <span className="text-xs font-medium">
+                                            {tableEditDisabledReason
+                                                ? "Edicion bloqueada"
+                                                : "Edicion habilitada"}
+                                        </span>
+                                    </div>
+                                )}
                                 {(globalFilter || filters.length > 0) && (
                                     <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#b69559]/10 border border-[#b69559]/30 rounded-full">
                                         <Filter className="w-3.5 h-3.5 text-[#b69559]" />
@@ -826,6 +1019,15 @@ export function DataViewerProModule({
                                         request_id: {uiError.requestId}
                                     </p>
                                 )}
+                                <div className="pt-1">
+                                    <button
+                                        type="button"
+                                        onClick={handleRetryView}
+                                        className="inline-flex items-center rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                                    >
+                                        Reintentar
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     ) : (
@@ -837,6 +1039,14 @@ export function DataViewerProModule({
                                     visibleColumnKeys={visibleColumnKeys}
                                     sort={sort}
                                     onSortChange={setSort}
+                                    onEditRow={
+                                        tableEditDisabledReason ? undefined : handleEditRow
+                                    }
+                                    getRowEditState={
+                                        tableEditDisabledReason
+                                            ? undefined
+                                            : getGridRowEditState
+                                    }
                                 />
                             </div>
 
@@ -889,6 +1099,28 @@ export function DataViewerProModule({
                     )}
                 </div>
             </div>
+
+            <RowEditSheet
+                open={isEditSheetOpen}
+                row={selectedRow}
+                editableColumns={editableColumns}
+                tableLabel={activeTable?.display_name ?? activeTableId}
+                isSaving={isSavingRow}
+                saveError={rowSaveError}
+                disabledReason={tableEditDisabledReason}
+                onOpenChange={(nextOpen) => {
+                    setIsEditSheetOpen(nextOpen);
+                    if (!nextOpen) {
+                        setSelectedRow(null);
+                        setRowSaveError(null);
+                        setPendingRetryDraftValues(null);
+                    }
+                }}
+                onSubmit={(draftValues) => {
+                    void persistRowEdition(draftValues);
+                }}
+                onRetry={handleRetryRowEdition}
+            />
         </div>
     );
 }

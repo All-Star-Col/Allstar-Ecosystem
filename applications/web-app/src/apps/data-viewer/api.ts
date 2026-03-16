@@ -6,6 +6,8 @@ import type {
     DataViewerQueryRequest,
     DataViewerQueryResponse,
     DataViewerTable,
+    DataViewerUpdateRowRequest,
+    DataViewerUpdateRowResponse,
 } from "./types";
 
 const DATA_VIEWER_BASE = `${API_SERVER}/workspace/data-viewer`;
@@ -182,5 +184,33 @@ export async function exportDataViewerCsv(
             fallbackFilename,
         ),
         requestId: response.headers.get("X-Request-ID") ?? requestId,
+    };
+}
+
+export async function updateDataViewerRow(
+    payload: DataViewerUpdateRowRequest,
+    options?: { signal?: AbortSignal },
+): Promise<{ result: DataViewerUpdateRowResponse; requestId: string }> {
+    const { headers, requestId } = buildHeaders(undefined, {
+        contentTypeJson: true,
+    });
+
+    const response = await fetch(`${DATA_VIEWER_BASE}/rows`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+    });
+
+    if (!response.ok) {
+        throw await toApiError(response, requestId);
+    }
+
+    const result = (await response.json()) as DataViewerUpdateRowResponse;
+
+    return {
+        result,
+        requestId:
+            response.headers.get("X-Request-ID") ?? result.request_id ?? requestId,
     };
 }

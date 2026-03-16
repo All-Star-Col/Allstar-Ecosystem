@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Pencil } from "lucide-react";
 import * as Switch from "@radix-ui/react-switch";
 import { getColumnType, humanizeColumnName } from "../data/columnUtils";
 import type { DataViewerRow, DataViewerSort } from "../types";
@@ -9,6 +9,8 @@ interface DataGridProps {
     visibleColumnKeys: string[];
     sort: DataViewerSort | null;
     onSortChange: (sort: DataViewerSort | null) => void;
+    onEditRow?: (row: DataViewerRow) => void;
+    getRowEditState?: (row: DataViewerRow) => { enabled: boolean; reason?: string };
 }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
@@ -110,7 +112,11 @@ export function DataGrid({
     visibleColumnKeys,
     sort,
     onSortChange,
+    onEditRow,
+    getRowEditState,
 }: DataGridProps) {
+    const showEditColumn = typeof onEditRow === "function";
+
     const handleSortToggle = (column: string) => {
         if (!sort || sort.column !== column) {
             onSortChange({ column, direction: "asc" });
@@ -158,6 +164,11 @@ export function DataGrid({
                                     </button>
                                 </th>
                             ))}
+                            {showEditColumn && (
+                                <th className="px-4 py-3 text-right text-sm font-semibold whitespace-nowrap">
+                                    Acciones
+                                </th>
+                            )}
                         </tr>
                     </thead>
 
@@ -175,6 +186,31 @@ export function DataGrid({
                                         <CellRenderer value={row[columnKey]} />
                                     </td>
                                 ))}
+                                {showEditColumn && (
+                                    <td className="px-4 py-3 text-right">
+                                        {(() => {
+                                            const editState = getRowEditState?.(row) ?? {
+                                                enabled: true,
+                                            };
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onEditRow?.(row)}
+                                                    disabled={!editState.enabled}
+                                                    title={
+                                                        editState.enabled
+                                                            ? "Editar fila"
+                                                            : editState.reason
+                                                    }
+                                                    className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    <Pencil className="w-3.5 h-3.5" />
+                                                    Editar
+                                                </button>
+                                            );
+                                        })()}
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>

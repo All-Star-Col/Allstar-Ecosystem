@@ -9,6 +9,7 @@ import {
     exportDataViewerCsv,
     fetchDataViewerTables,
     queryDataViewer,
+    updateDataViewerRow,
 } from "./api";
 
 const mockedGetToken = vi.mocked(getToken);
@@ -102,6 +103,28 @@ describe("data-viewer api", () => {
         expect(requestId).toBe("req-3");
     });
 
+    it("preserves csv payload with commas, quotes and line breaks", async () => {
+        const csvContent = 'id,name,notes\n1,"ACME, Inc.","line1\nline2""quoted"""';
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(csvContent, {
+                status: 200,
+                headers: {
+                    "Content-Disposition": 'attachment; filename="orders.csv"',
+                    "X-Request-ID": "req-3b",
+                },
+            }),
+        );
+
+        const { blob } = await exportDataViewerCsv({
+            table_id: "orders",
+            columns: ["id", "name", "notes"],
+            limit: 10000,
+            offset: 0,
+        });
+
+        await expect(blob.text()).resolves.toBe(csvContent);
+    });
+
     it("maps backend validation errors with code and request_id", async () => {
         vi.spyOn(globalThis, "fetch").mockResolvedValue(
             new Response(
@@ -131,6 +154,70 @@ describe("data-viewer api", () => {
             code: "LIMIT_EXCEEDED",
             requestId: "req-err",
             message: "limit exceeded",
+        });
+    });
+
+    it("sends row update payload with PATCH /rows", async () => {
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    row: { id: 10, status: "CLOSED" },
+                    updated_columns: ["status"],
+                    request_id: "req-row-ok",
+                }),
+                {
+                    status: 200,
+                    headers: {
+                        "X-Request-ID": "req-row-header",
+                    },
+                },
+            ),
+        );
+
+        const payload = {
+            table_id: "orders",
+            pk: { id: 10 },
+            changes: { status: "CLOSED" },
+        };
+
+        const response = await updateDataViewerRow(payload);
+
+        const [url, options] = fetchSpy.mock.calls[0];
+        expect(url).toContain("/workspace/data-viewer/rows");
+        expect(options?.method).toBe("PATCH");
+        expect(options?.body).toBe(JSON.stringify(payload));
+        expect(response.requestId).toBe("req-row-header");
+        expect(response.result.updated_columns).toEqual(["status"]);
+    });
+
+    it("maps row update conflict errors with request_id", async () => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+            new Response(
+                JSON.stringify({
+                    request_id: "req-conflict",
+                    detail: "conflict version",
+                    code: "CONFLICT_VERSION",
+                }),
+                {
+                    status: 409,
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                },
+            ),
+        );
+
+        await expect(
+            updateDataViewerRow({
+                table_id: "orders",
+                pk: { id: 10 },
+                changes: { status: "OPEN" },
+            }),
+        ).rejects.toMatchObject({
+            status: 409,
+            code: "CONFLICT_VERSION",
+            requestId: "req-conflict",
+            message: "conflict version",
         });
     });
 });

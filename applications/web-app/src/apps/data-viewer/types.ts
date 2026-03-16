@@ -1,12 +1,19 @@
 import type { CSSProperties } from "react";
 
 export type DataViewerRow = Record<string, unknown>;
+export type DataViewerPk = Record<string, string | number | boolean>;
+export type DataViewerChanges = Record<string, unknown>;
 
 export interface DataViewerColumn {
     name: string;
     type: string;
     nullable: boolean;
     visible: boolean;
+    editable?: boolean;
+    required?: boolean;
+    max_length?: number | null;
+    enum_values?: string[] | null;
+    read_only_reason?: string | null;
 }
 
 export interface DataViewerTable {
@@ -17,6 +24,10 @@ export interface DataViewerTable {
     stable_order_column: string | null;
     default_order_column: string | null;
     order_error_code: string | null;
+    can_update?: boolean;
+    can_insert?: boolean;
+    can_delete?: boolean;
+    pk_columns?: string[] | null;
     columns: DataViewerColumn[];
 }
 
@@ -61,6 +72,18 @@ export interface DataViewerQueryResponse {
     has_more: boolean;
 }
 
+export interface DataViewerUpdateRowRequest {
+    table_id: string;
+    pk: DataViewerPk;
+    changes: DataViewerChanges;
+}
+
+export interface DataViewerUpdateRowResponse {
+    row: DataViewerRow;
+    updated_columns: string[];
+    request_id?: string;
+}
+
 export type DataViewerErrorCode =
     | "INVALID_IDENTIFIER"
     | "INVALID_FILTER"
@@ -71,7 +94,15 @@ export type DataViewerErrorCode =
     | "INTERNAL_ERROR"
     | "TABLE_NOT_CONFIGURED"
     | "INVALID_Q_LENGTH"
-    | "NO_STABLE_ORDER_COLUMN";
+    | "NO_STABLE_ORDER_COLUMN"
+    | "TABLE_NOT_EDITABLE"
+    | "NO_PK_DEFINED"
+    | "PK_REQUIRED"
+    | "ROW_NOT_FOUND"
+    | "COLUMN_NOT_EDITABLE"
+    | "VALIDATION_ERROR"
+    | "CONFLICT_VERSION"
+    | "CONCURRENCY_NOT_SUPPORTED";
 
 export interface DataViewerApiErrorBody {
     request_id?: string;
