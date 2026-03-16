@@ -27,3 +27,5 @@ services/api-service/.venv/
 
 #AI-Documents
 docs/
+.claude/
+agents/
