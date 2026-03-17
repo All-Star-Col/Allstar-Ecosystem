@@ -3,6 +3,8 @@ name: Build & Deploy (prod)
 on:
   push:
     branches: ["master"]
+    paths:
+      - 'services/api-service/**'
 
 permissions:
   contents: read
@@ -35,8 +37,8 @@ jobs:
       - name: Build & push
         uses: docker/build-push-action@v6
         with:
-          context: .
-          file: ./Dockerfile
+          context: ./services/api-service
+          file: ./services/api-service/Dockerfile
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
