@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - 'services/api-service/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
