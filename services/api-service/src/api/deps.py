@@ -40,5 +40,4 @@ async def get_current_active_apps(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ) -> list[App]:
-    # Ahora sí, pasamos el ID correctamente
     return await get_user_apps_from_db(db, str(current_user.id))

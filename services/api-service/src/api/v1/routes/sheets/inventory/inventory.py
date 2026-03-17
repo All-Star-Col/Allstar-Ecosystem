@@ -52,7 +52,7 @@ async def post_product(item: int, service: SheetsService = Depends(get_sheets_se
     if status == 404:
         raise HTTPException(status_code=404, detail=f"El item no existe en {service.SHEET_NAME_ACCES}")
     elif status == 409:
-        raise HTTPException(status_code=404, detail="Ese Item ya existe en el inventario.")
+        raise HTTPException(status_code=409, detail="Ese Item ya existe en el inventario.")
     elif status != 200:
         raise HTTPException(status_code=500, detail="Error al agregar el item")
     return {"status": "OK"}

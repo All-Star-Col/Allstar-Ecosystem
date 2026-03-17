@@ -58,10 +58,22 @@ const useWorkspace = () => {
 
 // 3️⃣ Componente Dashboard (separado)
 function Dashboard() {
-    const currentDate = new Date();
+    const [currentDate, setCurrentDate] = React.useState(() => new Date());
+
+    React.useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            setCurrentDate(new Date());
+        }, 1000);
+
+        return () => {
+            window.clearInterval(intervalId);
+        };
+    }, []);
+
     const timeString = currentDate.toLocaleTimeString("es-ES", {
         hour: "2-digit",
         minute: "2-digit",
+        second: "2-digit",
     });
     const dateString = currentDate.toLocaleDateString("es-ES", {
         weekday: "long",
@@ -74,6 +86,19 @@ function Dashboard() {
     const [searchQuery, setSearchQuery] = React.useState("");
 
     const { data: workspaceData } = useWorkspace();
+    const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+    const filteredApps = React.useMemo(() => {
+        const apps = workspaceData?.apps ?? [];
+
+        if (!normalizedSearchQuery) {
+            return apps;
+        }
+
+        return apps.filter((app: App) =>
+            app.name.toLowerCase().includes(normalizedSearchQuery),
+        );
+    }, [workspaceData?.apps, normalizedSearchQuery]);
 
     return (
         <div
@@ -124,7 +149,7 @@ function Dashboard() {
                         justifyContent: "space-between",
                     }}
                 >
-                    {workspaceData?.apps.map((app: App, index: number) => {
+                    {filteredApps.map((app: App, index: number) => {
                         return (
                             <AppTile
                                 key={app.id}

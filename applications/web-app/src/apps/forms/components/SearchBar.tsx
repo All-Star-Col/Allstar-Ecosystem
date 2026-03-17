@@ -1,55 +1,56 @@
 import { motion } from "motion/react";
+import { Search, X } from "lucide-react";
+
+import { Button } from "@/shared/ui/button";
+import { Input } from "@/shared/ui/input";
+import { cn } from "@/shared/ui/utils";
 
 interface SearchBarProps {
     value: string;
     onChange: (value: string) => void;
+    placeholder?: string;
+    className?: string;
+    showClear?: boolean;
+    autoFocus?: boolean;
 }
 
-export function SearchBar({ value, onChange }: SearchBarProps) {
+export function SearchBar({
+    value,
+    onChange,
+    placeholder = "Buscar tablas...",
+    className,
+    showClear = true,
+    autoFocus,
+}: SearchBarProps) {
     return (
         <motion.div
-            initial={{ opacity: 0, x: 20 }}
+            initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.4, delay: 0.4 }}
-            className="flex items-center gap-2"
-            style={{
-                width: "300px",
-                height: "38px",
-                borderRadius: "19px",
-                backgroundColor: "#f6f5f0",
-                border: "1px solid rgba(47, 51, 57, 0.12)",
-                padding: "0 16px",
-            }}
+            transition={{ duration: 0.25, delay: 0.05 }}
+            className={cn("relative w-full", className)}
         >
-            <motion.svg
-                animate={{ rotate: value ? [0, 10, -10, 0] : 0 }}
-                transition={{ duration: 0.3 }}
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="rgba(47, 51, 57, 0.6)"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            >
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-            </motion.svg>
-            <input
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
                 type="text"
                 value={value}
                 onChange={(e) => onChange(e.target.value)}
-                placeholder="Buscar aplicaciones…"
-                style={{
-                    flex: 1,
-                    border: "none",
-                    outline: "none",
-                    backgroundColor: "transparent",
-                    fontSize: "14px",
-                    color: "#2f3339",
-                }}
+                placeholder={placeholder}
+                autoFocus={autoFocus}
+                className={cn("h-10 rounded-full bg-muted/40 pl-9 pr-10 shadow-sm")}
             />
+
+            {showClear && value.trim().length > 0 && (
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => onChange("")}
+                    className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label="Limpiar búsqueda"
+                >
+                    <X className="h-4 w-4" />
+                </Button>
+            )}
         </motion.div>
     );
 }

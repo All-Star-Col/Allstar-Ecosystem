@@ -1,25 +1,19 @@
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useTables } from "../store";
-import { DynamicFormField } from "../components/DynamicFormField";
-import { ConfirmModal } from "../components/ConfirmModal";
-import { Button } from "@/shared/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import { Skeleton } from "@/shared/ui/skeleton";
-import {
-    Breadcrumb,
-    BreadcrumbItem,
-    BreadcrumbLink,
-    BreadcrumbList,
-    BreadcrumbPage,
-    BreadcrumbSeparator,
-} from "@/shared/ui/breadcrumb";
-import { ArrowLeft, Save, Trash2, Loader2 } from "lucide-react";
+
+import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+
+import { useTables } from "../store";
 import { submitFormData } from "../api";
 import type { SubmitFormAPI } from "../api";
-import { getCategoryBreadcrumbLabel } from "./categoryLabel";
+import { DynamicFormField } from "../components/DynamicFormField";
+import { ConfirmModal } from "../components/ConfirmModal";
+
+import { Button } from "@/shared/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import NotFound from "@/shared/components/NotFound";
+import { Skeleton } from "@/shared/ui/skeleton";
 
 function isSystemManagedColumn(columnName: string): boolean {
     const normalizedName = columnName.toLowerCase();
@@ -29,35 +23,32 @@ function isSystemManagedColumn(columnName: string): boolean {
 export default function FormBuilder() {
     const navigate = useNavigate();
     const { tableId } = useParams();
+
     const [isLoading, setIsLoading] = useState(true);
     const [formData, setFormData] = useState<Record<string, any>>({});
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Get data from context
-    const { getTableById, getCategoryById } = useTables();
-
+    const { getTableById } = useTables();
     const table = tableId ? getTableById(tableId) : undefined;
-    const category = table ? getCategoryById(table.category) : undefined;
-    const editableColumns = useMemo(
-        () =>
-            table?.columns.filter(
-                (column) => !isSystemManagedColumn(column.name),
-            ) ?? [],
-        [table],
-    );
+
+    const visibleColumns = useMemo(() => {
+        if (!table) return [];
+        return table.columns.filter((column) => {
+            const name = column.name.toLowerCase();
+            return name !== "id" && name !== "timestamp";
+        });
+    }, [table]);
 
     useEffect(() => {
-        // Simulate loading
         setIsLoading(true);
         const timer = setTimeout(() => {
             setIsLoading(false);
 
-            // Initialize form with default values
             if (table) {
                 const initialData: Record<string, any> = {};
-                editableColumns.forEach((column) => {
+                visibleColumns.forEach((column) => {
                     if (column.defaultValue !== undefined) {
                         initialData[column.name] = column.defaultValue;
                     }
@@ -67,16 +58,16 @@ export default function FormBuilder() {
         }, 500);
 
         return () => clearTimeout(timer);
-    }, [tableId, table, editableColumns]);
+    }, [tableId, table, visibleColumns]);
 
     const handleFieldChange = (fieldName: string, value: any) => {
         setFormData((prev) => ({ ...prev, [fieldName]: value }));
-        // Clear error when user starts typing
+
         if (errors[fieldName]) {
             setErrors((prev) => {
-                const newErrors = { ...prev };
-                delete newErrors[fieldName];
-                return newErrors;
+                const next = { ...prev };
+                delete next[fieldName];
+                return next;
             });
         }
     };
@@ -84,9 +75,9 @@ export default function FormBuilder() {
     const validateForm = (): boolean => {
         if (!table) return false;
 
-        const newErrors: Record<string, string> = {};
+        const nextErrors: Record<string, string> = {};
 
-        editableColumns.forEach((column) => {
+        visibleColumns.forEach((column) => {
             const value = formData[column.name];
             const isRequired = column.required && !column.nullable;
 
@@ -94,12 +85,12 @@ export default function FormBuilder() {
                 isRequired &&
                 (value === undefined || value === null || value === "")
             ) {
-                newErrors[column.name] = "Este campo es obligatorio";
+                nextErrors[column.name] = "Este campo es obligatorio";
             }
         });
 
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
+        setErrors(nextErrors);
+        return Object.keys(nextErrors).length === 0;
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -107,11 +98,12 @@ export default function FormBuilder() {
 
         if (validateForm()) {
             setShowConfirmModal(true);
-        } else {
-            toast.error("Formulario incompleto", {
-                description: "Por favor completa todos los campos obligatorios",
-            });
+            return;
         }
+
+        toast.error("Formulario incompleto", {
+            description: "Por favor completa todos los campos obligatorios",
+        });
     };
 
     const handleConfirm = async () => {
@@ -121,25 +113,27 @@ export default function FormBuilder() {
         setIsSubmitting(true);
 
         try {
-            // Format data for the API
             const payload: SubmitFormAPI = {
                 table_name: table.name,
-                data: Object.entries(formData)
-                    .filter(([column]) => !isSystemManagedColumn(column))
-                    .map(([column, value]) => ({
-                        column,
-                        value,
+                data: visibleColumns
+                    .filter((column) => formData[column.name] !== undefined)
+                    .map((column) => ({
+                        column: column.name,
+                        value: formData[column.name],
                     })),
             };
 
             const result = await submitFormData(payload);
 
             if (result.status === "success") {
-                toast.success("¡Registro guardado!", {
-                    description: `El registro ha sido creado exitosamente en ${table.displayName}. ID: ${result.correlation_id}`,
+                toast.success("Registro guardado", {
+                    description:
+                        "El registro ha sido creado exitosamente en " +
+                        table.displayName +
+                        ". ID: " +
+                        result.correlation_id,
                 });
 
-                // Clear form after successful submission
                 handleClearForm();
             }
         } catch (error) {
@@ -156,28 +150,26 @@ export default function FormBuilder() {
     };
 
     const handleClearForm = () => {
-        if (table) {
-            const clearedData: Record<string, any> = {};
-            editableColumns.forEach((column) => {
-                if (column.defaultValue !== undefined) {
-                    clearedData[column.name] = column.defaultValue;
-                }
-            });
-            setFormData(clearedData);
-            setErrors({});
-            toast.info("Formulario limpiado");
-        }
+        if (!table) return;
+
+        const clearedData: Record<string, any> = {};
+        visibleColumns.forEach((column) => {
+            if (column.defaultValue !== undefined) {
+                clearedData[column.name] = column.defaultValue;
+            }
+        });
+
+        setFormData(clearedData);
+        setErrors({});
+        toast.info("Formulario limpiado");
     };
 
     if (!table) {
-        return (
-            <NotFound/>
-        );
+        return <NotFound />;
     }
 
     return (
         <div className="min-h-screen bg-background">
-            {/* Header */}
             <header className="bg-primary text-primary-foreground shadow-md">
                 <div className="container mx-auto px-4 py-6">
                     <div className="flex items-center gap-4 mb-4">
@@ -191,34 +183,17 @@ export default function FormBuilder() {
                             Volver
                         </Button>
                     </div>
-                    <Breadcrumb>
-                        <BreadcrumbList className="text-primary-foreground/80">
-                            <BreadcrumbItem>
-                                <BreadcrumbLink
-                                    onClick={() => navigate("/app/forms")}
-                                    className="hover:text-primary-foreground cursor-pointer"
-                                >
-                                    Tablas
-                                </BreadcrumbLink>
-                            </BreadcrumbItem>
-                            <BreadcrumbSeparator className="text-primary-foreground/60" />
-                            <BreadcrumbItem>
-                                <BreadcrumbLink className="text-primary-foreground/80">
-                                    {getCategoryBreadcrumbLabel(category)}
-                                </BreadcrumbLink>
-                            </BreadcrumbItem>
-                            <BreadcrumbSeparator className="text-primary-foreground/60" />
-                            <BreadcrumbItem>
-                                <BreadcrumbPage className="text-primary-foreground">
-                                    {table.displayName}
-                                </BreadcrumbPage>
-                            </BreadcrumbItem>
-                        </BreadcrumbList>
-                    </Breadcrumb>
+                    <div>
+                        <h1 className="text-3xl mb-2">
+                            <b>{table.displayName}</b>
+                        </h1>
+                        <p className="text-primary-foreground/80">
+                            Nuevo registro
+                        </p>
+                    </div>
                 </div>
             </header>
 
-            {/* Form */}
             <main className="container mx-auto px-4 py-8 max-w-5xl">
                 <Card className="shadow-lg">
                     <CardHeader className="border-b bg-muted/20">
@@ -239,7 +214,7 @@ export default function FormBuilder() {
                         ) : (
                             <form onSubmit={handleSubmit} className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {editableColumns.map((column) => (
+                                    {visibleColumns.map((column) => (
                                         <div
                                             key={column.name}
                                             className={
@@ -294,7 +269,6 @@ export default function FormBuilder() {
                 </Card>
             </main>
 
-            {/* Confirm Modal */}
             <ConfirmModal
                 open={showConfirmModal}
                 onOpenChange={setShowConfirmModal}

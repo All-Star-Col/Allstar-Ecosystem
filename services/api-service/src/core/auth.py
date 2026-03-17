@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/login")
 
 async def authenticate_user(db: AsyncSession, username: str, password: str) -> Optional[UserInDB]:
     user = await get_user(db, username)

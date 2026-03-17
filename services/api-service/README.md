@@ -68,8 +68,14 @@ API-SERVICES/
 
 ### Variables adicionales útiles
 
+- `ENVIRONMENT`: `dev` para entorno local, `prod` para CI/producción.
 - `DEBUG` (opcional)
 - `ALLOWED_ORIGINS` (se configura en `Settings`)
+
+### Entornos Docker (dev vs prod)
+
+- `Dockerfile`: imagen de producción/CI (usada por GitHub Actions).
+- `Dockerfile.dev` + `docker-compose.yml`: entorno local de desarrollo con recarga automática.
 
 ## Ejecución Local
 
@@ -86,11 +92,19 @@ pip install -r requirements.txt
 
 El proyecto necesita `BW_ACCESS_TOKEN` para arrancar correctamente.
 
+Si ejecutas con Docker Compose (desarrollo local):
+
+`keys.dev.env` ya existe en el repositorio con valores de desarrollo no sensibles (`ENVIRONMENT=dev`, `DEBUG=true`).
+
+`BW_ACCESS_TOKEN` se toma desde `/etc/environment` o desde la shell actual.
+
+Si ejecutas sin Docker (uvicorn local), exporta la variable en tu shell:
+
 ```bash
 export BW_ACCESS_TOKEN="tu_token"
 ```
 
-Si usas archivo de entorno local, respeta lo que espera el proyecto (`keys.env` / `src/keys.env` según tu flujo).
+Nota: para Docker Compose, `keys.dev.env` es el archivo esperado por `docker-compose.yml`.
 
 ### 3. Levantar API
 
@@ -122,27 +136,44 @@ Notas:
 
 ## Ejecución con Docker
 
-### Build
+### Desarrollo local (Docker Compose)
 
-```bash
-docker build -t allstar-api:latest .
-```
-
-### Run
-
-```bash
-docker run -p 8000:8000 \
-  -e BW_ACCESS_TOKEN="tu_token" \
-  allstar-api:latest
-```
-
-### Docker Compose
+Usa `Dockerfile.dev` + `docker-compose.yml`:
 
 ```bash
 docker compose up --build
 ```
 
-`docker-compose.yml` expone el puerto `8000` y permite inyectar variables por `env_file` y `environment`.
+La API queda disponible en `http://localhost` con `--reload` activo.
+
+### Producción / CI (Dockerfile)
+
+Build de imagen de producción:
+
+```bash
+docker build -t allstar-api:latest .
+```
+
+También puedes usar el script `run-prod-local.sh` para levantar el flujo local estilo producción (build + run) con mapeo `80:8000`.
+
+Run de imagen de producción:
+
+```bash
+docker run -p 80:8000 \
+  -e BW_ACCESS_TOKEN="tu_token" \
+  allstar-api:latest
+```
+
+Script recomendado para producción local:
+
+```bash
+export BW_ACCESS_TOKEN="tu_token"
+./run-prod-local.sh
+```
+
+Nota: el mapeo de puertos se define en el comando/runtime (`docker run` o script), no en `Dockerfile`.
+
+`docker-compose.yml` está orientado a desarrollo local, usa `env_file: ./keys.dev.env` y lee `BW_ACCESS_TOKEN` desde el entorno del host.
 
 ## Endpoints Principales
 

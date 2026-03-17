@@ -1,22 +1,68 @@
 import { useState } from "react";
 import type { Category, TableSchema } from "../schema";
 import { TableCard } from "./TableCard";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+    BarChart3,
+    Boxes,
+    ClipboardList,
+    Database,
+    Factory,
+    FileText,
+    Folder,
+    Settings,
+    Shield,
+    Truck,
+    Users,
+    Wrench,
+    ChevronDown,
+    ChevronRight,
+} from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface CategoryAccordionProps {
     category: Category;
-    name: string;
     tables: TableSchema[];
     onTableSelect: (table: TableSchema) => void;
 }
 
+const CATEGORY_ICON_SET: LucideIcon[] = [
+    Folder,
+    FileText,
+    ClipboardList,
+    Database,
+    Users,
+    Boxes,
+    Truck,
+    Factory,
+    Wrench,
+    Settings,
+    Shield,
+    BarChart3,
+];
+
+function hashString(input: string) {
+    let hash = 0;
+    for (let i = 0; i < input.length; i++) {
+        hash = (hash << 5) - hash + input.charCodeAt(i);
+        hash |= 0;
+    }
+    return hash;
+}
+
+function getCategoryIcon(category: Category) {
+    const key = category.id?.trim() || category.nombre?.trim() || "category";
+    const idx = Math.abs(hashString(key)) % CATEGORY_ICON_SET.length;
+    return CATEGORY_ICON_SET[idx] ?? Folder;
+}
+
 export function CategoryAccordion({
-    name,
+    category,
     tables,
     onTableSelect,
 }: CategoryAccordionProps) {
     const [isOpen, setIsOpen] = useState(true);
+    const Icon = getCategoryIcon(category);
 
     return (
         <div className="border border-border rounded-lg overflow-hidden bg-card shadow-sm">
@@ -25,20 +71,25 @@ export function CategoryAccordion({
                 className="w-full px-6 py-4 flex items-center justify-between hover:bg-muted/50 transition-colors"
             >
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-md bg-primary/10">
+                    <div className="flex items-center justify-center w-9 h-9 rounded-md bg-primary/10 text-primary">
+                        <Icon className="h-5 w-5" />
+                    </div>
+
+                    <div className="text-left">
+                        <h3 className="text-lg">{category.nombre}</h3>
+                    </div>
+                </div>
+                <div className="flex items-center gap-3">
+                    <div className="text-sm text-muted-foreground tabular-nums">
+                        {tables.length} {tables.length === 1 ? "tabla" : "tablas"}
+                    </div>
+                    <div className="flex items-center justify-center w-8 h-8 rounded-md bg-muted/60">
                         {isOpen ? (
                             <ChevronDown className="h-5 w-5 text-primary" />
                         ) : (
                             <ChevronRight className="h-5 w-5 text-primary" />
                         )}
                     </div>
-
-                    <div className="text-left">
-                        <h3 className="text-lg">{name}</h3>
-                    </div>
-                </div>
-                <div className="text-sm text-muted-foreground">
-                    {tables.length} {tables.length === 1 ? "tabla" : "tablas"}
                 </div>
             </button>
 

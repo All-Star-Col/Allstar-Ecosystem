@@ -13,6 +13,7 @@ concurrency:
 
 env:
   IMAGE_NAME: starbotdocker/allstar-fastapi-repository
+  ENVIRONMENT: prod
 
 jobs:
   build_push:
@@ -93,6 +94,7 @@ jobs:
             -o StrictHostKeyChecking=yes \
             "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
             "BW_ACCESS_TOKEN='${{ secrets.BW_ACCESS_TOKEN }}' \
+            ENVIRONMENT='${{ env.ENVIRONMENT }}' \
             DOCKERHUB_USERNAME='${{ secrets.DOCKERHUB_USERNAME }}' \
             DOCKERHUB_TOKEN='${{ secrets.DOCKERHUB_TOKEN }}' \
             /opt/allstar-api/deploy.sh"

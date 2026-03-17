@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InputField } from "./InputField";
+import { HelpCenterModal } from "./HelpCenterModal";
 import { motion } from "motion/react";
 import { API_SERVER } from "../../../config/api";
+import LogoStar from "../../../assets/Logo_Star.svg";
 
 export const LoginCard: React.FC = () => {
     const [email, setEmail] = useState("");
@@ -10,10 +12,44 @@ export const LoginCard: React.FC = () => {
     const [rememberMe, setRememberMe] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [isHelpCenterOpen, setIsHelpCenterOpen] = useState(false);
+    const helpCenterButtonRef = useRef<HTMLButtonElement | null>(null);
 
-    type TokenResponse = {
+    type LoginSuccessResponse = {
         access_token: string;
         token_type: string;
+    };
+
+    type LoginErrorResponse = {
+        detail?: string;
+    };
+
+    const isObject = (value: unknown): value is Record<string, unknown> => {
+        return typeof value === "object" && value !== null;
+    };
+
+    const isLoginSuccessResponse = (
+        value: unknown,
+    ): value is LoginSuccessResponse => {
+        if (!isObject(value)) {
+            return false;
+        }
+
+        return (
+            typeof value.access_token === "string" &&
+            typeof value.token_type === "string"
+        );
+    };
+
+    const getBackendMessage = (value: unknown): string | null => {
+        if (!isObject(value)) {
+            return null;
+        }
+
+        const errorPayload = value as LoginErrorResponse;
+        return typeof errorPayload.detail === "string"
+            ? errorPayload.detail
+            : null;
     };
 
     const navigate = useNavigate();
@@ -42,8 +78,7 @@ export const LoginCard: React.FC = () => {
                 body,
             });
 
-            console.log("Response status:", response.status);
-            let payload: any = null;
+            let payload: unknown = null;
             const contentType = response.headers.get("content-type") || "";
             if (contentType.includes("application/json")) {
                 payload = await response.json();
@@ -52,10 +87,7 @@ export const LoginCard: React.FC = () => {
             }
 
             if (!response.ok) {
-                const backendMsg =
-                    typeof payload === "object" && payload?.detail
-                        ? String(payload.detail)
-                        : null;
+                const backendMsg = getBackendMessage(payload);
 
                 if (response.status === 401 || response.status === 403) {
                     setError(
@@ -80,8 +112,7 @@ export const LoginCard: React.FC = () => {
                 return;
             }
 
-            const data: TokenResponse = payload;
-            if (!data?.access_token) {
+            if (!isLoginSuccessResponse(payload)) {
                 setError(
                     "Respuesta inesperada del servidor. No se recibió el token de acceso.",
                 );
@@ -89,7 +120,7 @@ export const LoginCard: React.FC = () => {
             }
 
             const storage = rememberMe ? localStorage : sessionStorage;
-            storage.setItem("access_token", data.access_token);
+            storage.setItem("access_token", payload.access_token);
 
             navigate("/dashboard", { replace: true });
         } catch (e) {
@@ -115,16 +146,14 @@ export const LoginCard: React.FC = () => {
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
                             Sistemas operativos
                         </div>
-
-                        <span className=" cursor-pointer hover:text-primary transition-colors select-none">
-                            ES / EN
-                        </span>
                     </div>
 
-                    <div className="bg-[122337] text-white rounded-xl flex items-center justify-center shadow-lag mt-5 transform transition-transform hover:scale-105 duration-300">
-                        <span className="material-icons-round text-3xl text-accent">
-                            star
-                        </span>
+                    <div className="text-white rounded-xl flex items-center justify-center shadow-lag mt-5 transform transition-transform hover:scale-105 duration-300">
+                        <img
+                            src={LogoStar}
+                            alt="Allstar logo"
+                            className="h-10 w-10"
+                        />
                     </div>
 
                     <h1 className="text-2xl font-bold text-text-main">
@@ -211,18 +240,26 @@ export const LoginCard: React.FC = () => {
 
                 <div className="mt-5 pt-2 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400 font-mono">
                     <span> v1.0.0</span>
-                    <a
-                        href="/?"
-                        className="flex items-center gap-1 hover:text-slate-600 transition-colors"
+                    <button
+                        ref={helpCenterButtonRef}
+                        type="button"
+                        onClick={() => setIsHelpCenterOpen(true)}
+                        className="flex items-center gap-1 hover:text-slate-600 transition-colors text-xs"
                     >
                         Help Center
                         <span className="material-icons-round text-xs">
                             {" "}
                             help_outline
                         </span>
-                    </a>
+                    </button>
                 </div>
             </div>
+
+            <HelpCenterModal
+                isOpen={isHelpCenterOpen}
+                onClose={() => setIsHelpCenterOpen(false)}
+                returnFocusRef={helpCenterButtonRef}
+            />
         </motion.div>
     );
 };

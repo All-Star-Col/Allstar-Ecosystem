@@ -12,7 +12,9 @@ export default defineConfig({
         include: [
             "src/apps/forms/**/*.spec.ts",
             "src/apps/data-viewer/**/*.spec.ts",
+            "src/test/**/*.spec.tsx",
         ],
-        environment: "node",
+        environment: "jsdom",
+        globals: true,
     },
 });

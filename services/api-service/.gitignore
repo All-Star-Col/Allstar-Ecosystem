@@ -48,6 +48,7 @@ src/keys.env
 # Allow safe env templates
 !.env.example
 !.env.template
+!keys.dev.env
 
 # Local Docker/Azure overrides
 docker-compose.override.yml

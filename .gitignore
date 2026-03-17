@@ -29,3 +29,6 @@ services/api-service/.venv/
 docs/
 .claude/
 agents/
+
+# AI tooling
+.alc/
