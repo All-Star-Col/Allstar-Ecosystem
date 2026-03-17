@@ -2,7 +2,7 @@ name: Build & Deploy (prod)
 
 on:
   push:
-    branches: ["master"]
+    branches: ["main"]
     paths:
       - 'services/api-service/**'
 
