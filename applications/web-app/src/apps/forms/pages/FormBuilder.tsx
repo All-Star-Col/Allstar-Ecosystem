@@ -35,10 +35,9 @@ export default function FormBuilder() {
 
     const visibleColumns = useMemo(() => {
         if (!table) return [];
-        return table.columns.filter((column) => {
-            const name = column.name.toLowerCase();
-            return name !== "id" && name !== "timestamp";
-        });
+        return table.columns.filter(
+            (column) => !isSystemManagedColumn(column.name),
+        );
     }, [table]);
 
     useEffect(() => {

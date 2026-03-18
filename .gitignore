@@ -1,16 +1,10 @@
-# Dependencies
-applications/web-app/node_modules/
-services/api-service/.venv/
-.venv/
-
-
-# Env and secrets
+# Global secrets and environment files
 .env
 .env.*
 *.env
 *.env.*
-!.env.example
-!.env.template
+
+# Certificates and keys
 *.pem
 *.key
 *.p12
@@ -19,16 +13,17 @@ services/api-service/.venv/
 *.cer
 *.jks
 
-# Common local artifacts
+# Logs
 *.log
+
+# OS / editor noise
 .DS_Store
 .idea/
 .vscode/
 
-#AI-Documents
-docs/
-.claude/
-agents/
-
-# AI tooling
+# Local tooling
 .alc/
+.claude/
+
+# Optional: generic virtual environments anywhere in the repo
+.venv/

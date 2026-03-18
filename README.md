@@ -18,7 +18,7 @@ The goal of this repo is to keep the Allstar Platform ecosystem described and na
 
 - Location: `applications/web-app/`
 - Stack: React + TypeScript + Vite (see `applications/web-app/package.json`).
-- API base URL is configured via `VITE_API_SERVER` (see `applications/web-app/.env.development` and `applications/web-app/.env.production`).
+- API base URL is configured via `VITE_API_SERVER` (copy `applications/web-app/.env.example` to `applications/web-app/.env.development`).
 - Available scripts (see `applications/web-app/package.json`): `dev`, `build`, `test`, `lint`, `preview`.
 
 ### API service (FastAPI)

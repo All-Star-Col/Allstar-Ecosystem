@@ -1,56 +1,40 @@
-# Python
+# Python cache / bytecode
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Virtual environments
 .venv/
 env/
 api_env/
+
+# Python version manager
 .python-version
+
+# Build artifacts
 build/
 dist/
 *.egg-info/
 
-# Tests / Linters
+# Test / coverage caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .tox/
-
-# Coverage
 .coverage
 .coverage.*
 coverage.xml
 htmlcov/
 
-# OS / IDE
-.DS_Store
-.idea/
-.vscode/
+# Local Docker overrides
+docker-compose.override.yml
+docker-compose.local.yml
+allstar-fastapi.local.yml
 
-# Logs
-*.log
-
-# Secrets
+# Local env files
 .env
 *.env
 *.env.*
 .envrc
 keys.env
 src/keys.env
-*.pem
-*.key
-*.p12
-*.pfx
-*.crt
-*.cer
-*.jks
-
-# Allow safe env templates
-!.env.example
-!.env.template
-!keys.dev.env
-
-# Local Docker/Azure overrides
-docker-compose.override.yml
-docker-compose.local.yml
-allstar-fastapi.local.yml
