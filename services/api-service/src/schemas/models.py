@@ -1,14 +1,14 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Any, List
+import re
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Any, List, Literal
 from uuid import UUID
 from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 
-
-# -----------------------------
-# Models
-# -----------------------------
+#_____________________________________________________
+#   /api/v1/login | auth
+#_____________________________________________________
 
 class Token(BaseModel):
     access_token: str
@@ -17,16 +17,15 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
 
+#_____________________________________________________
+#   /api/v1/register, /api/v1/workspace | users
+#_____________________________________________________
+
 class User(BaseModel):
     id: UUID
     username: str
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
-
-class Role(BaseModel):
-    id: int
-    name: str
-    description :Optional[str] = None
 
 class UserCreate(BaseModel):
     email: Optional[str] = None
@@ -36,6 +35,15 @@ class UserCreate(BaseModel):
 
 class UserInDB(User):
     password_hash: str
+
+#_____________________________________________________
+#   /api/v1/workspace | roles, apps
+#_____________________________________________________
+
+class Role(BaseModel):
+    id: int
+    name: str
+    description :Optional[str] = None
 
 class App(BaseModel):
     id: str
@@ -47,7 +55,10 @@ class App(BaseModel):
     icon_bg_color: str
     badge_color: str
 
-# Sheets Services Schemas
+#_____________________________________________________
+#   /api/v1/sheets/inventory | sheets
+#_____________________________________________________
+
 class Item_LookupResponse(BaseModel):
     item: int
     excel_row: int
@@ -55,20 +66,31 @@ class Item_LookupResponse(BaseModel):
     fabric: str
     warehouse: str
     warehouse_row: str
-    opt_warehouse: Optional[List[str]] = None
-    opt_row: Optional[List[str]] = None
+    opt_warehouse: List[str]
+    opt_row: List[str]
+    opt_conveyor: List[str]
+
+class Returned_Item(BaseModel):
+    item: str
+    product: str
+    fabric: str
+    client: str
 
 class DispatchItem(BaseModel):
     dispatch_date: str
     invoice: str
     referral: str
+    conveyor: str
 
 class LocationItem(BaseModel):
     new_warehouse: str
     new_row: str
     referral: Optional[str] = None
 
-# Forms Schemas
+#_____________________________________________________
+#   /api/v1/workspace/forms | forms
+#_____________________________________________________
+
 class CategoriesForms(BaseModel):
     id: int
     nombre: str
@@ -76,6 +98,11 @@ class CategoriesForms(BaseModel):
 class ColumnTable(BaseModel):
     name: str
     type: str
+    nullable: bool | None = None
+    required: bool | None = None
+    max_length: int | None = None
+    default_value: str | None = None
+    enum_values: List[str] | None = None
 
 class TableForms(BaseModel):
     id: int
@@ -104,6 +131,169 @@ class SubmitFormResponse(BaseModel):
     status: str
     correlation_id: str
 
+#_____________________________________________________
+#   /api/v1/workspace/data-viewer | data_viewer
+#_____________________________________________________
+
+DATA_VIEWER_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]{0,62}$"
+DATA_VIEWER_TABLE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+_DATA_VIEWER_IDENTIFIER_REGEX = re.compile(DATA_VIEWER_IDENTIFIER_PATTERN)
+
+
+class DataViewerColumn(BaseModel):
+    name: str = Field(
+        min_length=1,
+        max_length=63,
+        pattern=DATA_VIEWER_IDENTIFIER_PATTERN,
+    )
+    type: str
+    nullable: bool | None = None
+    visible: bool = True
+    editable: bool = True
+    required: bool | None = None
+    max_length: int | None = Field(default=None, ge=1)
+    enum_values: List[str] | None = None
+    read_only_reason: str | None = None
+
+
+class DataViewerTable(BaseModel):
+    table_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=DATA_VIEWER_TABLE_ID_PATTERN,
+    )
+    table_name: str
+    display_name: str | None = None
+    has_pk: bool
+    stable_order_column: str | None = Field(
+        default=None,
+        pattern=DATA_VIEWER_IDENTIFIER_PATTERN,
+    )
+    default_order_column: str | None = Field(
+        default=None,
+        pattern=DATA_VIEWER_IDENTIFIER_PATTERN,
+    )
+    order_error_code: str | None = None
+    can_update: bool = False
+    can_insert: bool = False
+    can_delete: bool = False
+    pk_columns: List[str] = Field(default_factory=list)
+    columns: List[DataViewerColumn]
+
+
+class DataViewerFilter(BaseModel):
+    column: str = Field(
+        min_length=1,
+        max_length=63,
+        pattern=DATA_VIEWER_IDENTIFIER_PATTERN,
+    )
+    operator: Literal["eq", "contains", "gt", "lt", "in", "between"]
+    value: Any | None = None
+    value_to: Any | None = None
+
+
+class DataViewerSort(BaseModel):
+    column: str = Field(
+        min_length=1,
+        max_length=63,
+        pattern=DATA_VIEWER_IDENTIFIER_PATTERN,
+    )
+    direction: Literal["asc", "desc"] = "asc"
+
+
+class DataViewerQueryRequest(BaseModel):
+    table_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=DATA_VIEWER_TABLE_ID_PATTERN,
+    )
+    columns: List[str] | None = None
+    filters: List[DataViewerFilter] = Field(default_factory=list)
+    sort: DataViewerSort | None = None
+    q: str | None = None
+    limit: int = Field(default=100, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+    include_total: bool = True
+
+    @field_validator("columns")
+    @classmethod
+    def validate_columns(cls, value: List[str] | None) -> List[str] | None:
+        if value is None:
+            return value
+
+        for column in value:
+            if not _DATA_VIEWER_IDENTIFIER_REGEX.match(column):
+                raise ValueError(f"Invalid column identifier: {column}")
+        return value
+
+    @field_validator("q")
+    @classmethod
+    def validate_q(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+
+        trimmed_value = value.strip()
+        if not trimmed_value:
+            return None
+        if len(trimmed_value) > 100:
+            raise ValueError("Invalid q length: maximum is 100 characters")
+        return trimmed_value
+
+
+class DataViewerQueryResponse(BaseModel):
+    rows: List[dict[str, Any]]
+    total_count: int | None = None
+    limit: int
+    offset: int
+    has_more: bool
+
+
+class DataViewerErrorResponse(BaseModel):
+    request_id: str
+    detail: str
+    code: str
+
+
+class DataViewerRowUpdateRequest(BaseModel):
+    table_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=DATA_VIEWER_TABLE_ID_PATTERN,
+    )
+    pk: dict[str, Any]
+    changes: dict[str, Any]
+
+    @field_validator("pk")
+    @classmethod
+    def validate_pk(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not value:
+            raise ValueError("pk must not be empty")
+
+        for key in value:
+            if not _DATA_VIEWER_IDENTIFIER_REGEX.match(key):
+                raise ValueError(f"Invalid pk identifier: {key}")
+        return value
+
+    @field_validator("changes")
+    @classmethod
+    def validate_changes(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not value:
+            raise ValueError("changes must not be empty")
+
+        for key in value:
+            if not _DATA_VIEWER_IDENTIFIER_REGEX.match(key):
+                raise ValueError(f"Invalid changes identifier: {key}")
+        return value
+
+
+class DataViewerRowUpdateResponse(BaseModel):
+    row: dict[str, Any]
+    updated_columns: List[str]
+
+#_____________________________________________________
+#   /api/v1/orders | orders
+#_____________________________________________________
+
 class EmailOrder(BaseModel):
     id: str
     subject: str | None  = None
@@ -127,3 +317,5 @@ class Order(BaseModel):
     email_order : EmailOrder
     products : List[Product]
     client : Client
+
+
