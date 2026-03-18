@@ -7,7 +7,7 @@ scheduler = AsyncIOScheduler()
 logger = get_logger(__name__)
 
 
-@scheduler.scheduled_job('interval', minutes=10)
+@scheduler.scheduled_job('interval', minutes=240)
 async def consultar_y_procesar():
     '''Job programado: llama al endpoint /trigger/production cada 10 minutos.'''
 

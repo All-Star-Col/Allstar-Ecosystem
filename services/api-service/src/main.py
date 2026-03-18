@@ -12,6 +12,7 @@ from src.api.v1.routes.sheets import sheets
 from src.api.v1.routes.sheets.inventory import inventory
 from src.api.v1.routes.workspace import workspace
 from src.api.v1.routes.workspace.forms import forms
+from src.api.v1.routes.workspace.data_viewer import router as data_viewer_router
 from src.api.v1.routes.workspace.orders import orders
 from src.core.config import settings
 from src.core.scheduler import scheduler
@@ -32,6 +33,7 @@ app.include_router(register.router, prefix="/api/v1", tags=["Auth"])
 app.include_router(workspace.router, prefix="/api/v1", tags=["Workspace"])
 app.include_router(public.router, prefix="/api/v1", tags=["Public"])
 app.include_router(forms.router, prefix="/api/v1/workspace/forms", tags=["Workspace"])
+app.include_router(data_viewer_router,prefix="/api/v1/workspace/data-viewer",tags=["Workspace"])
 app.include_router(orders.router, prefix='/api/v1/workspace', tags= ['Workspace'])
 app.include_router(inventory.router, prefix="/api/v1/sheets/inventory", tags=["sheets"])
 app.include_router(sheets.router, prefix="/api/v1/sheets", tags=["sheets"])

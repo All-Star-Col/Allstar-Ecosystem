@@ -1,33 +1,30 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List
 
-from src.core.logging_config import get_logger
+from src.schemas.models import Item_LookupResponse, LocationItem, DispatchItem
 from src.services.sheets import SheetsService, get_sheets_service
-
+from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
 
 
-@router.post('/trigger/production')
+"""
+    post_finishproduction()
+    Dispara la sincronizacion de items entre SQL Server y la hoja PRUEBA ACCESS.
+    Llamado automaticamente por el scheduler cada 10 minutos.
+"""
+@router.post("/trigger/production")
 async def post_finishproduction(service: SheetsService = Depends(get_sheets_service)):
     try:
         status = await service.compare_coditems()
         if status == 200:
-            return {status: success, message: Sincronizacioncompletada}
-        if status == 404:
-            raise HTTPException(
-                status_code=404,
-                detail=NoseencontrolahojaorecursodeGoogle,
-            )
-        raise HTTPException(
-            status_code=500,
-            detail=Errorinternoenelprocesodesincronizacion,
-        )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception(Errorejecutandotriggerdeproduccion)
-        raise HTTPException(
-            status_code=500,
-            detail=Errorinternoenelprocesodesincronizacion,
-        )
+            return {"status": "success", "message": "Sincronización completada"}
+        elif status == 404:
+            raise HTTPException(status_code=404, detail="No se encontró la hoja o recurso de Google")
+        else:
+            raise HTTPException(status_code=500, detail="Error interno en el proceso de sincronización")
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
