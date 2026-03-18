@@ -15,7 +15,6 @@ async def get_user_apps_from_db(db: AsyncSession, user_id: str) -> list[App]:
 
     if role_row is None:
         return []
-
     role_id = role_row["role_id"]
 
     query_apps = text("""

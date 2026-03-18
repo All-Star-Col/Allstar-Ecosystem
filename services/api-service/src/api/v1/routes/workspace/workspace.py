@@ -16,9 +16,7 @@ router = APIRouter()
 async def workspace(
     current_user: User = Depends(get_current_user),
     apps:List[App] = Depends(get_current_active_apps),
-    db: AsyncSession = Depends(get_db)
 ):
-
     return {
         "apps": apps,
         "username": current_user.username,

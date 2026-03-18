@@ -8,15 +8,14 @@ from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 load_dotenv("keys.dev.env", override=False)
-load_dotenv("keys.env", override=False)
 
 
 class Settings(BaseSettings):
     # --- IDS DE BITWARDEN (Pon tus UUIDs reales aquí) ---
 
     ID_ALGORITHM: str = "d609a512-df00-486e-a3fd-b3ef013e866f"
-    ID_POSTGRES_URL_DATABASE_PROD: str = "08f813ec-acd6-4a51-9aba-b3ef013db100"
     ID_POSTGRES_URL_DATABASE_DEV: str = "c054db7a-ac1b-4fcc-af5d-b410014abd81"
+    ID_POSTGRES_URL_DATABASE_PROD: str = "08f813ec-acd6-4a51-9aba-b3ef013db100"
     ID_SQLSERVER_URL_DATABASE: str = "db6447f6-6141-44ff-a0c9-b3f0011f2a07"
     ID_SECRET_KEY: str = "b8ac367c-d5c9-420b-b73e-b3ef013e672b"
     ID_SHEETS_INVENTARIO_ALLSTAR: str = "21fcbb73-0b64-4c23-935d-b3f0012008ed"
@@ -90,7 +89,6 @@ class Settings(BaseSettings):
 
             client.auth().login_access_token(access_token)
 
-
             def get_secret(secret_id: str, name: str) -> str:
                 secret = client.secrets().get(secret_id)
                 if not secret or not secret.data:
@@ -106,13 +104,10 @@ class Settings(BaseSettings):
                     )
                 postgres_secret_id = self.ID_POSTGRES_URL_DATABASE_DEV
 
-            logger.info(f"Using Postgres secret: {postgres_secret_id}")
-
-
             # Asignación segura
             self.ALGORITHM = get_secret(self.ID_ALGORITHM, "ALGORITHM")
             self.POSTGRES_URL_DATABASE = get_secret(
-                postgres_secret_id, "POSTGRES_URL_DATABASE"
+                postgres_secret_id, "POSTGRES_URL_DATABASE_PROD"
             )
             self.SECRET_KEY = get_secret(self.ID_SECRET_KEY, "SECRET_KEY")
             self.SQLSERVER_URL_DATABASE = get_secret(
@@ -123,10 +118,6 @@ class Settings(BaseSettings):
             )
             self.GOOGLE_CREDENTIALS_JSON = get_secret(
                 self.ID_GOOGLE_CREDENTIALS_JSON, "GOOGLE_CREDENTIALS_JSON"
-            )
-
-            logger.info(
-                f"Secretos cargados exitosamente para ENVIRONMENT={environment}"
             )
 
         except Exception as e:
