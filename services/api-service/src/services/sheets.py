@@ -769,7 +769,7 @@ class SheetsService:
 
             # 5. Actualizar DEVOLUCIONES segun el caso
             if is_unknown:
-                # Sobreescribir col A con new_item y col M con "Reintegrado Item nuevo"
+                # Sobreescribir col A con new_item y col N con "Reintegrado Item nuevo"
                 sheet_api.values().batchUpdate(
                     spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
                     body={
@@ -780,7 +780,7 @@ class SheetsService:
                                 "values": [[new_item]],
                             },
                             {
-                                "range": f"{self.SHEET_NAME_RETURNS}!M{dev_excel_row}",
+                                "range": f"{self.SHEET_NAME_RETURNS}!N{dev_excel_row}",
                                 "values": [["Reintegrado Item nuevo"]],
                             },
                         ],
