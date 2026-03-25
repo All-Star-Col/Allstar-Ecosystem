@@ -766,10 +766,10 @@ class SheetsService:
                     },
                 ).execute()
             else:
-                # Solo actualizar col M con "Reintegrado"
+                # Solo actualizar col N con "Reintegrado"
                 sheet_api.values().update(
                     spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
-                    range=f"{self.SHEET_NAME_RETURNS}!M{dev_excel_row}",
+                    range=f"{self.SHEET_NAME_RETURNS}!N{dev_excel_row}",
                     valueInputOption="USER_ENTERED",
                     body={"values": [["Reintegrado"]]},
                 ).execute()
