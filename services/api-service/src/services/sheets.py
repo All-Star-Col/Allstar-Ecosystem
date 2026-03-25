@@ -608,7 +608,7 @@ class SheetsService:
         """
         get_unknown_returns_sync()
         Retorna una lista de items (col A) de la hoja DEVOLUCIONES
-        cuyo Estado (col M) sea exactamente 'Por revisar y asignar item'.
+        cuyo Estado (col N) sea exactamente 'Por revisar y asignar item'.
         """
         service = self.get_google_service()
         if not service:
@@ -620,7 +620,7 @@ class SheetsService:
                 sheet_api.values()
                 .get(
                     spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
-                    range=f"{self.SHEET_NAME_RETURNS}!A:M",
+                    range=f"{self.SHEET_NAME_RETURNS}!A:N",
                 )
                 .execute()
             )
