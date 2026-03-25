@@ -1,33 +1,36 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-darkMode: "class",
-content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
-theme: {
+	darkMode: "class",
+	content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+	theme: {
 		extend: {
 		keyframes: {
-			l7: {
-			'to': { 'background-position': 'left' },
+			"l7": {
+				"to": { "background-position": "left" },
+			},
+			"caret-blink": {
+				"0%, 100%": { opacity: "1" },
+				"50%": { opacity: "0" },
+			},
+			"accordion-down": {
+				from: { height: "0" },
+				to: { height: "var(--radix-accordion-content-height)" },
+			},
+			"accordion-up": {
+				from: { height: "var(--radix-accordion-content-height)" },
+				to: { height: "0" },
 			},
 		},
 		animation: {
-			'loader-steps': 'l7 2s infinite steps(11)',
-		},
-		colors: {
-			primary: "#C7664C",
-			"primary-hover": "#B0553E",
-			"background-light": "#F0F2F5",
-			"background-dark": "#0F172A",
-			"card-light": "#F6F5F0",
-			"card-dark": "#1E293B",
-			"text-main": "#122337",
-			"text-light": "#F8FAFC",
-			"accent": "#B69599",
-			"gold-border": "#C5A059",
+			"loader-steps": "l7 2s infinite steps(11)",
+			"caret-blink": "caret-blink 1s step-end infinite",
+			"accordion-down": "accordion-down 0.2s ease-out",
+			"accordion-up": "accordion-up 0.2s ease-out",
 		},
 		fontFamily: {
 			display: ["Inter", "sans-serif"],
 			sans: ["Inter", "sans-serif"],
-			mono: ["monospace"], // Útil para el loader
+			mono: ["monospace"],
 		},
 		borderRadius: {
 			xl: "1.25rem",

@@ -9,6 +9,13 @@ import {
     Eye,
     Plus,
 } from "lucide-react";
+import { Button } from "@/shared/ui/button";
+
+const CELEBRATORY_SPRING = {
+    type: "spring" as const,
+    stiffness: 200,
+    damping: 15,
+};
 
 interface Product {
     nombre_all_star: string;
@@ -53,54 +60,52 @@ export function SuccessView({
             className="max-w-3xl mx-auto"
         >
             {/* Success Header */}
-            <div className="bg-white rounded-lg p-8 shadow-sm border border-[rgba(47,51,57,0.08)] text-center mb-6">
+            <div className="bg-white rounded-lg p-8 shadow-sm border border-border text-center mb-6">
                 <motion.div
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{
-                        type: "spring",
-                        stiffness: 200,
-                        damping: 15,
+                        ...CELEBRATORY_SPRING,
                         delay: 0.2,
                     }}
                 >
-                    <CheckCircle2 className="w-20 h-20 text-[#10b981] mx-auto mb-4" />
+                    <CheckCircle2 className="w-20 h-20 text-success mx-auto mb-4" />
                 </motion.div>
 
-                <h2 className="text-2xl text-[#122337] mb-2">
+                <h2 className="text-2xl text-foreground mb-2">
                     Pedido Enviado Correctamente
                 </h2>
-                <p className="text-[#5a5c61] mb-6">
+                <p className="text-muted-foreground mb-6">
                     Tu pedido ha sido registrado en el sistema de producción
                 </p>
 
                 {/* Número de OP Destacado */}
-                <div className="bg-[#122337] rounded-lg p-6 inline-block">
-                    <p className="text-[#F6F5F0]/80 text-sm mb-1">
+                <div className="bg-primary rounded-lg p-6 inline-block">
+                    <p className="text-primary-foreground/80 text-sm mb-1">
                         Orden de Producción
                     </p>
-                    <p className="text-[#B69559] text-4xl tracking-wider">
+                    <p className="text-accent text-4xl tracking-wider">
                         {ordenProduccion}
                     </p>
                 </div>
             </div>
 
             {/* Información del Pedido */}
-            <div className="bg-white rounded-lg p-6 shadow-sm border border-[rgba(47,51,57,0.08)] mb-6">
-                <h3 className="text-[#122337] mb-4 pb-3 border-b border-[rgba(47,51,57,0.1)]">
+            <div className="bg-white rounded-lg p-6 shadow-sm border border-border mb-6">
+                <h3 className="text-foreground mb-4 pb-3 border-b border-border">
                     Información del Pedido
                 </h3>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-[#122337]/5 rounded-lg flex items-center justify-center">
-                            <Calendar className="w-5 h-5 text-[#122337]" />
+                        <div className="w-10 h-10 bg-primary/5 rounded-lg flex items-center justify-center">
+                            <Calendar className="w-5 h-5 text-foreground" />
                         </div>
                         <div>
-                            <p className="text-xs text-[#5a5c61]">
+                            <p className="text-xs text-muted-foreground">
                                 Fecha de Creación
                             </p>
-                            <p className="text-sm text-[#2F3339]">
+                            <p className="text-sm text-secondary-foreground">
                                 {new Date(fecha).toLocaleDateString("es-CO", {
                                     year: "numeric",
                                     month: "long",
@@ -111,44 +116,44 @@ export function SuccessView({
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-[#122337]/5 rounded-lg flex items-center justify-center">
-                            <User className="w-5 h-5 text-[#122337]" />
+                        <div className="w-10 h-10 bg-primary/5 rounded-lg flex items-center justify-center">
+                            <User className="w-5 h-5 text-foreground" />
                         </div>
                         <div>
-                            <p className="text-xs text-[#5a5c61]">Cliente</p>
-                            <p className="text-sm text-[#2F3339]">{cliente}</p>
+                            <p className="text-xs text-muted-foreground">Cliente</p>
+                            <p className="text-sm text-secondary-foreground">{cliente}</p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-[#122337]/5 rounded-lg flex items-center justify-center">
-                            <FileText className="w-5 h-5 text-[#122337]" />
+                        <div className="w-10 h-10 bg-primary/5 rounded-lg flex items-center justify-center">
+                            <FileText className="w-5 h-5 text-foreground" />
                         </div>
                         <div>
-                            <p className="text-xs text-[#5a5c61]">
+                            <p className="text-xs text-muted-foreground">
                                 Orden de Compra
                             </p>
-                            <p className="text-sm text-[#2F3339]">
+                            <p className="text-sm text-secondary-foreground">
                                 {ordenCompra}
                             </p>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-[#10b981]/10 rounded-lg flex items-center justify-center">
-                            <CheckCircle2 className="w-5 h-5 text-[#10b981]" />
+                        <div className="w-10 h-10 bg-success/10 rounded-lg flex items-center justify-center">
+                            <CheckCircle2 className="w-5 h-5 text-success" />
                         </div>
                         <div>
-                            <p className="text-xs text-[#5a5c61]">Estado</p>
-                            <p className="text-sm text-[#10b981]">En proceso</p>
+                            <p className="text-xs text-muted-foreground">Estado</p>
+                            <p className="text-sm text-success">En proceso</p>
                         </div>
                     </div>
                 </div>
             </div>
 
             {/* Resumen de Productos */}
-            <div className="bg-white rounded-lg p-6 shadow-sm border border-[rgba(47,51,57,0.08)] mb-6">
-                <h3 className="text-[#122337] mb-4 pb-3 border-b border-[rgba(47,51,57,0.1)] flex items-center gap-2">
+            <div className="bg-white rounded-lg p-6 shadow-sm border border-border mb-6">
+                <h3 className="text-foreground mb-4 pb-3 border-b border-border flex items-center gap-2">
                     <Package className="w-5 h-5" />
                     Resumen de Productos
                 </h3>
@@ -157,22 +162,22 @@ export function SuccessView({
                     {productos.map((producto, index) => (
                         <div
                             key={index}
-                            className="flex items-center justify-between py-3 border-b border-[rgba(47,51,57,0.05)] last:border-0"
+                            className="flex items-center justify-between py-3 border-b border-border last:border-0"
                         >
                             <div className="flex-1">
-                                <p className="text-sm text-[#2F3339]">
+                                <p className="text-sm text-secondary-foreground">
                                     {producto.nombre_all_star}
                                 </p>
-                                <p className="text-xs text-[#5a5c61]">
+                                <p className="text-xs text-muted-foreground">
                                     Ref: {producto.referencia}
                                 </p>
                             </div>
                             <div className="text-right">
-                                <p className="text-sm text-[#2F3339]">
+                                <p className="text-sm text-secondary-foreground">
                                     {producto.cantidad} ×{" "}
                                     {formatCurrency(producto.valor)}
                                 </p>
-                                <p className="text-xs text-[#5a5c61]">
+                                <p className="text-xs text-muted-foreground">
                                     {formatCurrency(
                                         producto.cantidad * producto.valor,
                                     )}
@@ -183,12 +188,12 @@ export function SuccessView({
                 </div>
 
                 {/* Total */}
-                <div className="mt-4 pt-4 border-t-2 border-[#122337] flex items-center justify-between">
+                <div className="mt-4 pt-4 border-t-2 border-foreground flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                        <DollarSign className="w-5 h-5 text-[#122337]" />
-                        <span className="text-[#122337]">Total</span>
+                        <DollarSign className="w-5 h-5 text-foreground" />
+                        <span className="text-foreground">Total</span>
                     </div>
-                    <span className="text-xl text-[#122337]">
+                    <span className="text-xl text-foreground">
                         {formatCurrency(total)}
                     </span>
                 </div>
@@ -196,20 +201,24 @@ export function SuccessView({
 
             {/* Botones de Acción */}
             <div className="flex flex-col sm:flex-row gap-3">
-                <button
+                <Button
+                    variant="outline"
+                    size="lg"
                     onClick={onVerDetalle}
-                    className="flex-1 px-6 py-3 border-2 border-[#122337] text-[#122337] rounded-lg hover:bg-[#122337] hover:text-[#F6F5F0] transition-colors flex items-center justify-center gap-2"
+                    className="flex-1"
                 >
                     <Eye className="w-5 h-5" />
                     Ver Detalle del Pedido
-                </button>
-                <button
+                </Button>
+                <Button
+                    variant="default"
+                    size="lg"
                     onClick={onNuevoPedido}
-                    className="flex-1 px-6 py-3 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-colors flex items-center justify-center gap-2"
+                    className="flex-1"
                 >
                     <Plus className="w-5 h-5" />
                     Registrar Nuevo Pedido
-                </button>
+                </Button>
             </div>
         </motion.div>
     );

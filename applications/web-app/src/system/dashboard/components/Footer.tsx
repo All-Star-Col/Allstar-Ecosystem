@@ -2,6 +2,7 @@ import { type MouseEvent, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { Bell, Power, Settings, type LucideIcon } from "lucide-react";
 import { GenericInfoModal } from "../../../shared/components/GenericInfoModal";
+// import { duration, stagger } from "../../../shared/animations";
 
 const IconButton = ({
     icon: Icon,
@@ -18,22 +19,7 @@ const IconButton = ({
         type="button"
         whileHover={{ scale: 1.1, rotate: hoverRotate }}
         whileTap={{ scale: 0.95 }}
-        className="flex items-center justify-center transition-all"
-        style={{
-            width: "32px",
-            height: "32px",
-            borderRadius: "8px",
-            backgroundColor: "transparent",
-            border: "none",
-            cursor: "pointer",
-            color: "#2f3339",
-        }}
-        onMouseEnter={(e) =>
-            (e.currentTarget.style.backgroundColor = "rgba(47, 51, 57, 0.08)")
-        }
-        onMouseLeave={(e) =>
-            (e.currentTarget.style.backgroundColor = "transparent")
-        }
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-secondary-foreground hover:bg-secondary/10 transition-colors cursor-pointer border-none"
         aria-label={ariaLabel}
         onClick={onClick}
     >
@@ -67,14 +53,13 @@ export function Footer() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, delay: 0.8 }}
-                className="flex items-center justify-between mt-auto pt-4"
-                style={{ borderTop: "1px solid rgba(47, 51, 57, 0.08)" }}
+                className="flex items-center justify-between mt-auto pt-4 border-t border-border/50"
             >
                 <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.5, delay: 0.9 }}
-                    style={{ fontSize: "12px", color: "rgba(47, 51, 57, 0.6)" }}
+                    className="text-xs text-muted-foreground"
                 >
                     Versión 1.0.0 - © 2026 Sistema Corporativo
                 </motion.div>
@@ -98,34 +83,15 @@ export function Footer() {
                         hoverRotate={90}
                         ariaLabel="Abrir configuracion"
                         onClick={(event) =>
-                            handleOpenInfoModal("Configuracion", event)
+                            handleOpenInfoModal("Configuración", event)
                         }
                     />
 
                     <motion.button
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        className="flex items-center gap-2 transition-all"
+                        className="flex items-center gap-2 h-8 px-3 rounded-lg bg-destructive/10 text-destructive text-[13px] font-medium hover:bg-destructive/20 transition-all cursor-pointer border-none"
                         onClick={handleLogOut}
-                        style={{
-                            height: "32px",
-                            padding: "0 12px",
-                            borderRadius: "8px",
-                            backgroundColor: "rgba(199, 102, 76, 0.08)",
-                            border: "none",
-                            cursor: "pointer",
-                            color: "#C7664C",
-                            fontSize: "13px",
-                            fontWeight: 500,
-                        }}
-                        onMouseEnter={(e) =>
-                            (e.currentTarget.style.backgroundColor =
-                                "rgba(199, 102, 76, 0.15)")
-                        }
-                        onMouseLeave={(e) =>
-                            (e.currentTarget.style.backgroundColor =
-                                "rgba(199, 102, 76, 0.08)")
-                        }
                     >
                         <motion.div
                             whileHover={{ rotate: 180 }}

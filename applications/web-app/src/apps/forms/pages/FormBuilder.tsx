@@ -169,34 +169,35 @@ export default function FormBuilder() {
 
     return (
         <div className="min-h-screen bg-background">
-            <header className="bg-primary text-primary-foreground shadow-md">
-                <div className="container mx-auto px-4 py-6">
-                    <div className="flex items-center gap-4 mb-4">
+            <header className="border-b border-border/80 bg-card/80 backdrop-blur">
+                <div className="container mx-auto max-w-5xl px-4 py-5">
+                    <div className="flex items-center gap-3">
                         <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => navigate("/app/forms")}
-                            className="text-primary-foreground hover:bg-primary-foreground/10"
+                            className="text-foreground hover:bg-muted/60"
                         >
                             <ArrowLeft className="h-4 w-4 mr-2" />
                             Volver
                         </Button>
-                    </div>
-                    <div>
-                        <h1 className="text-3xl mb-2">
-                            <b>{table.displayName}</b>
-                        </h1>
-                        <p className="text-primary-foreground/80">
-                            Nuevo registro
-                        </p>
+                        <div className="h-8 w-px bg-border" aria-hidden />
+                        <div>
+                            <h1 className="text-2xl font-semibold leading-tight text-foreground">
+                                {table.displayName}
+                            </h1>
+                            <p className="text-sm text-muted-foreground">
+                                Nuevo registro
+                            </p>
+                        </div>
                     </div>
                 </div>
             </header>
 
-            <main className="container mx-auto px-4 py-8 max-w-5xl">
-                <Card className="shadow-lg">
+            <main className="container mx-auto max-w-5xl px-4 py-8">
+                <Card className="border border-border/80 shadow-sm bg-card">
                     <CardHeader className="border-b bg-muted/20">
-                        <CardTitle className="text-2xl">
+                        <CardTitle className="text-xl font-semibold text-foreground">
                             Nuevo registro: {table.displayName}
                         </CardTitle>
                     </CardHeader>

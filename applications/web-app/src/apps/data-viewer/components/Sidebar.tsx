@@ -1,5 +1,7 @@
-import { Search, Database, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Search, ArrowLeft, AlertTriangle } from "lucide-react";
 import { useMemo, useState } from "react";
+import { Input } from "@/shared/ui/input";
+import { cn } from "@/shared/ui/utils";
 
 interface SidebarTableItem {
     id: string;
@@ -55,42 +57,41 @@ export function Sidebar({
     };
 
     return (
-        <div className="w-72 h-full min-h-0 bg-[#2f3339] text-white flex flex-col">
+        <div className="w-72 h-full min-h-0 bg-card/95 text-foreground flex flex-col border-r border-border/70 shadow-[12px_0_40px_rgba(18,35,55,0.04)]">
             {showBackButton && (
                 <button
-                    className="flex items-center gap-3 px-6 py-4 bg-[#122337] hover:bg-[#1a3351] transition-colors"
+                    className="flex items-center gap-3 px-5 py-4 bg-primary/5 text-foreground hover:bg-primary/8 transition-colors border-b border-border/70"
                     onClick={handleBack}
                 >
                     <ArrowLeft className="w-5 h-5" />
-                    <span className="text-sm">Volver al Dashboard</span>
+                    <span className="text-sm font-medium">Volver al Dashboard</span>
                 </button>
             )}
 
-            <div className="px-6 py-6 border-b border-white/10">
-                <div className="flex items-center gap-3">
-                    <Database className="w-6 h-6 text-[#b69559]" />
+            <div className="inline-flex items-center justify-center px-5 py-5 pb-0">
+                <div className="flex items-center justify-center text-center">
                     <div>
-                        <h1 className="text-lg font-semibold">{title}</h1>
-                        <p className="text-xs text-white/60">{subtitle}</p>
+                        <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+                        <p className="text-xs text-muted-foreground">{subtitle}</p>
                     </div>
                 </div>
             </div>
 
-            <div className="px-6 py-4">
+            <div className="px-5 py-4 border-b border-border/70">
                 <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
-                    <input
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
                         type="text"
                         placeholder="Buscar tablas..."
                         value={searchQuery}
                         onChange={(event) => setSearchQuery(event.target.value)}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-[#b69559] focus:border-transparent"
+                        className="pl-10 bg-background border-border/70 text-foreground placeholder:text-muted-foreground focus-visible:ring-ring rounded-full"
                     />
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-4">
-                <div className="space-y-1">
+            <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
+                <div className="space-y-2">
                     {filteredTables.map((table) => {
                         const isActive = activeTable === table.id;
                         const isBlocked = Boolean(table.disabledReason);
@@ -99,25 +100,26 @@ export function Sidebar({
                             <button
                                 key={table.id}
                                 onClick={() => onTableSelect(table.id)}
-                                className={`w-full text-left px-4 py-3 rounded-lg transition-all ${
+                                className={cn(
+                                    "w-full text-left px-4 py-3 rounded-xl transition-all border",
                                     isActive
-                                        ? "bg-[#122337] text-white shadow-lg"
-                                        : "text-white/70 hover:bg-white/5 hover:text-white"
-                                }`}
+                                        ? "bg-primary/8 text-foreground border-primary/25 shadow-sm"
+                                        : "bg-card text-muted-foreground border-border/70 hover:bg-primary/5 hover:text-foreground",
+                                )}
                             >
                                 <div className="flex items-center justify-between gap-2">
-                                    <span className="text-sm font-medium">
+                                    <span className="text-sm font-medium text-inherit">
                                         {table.displayName}
                                     </span>
-                                    <span className="text-xs text-white/40 truncate">
+                                    <span className="text-xs text-muted-foreground truncate">
                                         {table.id}
                                     </span>
                                 </div>
-                                <p className="text-[11px] text-white/45 mt-1 truncate">
+                                <p className="text-[11px] text-muted-foreground mt-1 truncate">
                                     {table.technicalName}
                                 </p>
                                 {isBlocked && (
-                                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 text-[11px] text-amber-200">
+                                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-warning/10 border border-warning/20 px-2 py-0.5 text-[11px] text-warning-foreground">
                                         <AlertTriangle className="w-3 h-3" />
                                         <span>Requiere ajuste backend</span>
                                     </div>
@@ -128,14 +130,14 @@ export function Sidebar({
                 </div>
 
                 {filteredTables.length === 0 && (
-                    <div className="text-center py-8 text-white/40 text-sm">
+                    <div className="text-center py-8 text-muted-foreground text-sm">
                         No se encontraron tablas
                     </div>
                 )}
             </div>
 
-            <div className="px-6 py-4 border-t border-white/10">
-                <p className="text-xs text-white/40">
+            <div className="flex center-align justify-center center-text px-5 py-4 border-t border-border/70">
+                <p className="text-xs text-muted-foreground">
                     {tables.length} {tables.length === 1 ? "tabla" : "tablas"} disponibles
                 </p>
             </div>

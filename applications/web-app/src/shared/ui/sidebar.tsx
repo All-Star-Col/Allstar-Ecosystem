@@ -17,6 +17,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "./sheet";
+import { minimalPanelStyles } from "./panel";
 import { Skeleton } from "./skeleton";
 import {
   Tooltip,
@@ -187,7 +188,10 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
-          className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
+          className={cn(
+            "w-(--sidebar-width) p-0 [&>button]:hidden",
+            minimalPanelStyles.surface,
+          )}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
@@ -244,7 +248,11 @@ function Sidebar({
         <div
           data-sidebar="sidebar"
           data-slot="sidebar-inner"
-          className="bg-sidebar group-data-[variant=floating]:border-sidebar-border flex h-full w-full flex-col group-data-[variant=floating]:rounded-lg group-data-[variant=floating]:border group-data-[variant=floating]:shadow-sm"
+          className={cn(
+            "flex h-full w-full flex-col",
+            minimalPanelStyles.surface,
+            "group-data-[variant=floating]:rounded-2xl",
+          )}
         >
           {children}
         </div>
@@ -337,7 +345,7 @@ function SidebarHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-header"
       data-sidebar="header"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex flex-col gap-2 px-3 py-3", className)}
       {...props}
     />
   );
@@ -348,7 +356,7 @@ function SidebarFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="sidebar-footer"
       data-sidebar="footer"
-      className={cn("flex flex-col gap-2 p-2", className)}
+      className={cn("flex flex-col gap-2 px-3 py-3", className)}
       {...props}
     />
   );
@@ -362,7 +370,7 @@ function SidebarSeparator({
     <Separator
       data-slot="sidebar-separator"
       data-sidebar="separator"
-      className={cn("bg-sidebar-border mx-2 w-auto", className)}
+      className={cn("bg-border/70 mx-3 w-auto", className)}
       {...props}
     />
   );

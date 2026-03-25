@@ -44,6 +44,19 @@ Observed endpoints (see `services/api-service/README.md` and `services/api-servi
 
 Note: `services/api-service/src/main.py` includes an additional `orders` router, but its endpoint list is not documented here (TBD: inspect `services/api-service/src/api/v1/routes/workspace/orders`).
 
+## Entry Points (high-level catalog)
+
+- Web frontend (React + Vite)
+  - Entry HTML: applications/web-app/index.html
+  - Bootstrap: applications/web-app/src/main.tsx
+  - Run locally: (cd applications/web-app && npm run dev)
+  
+- API service (FastAPI)
+  - Entry: services/api-service/src/main.py
+  - Run locally: (cd services/api-service && uvicorn src.main:app --reload)
+  
+This repository uses a multi-app monorepo pattern: each app has its own entry point and bootstrapping files. This layout is standard and easy to navigate for contributors.
+
 ## Secrets and configuration
 
 - The API service requires `BW_ACCESS_TOKEN` at runtime to load secrets from Bitwarden (see `services/api-service/src/core/config.py`).

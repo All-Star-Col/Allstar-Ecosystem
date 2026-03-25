@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { Loader2, Send, X, Plus, CheckCircle2, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import { Button } from "@/shared/ui/button";
 import { FormSection } from "./FormSection";
 import { FormInput } from "./FormInput";
 import { FormSelect } from "./FormSelect";
@@ -125,6 +126,8 @@ interface NewProductForm {
 }
 
 type SubmitStatus = "idle" | "loading" | "success" | "error";
+
+const SECTION_TRANSITION_DURATION = 0.3;
 
 export function ProductRegistrationForm() {
     const {
@@ -350,7 +353,7 @@ export function ProductRegistrationForm() {
 
         // Preparar datos para envío
         const formData = watch();
-        const payload = {
+        const payload: Record<string, unknown> = {
             orden_compra: formData.orden_compra,
             fecha: formData.fecha,
             remitente: formData.remitente,
@@ -374,6 +377,7 @@ export function ProductRegistrationForm() {
             //   },
             //   body: JSON.stringify(payload)
             // });
+            void payload;
 
             // Simulación de envío
             await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -381,8 +385,6 @@ export function ProductRegistrationForm() {
             // Simular respuesta del servidor con número de OP
             const opNumber = `OP-${Date.now().toString().slice(-6)}`;
             setOrdenProduccion(opNumber);
-
-            console.log("Datos enviados:", payload);
 
             setSubmitStatus("success");
             setShowConfirmModal(false);
@@ -482,11 +484,11 @@ export function ProductRegistrationForm() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-[#122337]/20 backdrop-blur-[2px] z-40 flex items-center justify-center"
+                        className="fixed inset-0 bg-primary/20 backdrop-blur-[2px] z-40 flex items-center justify-center"
                     >
                         <div className="bg-white rounded-lg p-6 shadow-2xl flex items-center gap-3">
-                            <Loader2 className="w-6 h-6 animate-spin text-[#122337]" />
-                            <span className="text-[#2F3339]">
+                            <Loader2 className="w-6 h-6 animate-spin text-foreground" />
+                            <span className="text-secondary-foreground">
                                 Enviando datos al servidor…
                             </span>
                         </div>
@@ -499,11 +501,11 @@ export function ProductRegistrationForm() {
                 className="max-w-6xl mx-auto space-y-6"
             >
                 {/* Header */}
-                <div className="bg-[#122337] text-[#F6F5F0] rounded-lg p-6">
+                <div className="bg-primary text-primary-foreground rounded-lg p-6">
                     <h1 className="text-2xl mb-2">
                         Registro de Productos para Producción
                     </h1>
-                    <p className="text-sm text-[#F6F5F0]/80">
+                    <p className="text-sm text-primary-foreground/80">
                         All Star Colombia - Sistema de Gestión de Producción
                     </p>
                 </div>
@@ -633,7 +635,7 @@ export function ProductRegistrationForm() {
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.3 }}
+                            transition={{ duration: SECTION_TRANSITION_DURATION }}
                         >
                             <FormSection
                                 title="Nuevo Producto"
@@ -730,14 +732,15 @@ export function ProductRegistrationForm() {
                                     />
 
                                     <div className="flex items-end">
-                                        <button
-                                            type="button"
+                                        <Button
+                                            variant="accent"
+                                            size="md"
                                             onClick={agregarProductoNuevo}
-                                            className="w-full px-4 py-2.5 bg-[#B69559] text-white rounded-lg hover:bg-[#a08549] transition-colors flex items-center justify-center gap-2"
+                                            className="w-full"
                                         >
                                             <Plus className="w-5 h-5" />
                                             Agregar Producto
-                                        </button>
+                                        </Button>
                                     </div>
                                 </div>
                             </FormSection>
@@ -752,7 +755,7 @@ export function ProductRegistrationForm() {
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.3 }}
+                            transition={{ duration: SECTION_TRANSITION_DURATION }}
                         >
                             <FormSection
                                 title="Producto Existente"
@@ -785,15 +788,15 @@ export function ProductRegistrationForm() {
                                     />
                                 </div>
 
-                                <button
-                                    type="button"
+                                <Button
+                                    variant="accent"
+                                    size="md"
                                     onClick={agregarProductoExistente}
                                     disabled={!productoSeleccionado}
-                                    className="px-4 py-2.5 bg-[#B69559] text-white rounded-lg hover:bg-[#a08549] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                                 >
                                     <Plus className="w-5 h-5" />
                                     Agregar Producto
-                                </button>
+                                </Button>
                             </FormSection>
                         </motion.div>
                     )}
@@ -824,58 +827,63 @@ export function ProductRegistrationForm() {
                 </FormSection>
 
                 {/* Botones de Acción */}
-                <div className="flex gap-4 justify-end sticky bottom-4 bg-[#F6F5F0] p-4 rounded-lg border border-[rgba(47,51,57,0.1)] shadow-lg">
-                    <button
-                        type="button"
-                        className="px-6 py-2.5 border-2 border-[#2F3339] text-[#2F3339] rounded-lg hover:bg-[#2F3339] hover:text-white transition-colors"
+                <div className="flex gap-4 justify-end sticky bottom-4 bg-background p-4 rounded-lg border border-border shadow-lg">
+                    <Button
+                        variant="outline"
+                        size="md"
+                        className="rounded-lg border-2"
                         disabled={submitStatus === "loading"}
                     >
-                        <X className="w-5 h-5 inline mr-2" />
+                        <X className="w-5 h-5" />
                         Cancelar
-                    </button>
+                    </Button>
 
                     {submitStatus === "idle" && (
-                        <button
+                        <Button
                             type="submit"
+                            variant="primary"
+                            size="lg"
                             disabled={products.length === 0}
-                            className="px-6 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[220px] justify-center"
+                            className="min-w-[220px] justify-center"
                         >
                             <Send className="w-5 h-5" />
                             Enviar a Producción
-                        </button>
+                        </Button>
                     )}
 
                     {submitStatus === "loading" && (
-                        <button
-                            type="button"
-                            disabled
-                            className="px-6 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg flex items-center gap-2 min-w-[220px] justify-center opacity-75 cursor-not-allowed"
+                        <Button
+                            variant="primary"
+                            size="lg"
+                            loading
+                            className="min-w-[220px] justify-center"
                         >
-                            <Loader2 className="w-5 h-5 animate-spin" />
                             Enviando…
-                        </button>
+                        </Button>
                     )}
 
                     {submitStatus === "success" && (
-                        <button
-                            type="button"
+                        <Button
+                            variant="default"
+                            size="lg"
                             disabled
-                            className="px-6 py-2.5 bg-[#10b981] text-white rounded-lg flex items-center gap-2 min-w-[220px] justify-center cursor-not-allowed"
+                            className="min-w-[220px] justify-center bg-success text-white cursor-not-allowed"
                         >
                             <CheckCircle2 className="w-5 h-5" />
                             Pedido Enviado
-                        </button>
+                        </Button>
                     )}
 
                     {submitStatus === "error" && (
-                        <button
-                            type="button"
+                        <Button
+                            variant="outline"
+                            size="lg"
                             onClick={handleRetry}
-                            className="px-6 py-2.5 bg-white text-[#d4183d] border-2 border-[#d4183d] rounded-lg hover:bg-[#d4183d] hover:text-white transition-colors flex items-center gap-2 min-w-[220px] justify-center"
+                            className="min-w-[220px] justify-center text-destructive border-destructive hover:bg-destructive hover:text-white"
                         >
                             <RefreshCw className="w-5 h-5" />
                             Reintentar
-                        </button>
+                        </Button>
                     )}
                 </div>
             </form>

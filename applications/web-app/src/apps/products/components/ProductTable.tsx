@@ -2,6 +2,9 @@ import { Trash2, Plus } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { AIBadge } from "./AIBadge";
 import type { ProductoOrden } from "../types";
+import { Button } from "@/shared/ui/button";
+
+const ROW_STAGGER_DELAY = 0.05;
 
 interface ProductTableProps {
     products: ProductoOrden[];
@@ -30,10 +33,10 @@ export function ProductTable({
 
     return (
         <div className="space-y-3">
-            <div className="overflow-x-auto rounded-lg border border-[rgba(47,51,57,0.1)]">
+            <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full">
                     <thead>
-                        <tr className="bg-[#122337] text-[#F6F5F0]">
+                        <tr className="bg-primary text-primary-foreground">
                             <th className="px-4 py-3 text-left text-sm">SKU</th>
                             <th className="px-4 py-3 text-left text-sm">
                                 Producto
@@ -64,10 +67,10 @@ export function ProductTable({
                                     initial={{ opacity: 0, y: -10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     exit={{ opacity: 0, x: -20 }}
-                                    transition={{ delay: index * 0.05 }}
-                                    className="border-t border-[rgba(47,51,57,0.1)] hover:bg-[#F6F5F0]/50 transition-colors"
+                                    transition={{ delay: index * ROW_STAGGER_DELAY }}
+                                    className="border-t border-border hover:bg-background/50 transition-colors"
                                 >
-                                    <td className="px-4 py-3 text-sm text-[#5a5c61]">
+                                    <td className="px-4 py-3 text-sm text-muted-foreground">
                                         <div className="flex items-center gap-2">
                                             {productoOrden.producto.sku}
                                             {productoOrden.autocompletadoPorIA && (
@@ -80,51 +83,53 @@ export function ProductTable({
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-[#2F3339]">
+                                    <td className="px-4 py-3 text-sm text-secondary-foreground">
                                         {productoOrden.producto.nombre}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-[#5a5c61]">
+                                    <td className="px-4 py-3 text-sm text-muted-foreground">
                                         {productoOrden.producto.modelo}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-[#5a5c61]">
+                                    <td className="px-4 py-3 text-sm text-muted-foreground">
                                         {productoOrden.producto.tela}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-center text-[#2F3339]">
+                                    <td className="px-4 py-3 text-sm text-center text-secondary-foreground">
                                         {productoOrden.cantidad}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-right text-[#2F3339]">
+                                    <td className="px-4 py-3 text-sm text-right text-secondary-foreground">
                                         {formatCurrency(productoOrden.costo)}
                                     </td>
-                                    <td className="px-4 py-3 text-sm text-right text-[#2F3339]">
+                                    <td className="px-4 py-3 text-sm text-right text-secondary-foreground">
                                         {formatCurrency(
                                             productoOrden.costo *
                                                 productoOrden.cantidad,
                                         )}
                                     </td>
                                     <td className="px-4 py-3 text-center">
-                                        <button
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
                                             onClick={() =>
                                                 onRemove(productoOrden.id)
                                             }
-                                            className="p-1.5 hover:bg-[#d4183d]/10 rounded transition-colors group"
+                                            className="group"
                                             title="Eliminar producto"
                                         >
-                                            <Trash2 className="w-4 h-4 text-[#5a5c61] group-hover:text-[#d4183d] transition-colors" />
-                                        </button>
+                                            <Trash2 className="w-4 h-4 text-muted-foreground group-hover:text-destructive transition-colors" />
+                                        </Button>
                                     </td>
                                 </motion.tr>
                             ))}
                         </AnimatePresence>
                     </tbody>
                     <tfoot>
-                        <tr className="border-t-2 border-[#122337] bg-[#F6F5F0]">
+                        <tr className="border-t-2 border-foreground bg-primary-foreground">
                             <td
                                 colSpan={6}
-                                className="px-4 py-3 text-sm text-[#122337]"
+                                className="px-4 py-3 text-sm text-foreground"
                             >
                                 Total
                             </td>
-                            <td className="px-4 py-3 text-sm text-right text-[#122337]">
+                            <td className="px-4 py-3 text-sm text-right text-foreground">
                                 {formatCurrency(
                                     products.reduce(
                                         (sum, p) => sum + p.costo * p.cantidad,
@@ -139,13 +144,14 @@ export function ProductTable({
             </div>
 
             {showAddButton && onAdd && (
-                <button
+                <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={onAdd}
-                    className="flex items-center gap-2 text-sm text-[#122337] hover:text-[#B69559] transition-colors"
                 >
                     <Plus className="w-4 h-4" />
                     Agregar otro producto
-                </button>
+                </Button>
             )}
         </div>
     );

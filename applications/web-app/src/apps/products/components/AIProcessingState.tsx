@@ -1,5 +1,6 @@
 import { Loader2, Sparkles, RefreshCw, Edit3, AlertCircle } from "lucide-react";
 import { motion } from "motion/react";
+import { Button } from "@/shared/ui/button";
 
 interface AIProcessingStateProps {
     status: "processing" | "completed" | "error";
@@ -21,17 +22,17 @@ export function AIProcessingState({
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-lg p-12 shadow-sm border border-[rgba(47,51,57,0.08)] text-center"
+                className="bg-white rounded-lg p-12 shadow-sm border border-border text-center"
             >
                 <div className="relative inline-block mb-6">
-                    <Sparkles className="w-20 h-20 text-[#B69559]" />
-                    <Loader2 className="w-8 h-8 text-[#122337] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-spin" />
+                    <Sparkles className="w-20 h-20 text-accent" />
+                    <Loader2 className="w-8 h-8 text-foreground absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-spin" />
                 </div>
 
-                <h3 className="text-xl text-[#122337] mb-2">
+                <h3 className="text-xl text-foreground mb-2">
                     Procesando con IA…
                 </h3>
-                <p className="text-sm text-[#5a5c61] mb-6 max-w-md mx-auto">
+                <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
                     Estamos extrayendo la información del correo y completando
                     el formulario automáticamente. Esto puede tomar unos
                     segundos.
@@ -39,23 +40,25 @@ export function AIProcessingState({
 
                 <div className="flex gap-3 justify-center">
                     {onRetry && (
-                        <button
+                        <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={onRetry}
-                            className="px-4 py-2 text-sm text-[#5a5c61] hover:text-[#122337] transition-colors flex items-center gap-2"
                         >
                             <RefreshCw className="w-4 h-4" />
                             Reintentar IA
-                        </button>
+                        </Button>
                     )}
 
                     {onManualEdit && (
-                        <button
+                        <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={onManualEdit}
-                            className="px-4 py-2 text-sm text-[#5a5c61] hover:text-[#122337] transition-colors flex items-center gap-2"
                         >
                             <Edit3 className="w-4 h-4" />
                             Editar manualmente
-                        </button>
+                        </Button>
                     )}
                 </div>
             </motion.div>
@@ -67,37 +70,40 @@ export function AIProcessingState({
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-white rounded-lg p-12 shadow-sm border-2 border-[#C7664C]/20 text-center"
+                className="bg-white rounded-lg p-12 shadow-sm border-2 border-destructive/20 text-center"
             >
-                <AlertCircle className="w-20 h-20 text-[#C7664C] mx-auto mb-6" />
+                <AlertCircle className="w-20 h-20 text-destructive mx-auto mb-6" />
 
-                <h3 className="text-xl text-[#122337] mb-2">
+                <h3 className="text-xl text-foreground mb-2">
                     Error en el procesamiento
                 </h3>
-                <p className="text-sm text-[#5a5c61] mb-6 max-w-md mx-auto">
+                <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
                     {errorMessage ||
                         "No pudimos procesar el correo con IA. Puedes reintentarlo o editar manualmente."}
                 </p>
 
                 <div className="flex gap-3 justify-center">
                     {onRetry && (
-                        <button
+                        <Button
+                            variant="default"
+                            size="md"
                             onClick={onRetry}
-                            className="px-6 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-colors flex items-center gap-2"
                         >
                             <RefreshCw className="w-5 h-5" />
                             Reintentar IA
-                        </button>
+                        </Button>
                     )}
 
                     {onManualEdit && (
-                        <button
+                        <Button
+                            variant="outline"
+                            size="md"
                             onClick={onManualEdit}
-                            className="px-6 py-2.5 border-2 border-[#2F3339] text-[#2F3339] rounded-lg hover:bg-[#2F3339] hover:text-white transition-colors flex items-center gap-2"
+                            className="rounded-lg border-2"
                         >
                             <Edit3 className="w-5 h-5" />
                             Editar manualmente
-                        </button>
+                        </Button>
                     )}
                 </div>
             </motion.div>

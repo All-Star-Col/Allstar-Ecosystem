@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
+import { Button } from "@/shared/ui/button";
 import { FormSection } from "./FormSection";
 import { FormInput } from "./FormInput";
 import { FormSelect } from "./FormSelect";
@@ -1368,25 +1369,25 @@ export function ProductionFormWizard({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-[#122337]/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-primary/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
                     >
                         <motion.div
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="bg-white w-full max-w-lg rounded-lg shadow-2xl border border-[rgba(47,51,57,0.12)]"
+                            className="bg-white w-full max-w-lg rounded-lg shadow-2xl border border-border"
                         >
                             <div className="p-6">
                                 <div className="flex items-start gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-[#C7664C]/10 flex items-center justify-center flex-shrink-0">
-                                        <AlertTriangle className="w-5 h-5 text-[#C7664C]" />
+                                    <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                                        <AlertTriangle className="w-5 h-5 text-destructive" />
                                     </div>
                                     <div>
-                                        <h3 className="text-lg text-[#2F3339]">
+                                        <h3 className="text-lg text-secondary-foreground">
                                             Campos por revisar
                                         </h3>
-                                        <p className="text-sm text-[#5a5c61] mt-1">
+                                        <p className="text-sm text-muted-foreground mt-1">
                                             Hay campos con revisión pendiente.
                                             ¿Deseas enviar igual o volver a
                                             revisar?
@@ -1395,22 +1396,22 @@ export function ProductionFormWizard({
                                 </div>
 
                                 <div className="flex justify-end gap-3 mt-6">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="outline"
+                                        size="md"
                                         onClick={() =>
                                             setShowReviewSubmitModal(false)
                                         }
-                                        className="px-4 py-2.5 border border-[rgba(47,51,57,0.2)] text-[#2F3339] rounded-lg hover:bg-[#f5f5f5] transition-colors"
                                     >
                                         Volver a revisar
-                                    </button>
-                                    <button
-                                        type="button"
+                                    </Button>
+                                    <Button
+                                        variant="default"
+                                        size="md"
                                         onClick={handleSubmitWithReview}
-                                        className="px-4 py-2.5 bg-[#122337] text-white rounded-lg hover:bg-[#1a3352] transition-colors"
                                     >
                                         Enviar igual
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         </motion.div>
@@ -1424,25 +1425,25 @@ export function ProductionFormWizard({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-[#122337]/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-primary/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
                     >
                         <motion.div
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="bg-white w-full max-w-xl rounded-lg shadow-2xl border border-[rgba(47,51,57,0.12)]"
+                            className="bg-white w-full max-w-xl rounded-lg shadow-2xl border border-border"
                         >
                             <div className="p-6">
                                 <div className="flex items-start gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-[#C7664C]/10 flex items-center justify-center flex-shrink-0">
-                                        <AlertTriangle className="w-5 h-5 text-[#C7664C]" />
+                                    <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                                        <AlertTriangle className="w-5 h-5 text-destructive" />
                                     </div>
                                     <div>
-                                        <h3 className="text-lg text-[#2F3339]">
+                                        <h3 className="text-lg text-secondary-foreground">
                                             Cambiar de correo
                                         </h3>
-                                        <p className="text-sm text-[#5a5c61] mt-1">
+                                        <p className="text-sm text-muted-foreground mt-1">
                                             Tienes información sin guardar en
                                             este formulario.
                                             <br />
@@ -1453,27 +1454,27 @@ export function ProductionFormWizard({
                                 </div>
 
                                 <div className="flex justify-end gap-3 mt-6">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="outline"
+                                        size="md"
                                         onClick={cancelEmailChange}
-                                        className="px-4 py-2.5 border border-[rgba(47,51,57,0.2)] text-[#2F3339] rounded-lg hover:bg-[#f5f5f5] transition-colors"
                                     >
                                         Cancelar
-                                    </button>
-                                    <button
-                                        type="button"
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        size="md"
                                         onClick={discardAndContinueEmailChange}
-                                        className="px-4 py-2.5 bg-[#C7664C] text-white rounded-lg hover:bg-[#b85b44] transition-colors"
                                     >
                                         Descartar cambios
-                                    </button>
-                                    <button
-                                        type="button"
+                                    </Button>
+                                    <Button
+                                        variant="default"
+                                        size="md"
                                         onClick={saveAndContinueEmailChange}
-                                        className="px-4 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-colors"
                                     >
                                         Guardar y continuar
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         </motion.div>
@@ -1487,40 +1488,40 @@ export function ProductionFormWizard({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-[#122337]/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-primary/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
                     >
                         <motion.div
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="bg-white w-full max-w-lg rounded-lg shadow-2xl border border-[rgba(47,51,57,0.12)]"
+                            className="bg-white w-full max-w-lg rounded-lg shadow-2xl border border-border"
                         >
                             <div className="p-6">
-                                <h3 className="text-lg text-[#2F3339]">
+                                <h3 className="text-lg text-secondary-foreground">
                                     Nuevo correo seleccionado
                                 </h3>
-                                <p className="text-sm text-[#5a5c61] mt-1">
+                                <p className="text-sm text-muted-foreground mt-1">
                                     ¿Cómo deseas completar este formulario?
                                 </p>
 
                                 <div className="flex justify-end gap-3 mt-6">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="outline"
+                                        size="md"
                                         onClick={() =>
                                             handleAIDecision("manual")
                                         }
-                                        className="px-4 py-2.5 border border-[rgba(47,51,57,0.2)] text-[#2F3339] rounded-lg hover:bg-[#f5f5f5] transition-colors"
                                     >
                                         Llenar manualmente
-                                    </button>
-                                    <button
-                                        type="button"
+                                    </Button>
+                                    <Button
+                                        variant="default"
+                                        size="md"
                                         onClick={() => handleAIDecision("ia")}
-                                        className="px-4 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-colors"
                                     >
                                         Completar con IA
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         </motion.div>
@@ -1534,25 +1535,25 @@ export function ProductionFormWizard({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-[#122337]/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-primary/35 backdrop-blur-[2px] z-50 flex items-center justify-center p-4"
                     >
                         <motion.div
                             initial={{ scale: 0.95, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             transition={{ duration: 0.2 }}
-                            className="bg-white w-full max-w-md rounded-lg shadow-2xl border border-[rgba(47,51,57,0.12)]"
+                            className="bg-white w-full max-w-md rounded-lg shadow-2xl border border-border"
                         >
                             <div className="p-6">
                                 <div className="flex items-start gap-3">
-                                    <div className="w-10 h-10 rounded-full bg-[#C7664C]/10 flex items-center justify-center flex-shrink-0">
-                                        <AlertTriangle className="w-5 h-5 text-[#C7664C]" />
+                                    <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                                        <AlertTriangle className="w-5 h-5 text-destructive" />
                                     </div>
                                     <div>
-                                        <h3 className="text-lg text-[#2F3339]">
+                                        <h3 className="text-lg text-secondary-foreground">
                                             Confirmar cambio de cliente
                                         </h3>
-                                        <p className="text-sm text-[#5a5c61] mt-1">
+                                        <p className="text-sm text-muted-foreground mt-1">
                                             {"Cambiar el cliente eliminar" +
                                                 String.fromCharCode(225) +
                                                 " los productos agregados actualmente. " +
@@ -1563,20 +1564,20 @@ export function ProductionFormWizard({
                                 </div>
 
                                 <div className="flex justify-end gap-3 mt-6">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="outline"
+                                        size="md"
                                         onClick={cancelChangeCliente}
-                                        className="px-4 py-2.5 border border-[rgba(47,51,57,0.2)] text-[#2F3339] rounded-lg hover:bg-[#f5f5f5] transition-colors"
                                     >
                                         Cancelar
-                                    </button>
-                                    <button
-                                        type="button"
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        size="md"
                                         onClick={confirmChangeCliente}
-                                        className="px-4 py-2.5 bg-[#C7664C] text-white rounded-lg hover:bg-[#b85b44] transition-colors"
                                     >
                                         Confirmar y limpiar productos
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         </motion.div>
@@ -1590,11 +1591,11 @@ export function ProductionFormWizard({
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="fixed inset-0 bg-[#122337]/20 backdrop-blur-[2px] z-40 flex items-center justify-center"
+                        className="fixed inset-0 bg-primary/20 backdrop-blur-[2px] z-40 flex items-center justify-center"
                     >
                         <div className="bg-white rounded-lg p-6 shadow-2xl flex items-center gap-3">
-                            <Loader2 className="w-6 h-6 animate-spin text-[#122337]" />
-                            <span className="text-[#2F3339]">
+                            <Loader2 className="w-6 h-6 animate-spin text-foreground" />
+                            <span className="text-secondary-foreground">
                                 Enviando datos al servidor...
                             </span>
                         </div>
@@ -1604,34 +1605,34 @@ export function ProductionFormWizard({
 
             <form onSubmit={handleSubmitClick} className="space-y-6">
                 <div>
-                    <button
-                        type="button"
+                    <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => {
                             window.location.href = "/dashboard";
                         }}
-                        className="inline-flex items-center gap-2 text-sm text-[#2F3339] hover:text-[#122337] transition-colors"
                     >
                         <ChevronLeft className="w-4 h-4" />
                         Volver
-                    </button>
+                    </Button>
                 </div>
 
                 {/* Header */}
-                <div className="bg-[#122337] text-[#F6F5F0] rounded-lg p-6">
+                <div className="bg-primary text-primary-foreground rounded-lg p-6">
                     <h1 className="text-2xl mb-2">
                         Registro de Productos para Producción
                     </h1>
-                    <p className="text-sm text-[#F6F5F0]/80">
+                    <p className="text-sm text-primary-foreground/80">
                         All Star Colombia - Sistema de Gestión de Producción
                     </p>
                 </div>
 
                 {/* Progress Wizard */}
-                <div className="bg-white rounded-lg p-4 shadow-sm border border-[rgba(47,51,57,0.08)]">
+                <div className="bg-white rounded-lg p-4 shadow-sm border border-border">
                     <div className="flex items-center justify-between relative">
-                        <div className="absolute top-5 left-0 right-0 h-0.5 bg-[rgba(47,51,57,0.1)] -z-10">
+                        <div className="absolute top-5 left-0 right-0 h-0.5 bg-border -z-10">
                             <motion.div
-                                className="h-full bg-[#122337]"
+                                className="h-full bg-primary"
                                 initial={{ width: "0%" }}
                                 animate={{
                                     width: `${(currentStep / 2) * 100}%`,
@@ -1654,25 +1655,25 @@ export function ProductionFormWizard({
                     w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all
                     ${
                         currentStep > index
-                            ? "bg-[#122337] border-[#122337]"
+                            ? "bg-primary border-primary"
                             : currentStep === index
-                              ? "bg-white border-[#B69559]"
-                              : "bg-white border-[rgba(47,51,57,0.2)]"
+                              ? "bg-white border-accent"
+                              : "bg-white border-input"
                     }
                   `}
                                 >
                                     {currentStep > index ? (
-                                        <CheckCircle2 className="w-5 h-5 text-[#F6F5F0]" />
+                                        <CheckCircle2 className="w-5 h-5 text-primary-foreground" />
                                     ) : (
                                         <span
-                                            className={`text-sm ${currentStep === index ? "text-[#B69559]" : "text-[#5a5c61]"}`}
+                                            className={`text-sm ${currentStep === index ? "text-accent" : "text-muted-foreground"}`}
                                         >
                                             {step.number}
                                         </span>
                                     )}
                                 </motion.div>
                                 <span
-                                    className={`mt-2 text-xs text-center ${currentStep === index ? "text-[#122337]" : "text-[#5a5c61]"}`}
+                                    className={`mt-2 text-xs text-center ${currentStep === index ? "text-foreground" : "text-muted-foreground"}`}
                                 >
                                     {step.label}
                                 </span>
@@ -1686,11 +1687,11 @@ export function ProductionFormWizard({
                     <motion.div
                         initial={{ opacity: 0, y: -10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-[#C7664C]/10 border border-[#C7664C]/30 rounded-lg p-4 flex items-start gap-3"
+                        className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 flex items-start gap-3"
                     >
-                        <AlertTriangle className="w-5 h-5 text-[#C7664C] flex-shrink-0 mt-0.5" />
+                        <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
                         <div>
-                            <p className="text-sm text-[#C7664C]">
+                            <p className="text-sm text-destructive">
                                 Hay campos marcados para revisión antes de
                                 enviar. Asegúrate de verificar la información.
                             </p>
@@ -1788,14 +1789,14 @@ export function ProductionFormWizard({
                                 </div>
 
                                 {isLoadingClientes && (
-                                    <p className="text-sm text-[#5a5c61] flex items-center gap-2">
-                                        <Loader2 className="w-4 h-4 animate-spin text-[#122337]" />
+                                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                                        <Loader2 className="w-4 h-4 animate-spin text-foreground" />
                                         Cargando lista de clientes...
                                     </p>
                                 )}
 
                                 {!isLoadingClientes && clientesError && (
-                                    <p className="text-sm text-[#C7664C]">
+                                    <p className="text-sm text-destructive">
                                         {clientesError}
                                     </p>
                                 )}
@@ -1827,14 +1828,14 @@ export function ProductionFormWizard({
                                 </div>
 
                                 {isLoadingCliente && (
-                                    <p className="text-sm text-[#5a5c61] flex items-center gap-2">
-                                        <Loader2 className="w-4 h-4 animate-spin text-[#122337]" />
+                                    <p className="text-sm text-muted-foreground flex items-center gap-2">
+                                        <Loader2 className="w-4 h-4 animate-spin text-foreground" />
                                         Cargando información del cliente...
                                     </p>
                                 )}
 
                                 {!isLoadingCliente && clienteInfoError && (
-                                    <p className="text-sm text-[#C7664C]">
+                                    <p className="text-sm text-destructive">
                                         {clienteInfoError}
                                     </p>
                                 )}
@@ -1842,7 +1843,7 @@ export function ProductionFormWizard({
                                 {!isLoadingCliente &&
                                     !clienteInfoError &&
                                     clienteSeleccionado?.ciudad && (
-                                        <p className="text-sm text-[#5a5c61]">
+                                        <p className="text-sm text-muted-foreground">
                                             Ciudad: {clienteSeleccionado.ciudad}
                                         </p>
                                     )}
@@ -1935,14 +1936,14 @@ export function ProductionFormWizard({
                                     </div>
 
                                     {isLoadingProductos && (
-                                        <p className="text-sm text-[#5a5c61] flex items-center gap-2">
-                                            <Loader2 className="w-4 h-4 animate-spin text-[#122337]" />
+                                        <p className="text-sm text-muted-foreground flex items-center gap-2">
+                                            <Loader2 className="w-4 h-4 animate-spin text-foreground" />
                                             Cargando lista de productos...
                                         </p>
                                     )}
 
                                     {!isLoadingProductos && productosError && (
-                                        <p className="text-sm text-[#C7664C]">
+                                        <p className="text-sm text-destructive">
                                             {productosError}
                                         </p>
                                     )}
@@ -1964,16 +1965,17 @@ export function ProductionFormWizard({
                                         />
 
                                         <div className="flex items-end">
-                                            <button
-                                                type="button"
+                                            <Button
+                                                variant="accent"
+                                                size="md"
                                                 onClick={
                                                     agregarProductoExistente
                                                 }
-                                                className="w-full px-4 py-2.5 bg-[#B69559] text-white rounded-lg hover:bg-[#a08549] transition-colors flex items-center justify-center gap-2"
+                                                className="w-full"
                                             >
                                                 <Plus className="w-5 h-5" />
                                                 Agregar Producto
-                                            </button>
+                                            </Button>
                                         </div>
                                     </div>
                                 </FormSection>
@@ -2082,14 +2084,15 @@ export function ProductionFormWizard({
                                         />
 
                                         <div className="flex items-end">
-                                            <button
-                                                type="button"
+                                            <Button
+                                                variant="accent"
+                                                size="md"
                                                 onClick={agregarProductoNuevo}
-                                                className="w-full px-4 py-2.5 bg-[#B69559] text-white rounded-lg hover:bg-[#a08549] transition-colors flex items-center justify-center gap-2"
+                                                className="w-full"
                                             >
                                                 <Plus className="w-5 h-5" />
                                                 Agregar Producto Nuevo
-                                            </button>
+                                            </Button>
                                         </div>
                                     </div>
                                 </FormSection>
@@ -2137,36 +2140,36 @@ export function ProductionFormWizard({
                                 <div className="space-y-4">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
-                                            <p className="text-xs text-[#5a5c61]">
+                                            <p className="text-xs text-muted-foreground">
                                                 Fecha
                                             </p>
-                                            <p className="text-sm text-[#2F3339]">
+                                            <p className="text-sm text-secondary-foreground">
                                                 {new Date(
                                                     fecha,
                                                 ).toLocaleDateString("es-CO")}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-xs text-[#5a5c61]">
+                                            <p className="text-xs text-muted-foreground">
                                                 Orden de Compra
                                             </p>
-                                            <p className="text-sm text-[#2F3339]">
+                                            <p className="text-sm text-secondary-foreground">
                                                 {ocInterno}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-xs text-[#5a5c61]">
+                                            <p className="text-xs text-muted-foreground">
                                                 OC Cliente
                                             </p>
-                                            <p className="text-sm text-[#2F3339]">
+                                            <p className="text-sm text-secondary-foreground">
                                                 {ocCliente}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-xs text-[#5a5c61]">
+                                            <p className="text-xs text-muted-foreground">
                                                 Cliente
                                             </p>
-                                            <p className="text-sm text-[#2F3339]">
+                                            <p className="text-sm text-secondary-foreground">
                                                 {clienteSeleccionado?.nombre ||
                                                     clienteId ||
                                                     "-"}
@@ -2174,8 +2177,8 @@ export function ProductionFormWizard({
                                         </div>
                                     </div>
 
-                                    <div className="border-t border-[rgba(47,51,57,0.1)] pt-4">
-                                        <p className="text-xs text-[#5a5c61] mb-2">
+                                    <div className="border-t border-border pt-4">
+                                        <p className="text-xs text-muted-foreground mb-2">
                                             Productos ({products.length})
                                         </p>
                                         <ProductTable
@@ -2190,82 +2193,87 @@ export function ProductionFormWizard({
                 </AnimatePresence>
 
                 {/* Navigation Buttons */}
-                <div className="flex gap-4 justify-between sticky bottom-4 bg-[#F6F5F0] p-4 rounded-lg border border-[rgba(47,51,57,0.1)] shadow-lg">
+                <div className="flex gap-4 justify-between sticky bottom-4 bg-background p-4 rounded-lg border border-border shadow-lg">
                     <div className="flex gap-3">
                         {currentStep > 0 && (
-                            <button
-                                type="button"
+                            <Button
+                                variant="outline"
+                                size="md"
                                 onClick={prevStep}
-                                className="px-6 py-2.5 border-2 border-[#2F3339] text-[#2F3339] rounded-lg hover:bg-[#2F3339] hover:text-white transition-colors flex items-center gap-2"
+                                className="rounded-lg border-2"
                             >
                                 <ChevronLeft className="w-5 h-5" />
                                 Anterior
-                            </button>
+                            </Button>
                         )}
 
-                        <button
-                            type="button"
+                        <Button
+                            variant="ghost"
+                            size="md"
                             onClick={onCancel}
-                            className="px-6 py-2.5 text-[#5a5c61] hover:text-[#2F3339] transition-colors"
                             disabled={submitStatus === "loading"}
                         >
                             Cancelar
-                        </button>
+                        </Button>
                     </div>
 
                     {currentStep < 2 ? (
-                        <button
-                            type="button"
+                        <Button
+                            variant="default"
+                            size="md"
                             onClick={nextStep}
-                            className="px-6 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-colors flex items-center gap-2"
                         >
                             Siguiente
                             <ChevronRight className="w-5 h-5" />
-                        </button>
+                        </Button>
                     ) : (
                         <>
                             {submitStatus === "idle" && (
-                                <button
+                                <Button
                                     type="submit"
+                                    variant="primary"
+                                    size="lg"
                                     disabled={products.length === 0}
-                                    className="px-6 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[220px] justify-center"
+                                    className="min-w-[220px] justify-center"
                                 >
                                     <Send className="w-5 h-5" />
                                     Enviar a Producción
-                                </button>
+                                </Button>
                             )}
 
                             {submitStatus === "loading" && (
-                                <button
-                                    type="button"
-                                    disabled
-                                    className="px-6 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg flex items-center gap-2 min-w-[220px] justify-center opacity-75 cursor-not-allowed"
+                                <Button
+                                    variant="primary"
+                                    size="lg"
+                                    loading
+                                    className="min-w-[220px] justify-center"
                                 >
-                                    <Loader2 className="w-5 h-5 animate-spin" />
                                     Enviando...
-                                </button>
+                                </Button>
                             )}
 
                             {submitStatus === "success" && (
-                                <button
-                                    type="button"
+                                <Button
+                                    variant="default"
+                                    size="lg"
                                     disabled
-                                    className="px-6 py-2.5 bg-[#10b981] text-white rounded-lg flex items-center gap-2 min-w-[220px] justify-center cursor-not-allowed"
+                                    className="min-w-[220px] justify-center bg-success text-white cursor-not-allowed"
                                 >
                                     <CheckCircle2 className="w-5 h-5" />
                                     Pedido Enviado
-                                </button>
+                                </Button>
                             )}
 
                             {submitStatus === "error" && (
-                                <button
-                                    type="button"
+                                <Button
+                                    variant="outline"
+                                    size="lg"
                                     onClick={handleRetry}
-                                    className="px-6 py-2.5 bg-white text-[#d4183d] border-2 border-[#d4183d] rounded-lg hover:bg-[#d4183d] hover:text-white transition-colors flex items-center gap-2 min-w-[220px] justify-center"
+                                    className="min-w-[220px] justify-center text-destructive border-destructive hover:bg-destructive hover:text-white"
                                 >
                                     <RefreshCw className="w-5 h-5" />
                                     Reintentar
-                                </button>
+                                </Button>
                             )}
                         </>
                     )}

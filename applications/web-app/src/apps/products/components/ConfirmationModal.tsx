@@ -1,5 +1,12 @@
 import { motion, AnimatePresence } from "motion/react";
 import { AlertTriangle, X } from "lucide-react";
+import { Button } from "@/shared/ui/button";
+
+const MODAL_TRANSITION = {
+    type: "spring" as const,
+    stiffness: 300,
+    damping: 30,
+};
 
 interface ConfirmationModalProps {
     isOpen: boolean;
@@ -24,7 +31,7 @@ export function ConfirmationModal({
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
                         onClick={onClose}
-                        className="fixed inset-0 bg-[#122337]/60 backdrop-blur-sm z-50"
+                        className="fixed inset-0 bg-primary/60 backdrop-blur-sm z-50"
                     />
 
                     {/* Modal */}
@@ -33,36 +40,34 @@ export function ConfirmationModal({
                             initial={{ opacity: 0, scale: 0.95, y: 20 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                            transition={{
-                                type: "spring",
-                                stiffness: 300,
-                                damping: 30,
-                            }}
+                            transition={MODAL_TRANSITION}
                             className="bg-white rounded-lg shadow-2xl max-w-md w-full overflow-hidden"
                         >
                             {/* Header */}
-                            <div className="bg-[#122337] text-[#F6F5F0] px-6 py-4 flex items-center justify-between">
+                            <div className="bg-primary text-primary-foreground px-6 py-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <AlertTriangle className="w-6 h-6 text-[#B69559]" />
+                                    <AlertTriangle className="w-6 h-6 text-accent" />
                                     <h3 className="text-lg">
                                         Confirmar envío a producción
                                     </h3>
                                 </div>
-                                <button
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
                                     onClick={onClose}
-                                    className="text-[#F6F5F0]/70 hover:text-[#F6F5F0] transition-colors"
                                     disabled={isLoading}
+                                    className="text-primary-foreground/70 hover:text-primary-foreground"
                                 >
                                     <X className="w-5 h-5" />
-                                </button>
+                                </Button>
                             </div>
 
                             {/* Content */}
                             <div className="p-6">
-                                <p className="text-[#2F3339] leading-relaxed">
+                                <p className="text-secondary-foreground leading-relaxed">
                                     ¿Estás seguro de enviar este pedido a
                                     producción? Esta acción generará una{" "}
-                                    <span className="font-medium text-[#122337]">
+                                    <span className="font-medium text-foreground">
                                         Orden de Producción (OP)
                                     </span>
                                     .
@@ -70,23 +75,27 @@ export function ConfirmationModal({
                             </div>
 
                             {/* Footer */}
-                            <div className="bg-[#F6F5F0] px-6 py-4 flex gap-3 justify-end">
-                                <button
+                            <div className="bg-primary-foreground px-6 py-4 flex gap-3 justify-end">
+                                <Button
+                                    variant="outline"
+                                    size="md"
                                     onClick={onClose}
                                     disabled={isLoading}
-                                    className="px-5 py-2.5 border-2 border-[#2F3339] text-[#2F3339] rounded-lg hover:bg-[#2F3339] hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="rounded-lg border-2"
                                 >
                                     Cancelar
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                    variant="default"
+                                    size="md"
                                     onClick={onConfirm}
                                     disabled={isLoading}
-                                    className="px-5 py-2.5 bg-[#122337] text-[#F6F5F0] rounded-lg hover:bg-[#1a3352] transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-[140px]"
+                                    className="min-w-[140px]"
                                 >
                                     {isLoading
                                         ? "Procesando..."
                                         : "Confirmar Envío"}
-                                </button>
+                                </Button>
                             </div>
                         </motion.div>
                     </div>

@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InputField } from "./InputField";
-import { HelpCenterModal } from "./HelpCenterModal";
+import { GenericInfoModal } from "@/shared/components/GenericInfoModal";
 import { motion } from "motion/react";
 import { API_SERVER } from "../../../config/api";
 import LogoStar from "../../../assets/Logo_Star.svg";
@@ -139,7 +139,7 @@ export const LoginCard: React.FC = () => {
             }}
             className="w-full"
         >
-            <div className="w-full bg-card-light backdrop-blur-sm rounded-md shadow-premiun p-10 pb-4 border-0 animate-fade-in-up">
+            <div className="w-full bg-card backdrop-blur-sm rounded-md shadow-premium p-10 pb-4 border-0 animate-fade-in-up">
                 <div className="flex flex-col items-center justify-center text-center">
                     <div className="w-full flex justify-between items-center text-[10px] font-bold tracking-tight text-slate-400 uppercase">
                         <div className=" flex items-center gap-1.5 text-emerald-500">
@@ -156,7 +156,7 @@ export const LoginCard: React.FC = () => {
                         />
                     </div>
 
-                    <h1 className="text-2xl font-bold text-text-main">
+                    <h1 className="text-2xl font-bold text-foreground">
                         {" "}
                         All star
                     </h1>
@@ -199,7 +199,7 @@ export const LoginCard: React.FC = () => {
                                 onChange={(e) =>
                                     setRememberMe(e.target.checked)
                                 }
-                                className="h-4 w-4 text-primery bg-slate-100 border-slate-300 focus:ring-primary focus:ring-2 transition-all cursor-pointer"
+                                className="h-4 w-4 text-brand bg-slate-100 border-slate-300 focus:ring-2 focus:ring-ring transition-all cursor-pointer"
                             />
                             <span className="text-slate-500 group-hover:text-slate-800 transtion-colors select-none cursor-pointer">
                                 Recordar sesión
@@ -208,14 +208,14 @@ export const LoginCard: React.FC = () => {
 
                         <a
                             href="/404"
-                            className="text-primary hover:text-primary-hover font-semibold transition-colors focus:outline-none focus:underline cursor-pointer"
+                            className="text-brand hover:text-brand-hover font-semibold transition-colors focus:outline-none focus:underline cursor-pointer"
                         >
                             ¿Olvidaste tu contraseña?
                         </a>
                     </div>
 
                     {error && (
-                        <div className="text-sm text-bold-text text-red-600 bg-red-50 border border-red-200 rounded rounded-md px-4 py-2">
+                        <div className="text-sm text-foreground text-red-600 bg-red-50 border border-red-200 rounded-md px-4 py-2">
                             {error}
                         </div>
                     )}
@@ -223,7 +223,7 @@ export const LoginCard: React.FC = () => {
                     <button
                         type="submit"
                         disabled={isLoading}
-                        className={`w-full bg-primary hover:bg-primary-hover text-white font-semibold py-3.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 group mt-2 ${isLoading ? "opacity-80 cursor-wait " : ""}`}
+                        className={`w-full bg-brand hover:bg-primary text-brand-foreground font-semibold py-3.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 group mt-2 ${isLoading ? "opacity-80 cursor-wait " : ""}`}
                     >
                         {isLoading ? (
                             <span className="inline-block w-5 h-5 border-2 border-white-30 border-t-white rounded-full animate-spin"></span>
@@ -255,10 +255,11 @@ export const LoginCard: React.FC = () => {
                 </div>
             </div>
 
-            <HelpCenterModal
+            <GenericInfoModal
                 isOpen={isHelpCenterOpen}
                 onClose={() => setIsHelpCenterOpen(false)}
-                returnFocusRef={helpCenterButtonRef}
+                message="El equipo de IT ha sido notificado."
+                title={"Help Center"}
             />
         </motion.div>
     );

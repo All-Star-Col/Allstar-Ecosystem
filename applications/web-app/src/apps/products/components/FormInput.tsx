@@ -28,11 +28,11 @@ export const FormInput = React.forwardRef<HTMLInputElement, FormInputProps>(
 
         return (
             <div className="space-y-1.5">
-                <label className="block text-sm text-[#2F3339] flex items-center gap-2">
+                <label className="block text-sm text-secondary-foreground flex items-center gap-2">
                     <span>
                         {label}
                         {required && (
-                            <span className="text-[#C7664C] ml-1">*</span>
+                            <span className="text-destructive ml-1">*</span>
                         )}
                     </span>
                     {aiStatus && (
@@ -49,36 +49,36 @@ export const FormInput = React.forwardRef<HTMLInputElement, FormInputProps>(
                         className={`
             w-full px-4 py-2.5 rounded-lg border bg-white
             transition-all duration-200
-            placeholder:text-[#9ca3af]
+            placeholder:text-placeholder
             focus:outline-none focus:ring-2 focus:ring-offset-1
-            disabled:bg-[#f3f4f6] disabled:cursor-not-allowed
+            disabled:bg-muted disabled:cursor-not-allowed
             ${
                 hasError
-                    ? "border-[#d4183d] focus:ring-[#d4183d]/20"
+                    ? "border-destructive focus:ring-destructive/20"
                     : aiStatus?.requiereRevision
-                      ? "border-[#C7664C] focus:ring-[#C7664C]/20"
+                      ? "border-destructive focus:ring-destructive/20"
                       : valid
-                        ? "border-[#10b981] focus:ring-[#10b981]/20"
-                        : "border-[rgba(47,51,57,0.15)] focus:ring-[#B69559]/20"
+                        ? "border-success focus:ring-success/20"
+                        : "border-input focus:ring-ring/20"
             }
             ${className}
           `}
                         {...props}
                     />
                     {hasError && (
-                        <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#d4183d]" />
+                        <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-destructive" />
                     )}
                     {valid && !hasError && !aiStatus?.requiereRevision && (
-                        <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#10b981]" />
+                        <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-success" />
                     )}
                 </div>
                 {hasError && (
-                    <p className="text-xs text-[#d4183d] flex items-center gap-1">
+                    <p className="text-xs text-destructive flex items-center gap-1">
                         {error}
                     </p>
                 )}
                 {aiStatus?.requiereRevision && !hasError && (
-                    <p className="text-xs text-[#C7664C]">
+                    <p className="text-xs text-destructive">
                         Este campo requiere revisión antes de enviar
                     </p>
                 )}

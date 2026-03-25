@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Search,
-    Database,
     Filter,
     AlertTriangle,
     ChevronLeft,
@@ -77,7 +76,9 @@ function getInitialTableId(
     return tables[0]?.table_id ?? "";
 }
 
-function getDefaultVisibleColumns(table: DataViewerTable | undefined): Set<string> {
+function getDefaultVisibleColumns(
+    table: DataViewerTable | undefined,
+): Set<string> {
     if (!table) {
         return new Set();
     }
@@ -86,9 +87,10 @@ function getDefaultVisibleColumns(table: DataViewerTable | undefined): Set<strin
         .filter((column) => column.visible)
         .map((column) => column.name);
 
-    const fallback = explicitVisible.length > 0
-        ? explicitVisible
-        : table.columns.map((column) => column.name);
+    const fallback =
+        explicitVisible.length > 0
+            ? explicitVisible
+            : table.columns.map((column) => column.name);
 
     return new Set(fallback);
 }
@@ -251,7 +253,9 @@ export function DataViewerProModule({
 }: DataViewerModuleProps) {
     const [tables, setTables] = useState<DataViewerTable[]>([]);
     const [activeTableId, setActiveTableId] = useState("");
-    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set());
+    const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
+        new Set(),
+    );
 
     const [globalFilterInput, setGlobalFilterInput] = useState("");
     const [globalFilter, setGlobalFilter] = useState("");
@@ -279,9 +283,8 @@ export function DataViewerProModule({
     const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
     const [selectedRow, setSelectedRow] = useState<DataViewerRow | null>(null);
     const [isSavingRow, setIsSavingRow] = useState(false);
-    const [pendingRetryDraftValues, setPendingRetryDraftValues] = useState<
-        Record<string, unknown> | null
-    >(null);
+    const [pendingRetryDraftValues, setPendingRetryDraftValues] =
+        useState<Record<string, unknown> | null>(null);
 
     const [tablesReloadCounter, setTablesReloadCounter] = useState(0);
     const [refreshCounter, setRefreshCounter] = useState(0);
@@ -334,7 +337,8 @@ export function DataViewerProModule({
         const baseColumns = getQueryColumnKeys(activeTable, visibleColumnKeys);
         const sortColumn = sort?.column;
         const defaultOrderColumn =
-            activeTable?.default_order_column ?? activeTable?.stable_order_column;
+            activeTable?.default_order_column ??
+            activeTable?.stable_order_column;
 
         const mergedColumns = [
             ...baseColumns,
@@ -385,7 +389,8 @@ export function DataViewerProModule({
         setFilters([]);
         setSort(() => {
             const defaultSortColumn =
-                activeTable.default_order_column ?? activeTable.stable_order_column;
+                activeTable.default_order_column ??
+                activeTable.stable_order_column;
             if (!defaultSortColumn) {
                 return null;
             }
@@ -423,7 +428,12 @@ export function DataViewerProModule({
 
                 setTables(tableResponse);
                 setActiveTableId((current) => {
-                    if (current && tableResponse.some((table) => table.table_id === current)) {
+                    if (
+                        current &&
+                        tableResponse.some(
+                            (table) => table.table_id === current,
+                        )
+                    ) {
                         return current;
                     }
 
@@ -631,7 +641,9 @@ export function DataViewerProModule({
 
         const rowEditState = canEditRow(activeTable, selectedRow);
         if (!rowEditState.allowed || !rowEditState.pk) {
-            const reason = rowEditState.reason ?? "No se pudo validar la fila para actualizar.";
+            const reason =
+                rowEditState.reason ??
+                "No se pudo validar la fila para actualizar.";
             setRowSaveError({
                 detail: reason,
             });
@@ -726,7 +738,9 @@ export function DataViewerProModule({
                 .map((entry) => parseScalarValue(entry, selectedColumn.type));
 
             if (values.length === 0) {
-                toast.error("Para IN debes ingresar uno o mas valores separados por coma");
+                toast.error(
+                    "Para IN debes ingresar uno o mas valores separados por coma",
+                );
                 return;
             }
 
@@ -737,13 +751,19 @@ export function DataViewerProModule({
                 return;
             }
 
-            nextFilter.value = parseScalarValue(draftFilter.value, selectedColumn.type);
+            nextFilter.value = parseScalarValue(
+                draftFilter.value,
+                selectedColumn.type,
+            );
             nextFilter.value_to = parseScalarValue(
                 draftFilter.valueTo,
                 selectedColumn.type,
             );
         } else {
-            nextFilter.value = parseScalarValue(draftFilter.value, selectedColumn.type);
+            nextFilter.value = parseScalarValue(
+                draftFilter.value,
+                selectedColumn.type,
+            );
         }
 
         setFilters((previous) => [...previous, nextFilter]);
@@ -806,7 +826,7 @@ export function DataViewerProModule({
 
     return (
         <div
-            className={`data-viewer-pro-module flex h-full min-h-[600px] overflow-hidden bg-[#f6f5f0] ${className ?? ""}`}
+            className={`data-viewer-pro-module flex h-full min-h-[600px] overflow-hidden bg-background ${className ?? ""}`}
             style={style}
         >
             <Toaster position="top-right" richColors />
@@ -830,28 +850,30 @@ export function DataViewerProModule({
             />
 
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-                <div className="bg-white border-b border-gray-200 px-8 py-6">
+                <div className="bg-card border-b border-border px-8 py-6">
                     <div className="flex items-center justify-between mb-4 gap-6">
-                        <div>
+                        <div className="flex items-center gap-4">
                             <div className="flex items-center gap-3">
-                                <Database className="w-6 h-6 text-[#122337]" />
-                                <h1 className="text-2xl font-semibold text-gray-900">
-                                    {activeTable?.display_name ?? "No hay tablas disponibles"}
+                                <h1 className="text-2xl font-semibold text-foreground">
+                                    {activeTable?.display_name ??
+                                        "No hay tablas disponibles"}
                                 </h1>
                             </div>
 
                             <div className="flex items-center gap-3 mt-1">
-                                <p className="text-sm text-gray-500">{technicalStatusText}</p>
                                 {activeTable && (
                                     <div
                                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 border rounded-full ${
                                             tableEditDisabledReason
-                                                ? "bg-amber-50 border-amber-200 text-amber-700"
-                                                : "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                                ? "bg-warning/10 border-warning/30 text-warning-foreground"
+                                                : "bg-success/85 border-success/30 text-success-foreground"
                                         }`}
-                                        title={tableEditDisabledReason ?? "Tabla editable"}
+                                        title={
+                                            tableEditDisabledReason ??
+                                            "Tabla editable"
+                                        }
                                     >
-                                        <span className="text-xs font-medium">
+                                        <span className="text-xs font-medium ">
                                             {tableEditDisabledReason
                                                 ? "Edicion bloqueada"
                                                 : "Edicion habilitada"}
@@ -859,13 +881,17 @@ export function DataViewerProModule({
                                     </div>
                                 )}
                                 {(globalFilter || filters.length > 0) && (
-                                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#b69559]/10 border border-[#b69559]/30 rounded-full">
-                                        <Filter className="w-3.5 h-3.5 text-[#b69559]" />
-                                        <span className="text-xs font-medium text-[#b69559]">
-                                            {filters.length} filtros · q: {globalFilter || "-"}
+                                    <div className="flex items-center gap-1.5 px-2.5 py-1 bg-accent/10 border border-accent/30 rounded-full">
+                                        <Filter className="w-3.5 h-3.5 text-accent" />
+                                        <span className="text-xs font-medium text-accent">
+                                            {filters.length} filtros · q:{" "}
+                                            {globalFilter || "-"}
                                         </span>
                                     </div>
                                 )}
+                                <p className="text-sm text-muted-foreground">
+                                    {technicalStatusText}
+                                </p>
                             </div>
                         </div>
 
@@ -877,19 +903,23 @@ export function DataViewerProModule({
                             onToggleColumn={handleToggleColumn}
                             includeTotal={includeTotal}
                             onIncludeTotalChange={setIncludeTotal}
-                            disabled={!activeTable || isTablesLoading || isExporting}
+                            disabled={
+                                !activeTable || isTablesLoading || isExporting
+                            }
                         />
                     </div>
 
                     <div className="flex gap-4 flex-wrap items-end">
                         <div className="relative max-w-md w-full">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                             <input
                                 type="text"
                                 placeholder="Buscar en todos los campos..."
                                 value={globalFilterInput}
-                                onChange={(event) => setGlobalFilterInput(event.target.value)}
-                                className="w-full bg-gray-50 border border-gray-200 rounded-lg pl-11 pr-4 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#122337] focus:border-transparent"
+                                onChange={(event) =>
+                                    setGlobalFilterInput(event.target.value)
+                                }
+                                className="w-full bg-muted border border-border rounded-lg pl-11 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
                             />
                         </div>
 
@@ -902,11 +932,14 @@ export function DataViewerProModule({
                                         column: event.target.value,
                                     }))
                                 }
-                                className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
+                                className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
                                 disabled={!activeTable}
                             >
                                 {(activeTable?.columns ?? []).map((column) => (
-                                    <option key={column.name} value={column.name}>
+                                    <option
+                                        key={column.name}
+                                        value={column.name}
+                                    >
                                         {humanizeColumnName(column.name)}
                                     </option>
                                 ))}
@@ -921,7 +954,7 @@ export function DataViewerProModule({
                                             .value as DataViewerFilterOperator,
                                     }))
                                 }
-                                className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
+                                className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
                                 disabled={!activeTable}
                             >
                                 <option value="eq">eq</option>
@@ -945,7 +978,7 @@ export function DataViewerProModule({
                                         ? "valor1,valor2"
                                         : "Valor"
                                 }
-                                className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
+                                className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
                                 disabled={!activeTable}
                             />
 
@@ -959,7 +992,7 @@ export function DataViewerProModule({
                                         }))
                                     }
                                     placeholder="Valor final"
-                                    className="bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-sm"
+                                    className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
                                     disabled={!activeTable}
                                 />
                             )}
@@ -967,7 +1000,7 @@ export function DataViewerProModule({
                             <button
                                 onClick={handleAddFilter}
                                 disabled={!activeTable}
-                                className="px-3 py-2.5 rounded-lg text-sm bg-[#122337] text-white hover:bg-[#1a3351] disabled:opacity-60 disabled:cursor-not-allowed"
+                                className="px-3 py-2.5 rounded-lg text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 Agregar filtro
                             </button>
@@ -979,7 +1012,7 @@ export function DataViewerProModule({
                             {filters.map((filter, index) => (
                                 <span
                                     key={`${filter.column}-${filter.operator}-${index}`}
-                                    className="inline-flex items-center gap-2 rounded-full bg-[#122337]/10 border border-[#122337]/20 px-3 py-1 text-xs text-[#122337]"
+                                    className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs text-primary"
                                 >
                                     {getFilterSummary(filter)}
                                     <button
@@ -987,11 +1020,12 @@ export function DataViewerProModule({
                                             setFilters((previous) =>
                                                 previous.filter(
                                                     (_, candidateIndex) =>
-                                                        candidateIndex !== index,
+                                                        candidateIndex !==
+                                                        index,
                                                 ),
                                             )
                                         }
-                                        className="text-[#122337] hover:text-red-600"
+                                        className="text-primary hover:text-destructive"
                                     >
                                         <X className="w-3.5 h-3.5" />
                                     </button>
@@ -1005,17 +1039,19 @@ export function DataViewerProModule({
                     {isTablesLoading || (isQueryLoading && !hasRows) ? (
                         <LoadingSkeleton />
                     ) : uiError ? (
-                        <div className="flex-1 bg-white rounded-lg border border-red-200 p-6 flex items-center justify-center">
+                        <div className="flex-1 bg-card rounded-lg border border-destructive/30 p-6 flex items-center justify-center">
                             <div className="max-w-xl text-center space-y-3">
-                                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-red-50 text-red-600">
+                                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-destructive/10 text-destructive">
                                     <AlertTriangle className="w-5 h-5" />
                                 </div>
-                                <h3 className="text-lg font-semibold text-gray-900">
+                                <h3 className="text-lg font-semibold text-foreground">
                                     Error consultando Data Viewer
                                 </h3>
-                                <p className="text-sm text-gray-600">{uiError.detail}</p>
+                                <p className="text-sm text-muted-foreground">
+                                    {uiError.detail}
+                                </p>
                                 {uiError.requestId && (
-                                    <p className="text-xs text-gray-500">
+                                    <p className="text-xs text-muted-foreground">
                                         request_id: {uiError.requestId}
                                     </p>
                                 )}
@@ -1023,7 +1059,7 @@ export function DataViewerProModule({
                                     <button
                                         type="button"
                                         onClick={handleRetryView}
-                                        className="inline-flex items-center rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                                        className="inline-flex items-center rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
                                     >
                                         Reintentar
                                     </button>
@@ -1035,12 +1071,17 @@ export function DataViewerProModule({
                             <div className="flex-1 min-h-0">
                                 <DataGrid
                                     rows={queryResult.rows}
-                                    tableLabel={activeTable?.display_name ?? activeTableId}
+                                    tableLabel={
+                                        activeTable?.display_name ??
+                                        activeTableId
+                                    }
                                     visibleColumnKeys={visibleColumnKeys}
                                     sort={sort}
                                     onSortChange={setSort}
                                     onEditRow={
-                                        tableEditDisabledReason ? undefined : handleEditRow
+                                        tableEditDisabledReason
+                                            ? undefined
+                                            : handleEditRow
                                     }
                                     getRowEditState={
                                         tableEditDisabledReason
@@ -1050,20 +1091,25 @@ export function DataViewerProModule({
                                 />
                             </div>
 
-                            <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-                                <div className="text-sm text-gray-600">
+                            <div className="bg-card border border-border rounded-lg px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                                <div className="text-sm text-muted-foreground">
                                     Mostrando {rangeStart}-{rangeEnd}
-                                    {includeTotal && queryResult.total_count !== null
+                                    {includeTotal &&
+                                    queryResult.total_count !== null
                                         ? ` de ${queryResult.total_count.toLocaleString("es-CO")}`
                                         : ""}
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                    <label className="text-sm text-gray-600">Filas por pagina</label>
+                                    <label className="text-sm text-muted-foreground">
+                                        Filas por pagina
+                                    </label>
                                     <select
                                         value={limit}
-                                        onChange={(event) => setLimit(Number(event.target.value))}
-                                        className="border border-gray-200 rounded-md px-2 py-1 text-sm"
+                                        onChange={(event) =>
+                                            setLimit(Number(event.target.value))
+                                        }
+                                        className="border border-border rounded-md px-2 py-1 text-sm"
                                     >
                                         {PAGE_SIZE_OPTIONS.map((option) => (
                                             <option key={option} value={option}>
@@ -1079,16 +1125,20 @@ export function DataViewerProModule({
                                             )
                                         }
                                         disabled={!canGoPrev || isQueryLoading}
-                                        className="inline-flex items-center gap-1 border border-gray-200 rounded-md px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="inline-flex items-center gap-1 border border-border rounded-md px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <ChevronLeft className="w-4 h-4" />
                                         Anterior
                                     </button>
 
                                     <button
-                                        onClick={() => setOffset((previous) => previous + limit)}
+                                        onClick={() =>
+                                            setOffset(
+                                                (previous) => previous + limit,
+                                            )
+                                        }
                                         disabled={!canGoNext || isQueryLoading}
-                                        className="inline-flex items-center gap-1 border border-gray-200 rounded-md px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="inline-flex items-center gap-1 border border-border rounded-md px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         Siguiente
                                         <ChevronRight className="w-4 h-4" />

@@ -9,7 +9,8 @@
         "test": "vitest run",
         "check:forms-category-contract": "node -e \"const fs=require('fs');const root='src/apps/forms';const re=/\\bcategory\\??\\.name\\b/;const bad=[];const walk=(dir)=>{for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const file=dir+'/'+ent.name;if(ent.isDirectory())walk(file);else if(/\\.(ts|tsx)$/.test(ent.name)){const lines=fs.readFileSync(file,'utf8').split(/\\r?\\n/);lines.forEach((line,i)=>{if(re.test(line)) bad.push(file+':'+(i+1)+':'+line.trim());});}}};walk(root);if(bad.length){console.error(bad.join('\\n'));process.exit(1);}\"",
         "lint": "npm run check:forms-category-contract && eslint .",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "analyze": "ANALYZE=true npm run build"
     },
     "dependencies": {
         "@radix-ui/react-accordion": "^1.2.12",
@@ -74,6 +75,7 @@
         "globals": "^16.5.0",
         "jsdom": "^29.0.0",
         "postcss": "^8.5.6",
+        "rollup-plugin-visualizer": "^7.0.1",
         "tailwindcss": "^4.1.18",
         "typescript": "~5.9.3",
         "typescript-eslint": "^8.46.4",

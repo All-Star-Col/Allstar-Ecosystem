@@ -1,7 +1,6 @@
 import type { TableSchema } from "../schema";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/shared/ui/card";
-import { Database } from "lucide-react";
 
 interface TableCardProps {
     table: TableSchema;
@@ -11,18 +10,23 @@ interface TableCardProps {
 export function TableCard({ table, onClick }: TableCardProps) {
     return (
         <Card
-            className="cursor-pointer transition-all hover:shadow-lg hover:border-accent group"
+            className="cursor-pointer transition-all bg-card/90 hover:bg-primary/5 hover:border-primary/40 hover:shadow-sm group border border-border/80"
             onClick={onClick}
         >
             <CardHeader className="py-4">
-                <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <Database className="h-5 w-5 text-accent flex-shrink-0" />
-                        <CardTitle className="text-lg truncate leading-none">
-                            {table.displayName}
-                        </CardTitle>
+                <div className="flex flex-wrap items-start gap-2">
+                    <div className="flex min-w-0 flex-1 items-start gap-3 pr-1">
+                        <div className="min-w-0 space-y-1">
+                            <CardTitle className="text-base font-semibold leading-snug text-foreground break-words">
+                                {table.displayName}
+                            </CardTitle>
+
+                        </div>
                     </div>
-                    <Badge variant="secondary" className="flex-shrink-0">
+                    <Badge
+                        variant="secondary"
+                        className="ml-auto shrink-0 whitespace-nowrap bg-info/15 text-info border border-info/30"
+                    >
                         {table.columns.length} campos
                     </Badge>
                 </div>

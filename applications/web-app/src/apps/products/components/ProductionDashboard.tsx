@@ -91,8 +91,6 @@ export function ProductionDashboard() {
                     },
                 );
 
-                console.log(response)
-
                 if (!response.ok) {
                     let payload: ApiErrorPayload | null = null;
                     let rawBody = "";
@@ -252,7 +250,7 @@ export function ProductionDashboard() {
     };
 
     return (
-        <div className="h-screen flex bg-[#F6F5F0]">
+        <div className="h-screen flex bg-background">
             <div className="w-96 flex-shrink-0">
                 <EmailList
                     emails={emails}
@@ -274,9 +272,9 @@ export function ProductionDashboard() {
                 ) : (
                     <div className="h-full flex items-center justify-center">
                         <div className="text-center">
-                            <div className="w-32 h-32 mx-auto mb-6 bg-[#122337]/5 rounded-full flex items-center justify-center">
+                            <div className="w-32 h-32 mx-auto mb-6 bg-primary/5 rounded-full flex items-center justify-center">
                                 <svg
-                                    className="w-16 h-16 text-[#5a5c61]"
+                                    className="w-16 h-16 text-muted-foreground"
                                     fill="none"
                                     stroke="currentColor"
                                     viewBox="0 0 24 24"
@@ -289,10 +287,10 @@ export function ProductionDashboard() {
                                     />
                                 </svg>
                             </div>
-                            <h3 className="text-xl text-[#122337] mb-2">
+                            <h3 className="text-xl text-foreground mb-2">
                                 Selecciona un correo
                             </h3>
-                            <p className="text-sm text-[#5a5c61] max-w-sm mx-auto">
+                            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
                                 Selecciona un correo de la lista para procesar
                                 el pedido con IA y crear una orden de
                                 produccion.

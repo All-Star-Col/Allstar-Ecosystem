@@ -11,9 +11,17 @@ import type { TableSchema } from "../schema";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 
+const ALL_CATEGORY_ID = "__all__";
+
 export default function TableSelection() {
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState("");
+    const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
+        ALL_CATEGORY_ID,
+    );
+    const [openCategories, setOpenCategories] = useState<Record<string, boolean>>(
+        {},
+    );
 
     const { categories, tables, loading, error } = useTables();
 
@@ -29,37 +37,147 @@ export default function TableSelection() {
         );
     }, [searchQuery, tables]);
 
+    const categoryBuckets = useMemo(() => {
+        return categories
+            .map((category) => ({
+                category,
+                tables: filteredTables.filter(
+                    (table) => table.category === category.id,
+                ),
+            }))
+            .sort((a, b) => {
+                if (b.tables.length !== a.tables.length) {
+                    return b.tables.length - a.tables.length;
+                }
+
+                return a.category.nombre.localeCompare(b.category.nombre);
+            })
+            .filter((bucket) => bucket.tables.length > 0);
+    }, [categories, filteredTables]);
+
+    const hasSelectedCategory = useMemo(
+        () =>
+            selectedCategoryId === ALL_CATEGORY_ID ||
+            categoryBuckets.some(
+                (bucket) => bucket.category.id === selectedCategoryId,
+            ),
+        [categoryBuckets, selectedCategoryId],
+    );
+
+    const resolvedCategoryId = hasSelectedCategory
+        ? selectedCategoryId
+        : ALL_CATEGORY_ID;
+
+    const visibleBuckets =
+        resolvedCategoryId === ALL_CATEGORY_ID
+            ? categoryBuckets
+            : categoryBuckets.filter(
+                  (bucket) => bucket.category.id === resolvedCategoryId,
+              );
+
+    const isCategoryOpen = (id: string) => openCategories[id] ?? true;
+
+    const handleCategorySelect = (categoryId: string) => {
+        setSelectedCategoryId(categoryId);
+
+        if (categoryId !== ALL_CATEGORY_ID) {
+            setOpenCategories((prev) => ({ ...prev, [categoryId]: true }));
+        }
+    };
+
+    const handleAccordionToggle = (categoryId: string, open: boolean) => {
+        setOpenCategories((prev) => ({ ...prev, [categoryId]: open }));
+    };
+
+    const renderCategoryFilterControls = () => {
+        if (categoryBuckets.length === 0) {
+            return null;
+        }
+
+        return (
+            <div className="space-y-3">
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Categorías
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className={
+                            resolvedCategoryId === ALL_CATEGORY_ID
+                                ? "rounded-full border-primary/25 bg-primary/10 text-foreground"
+                                : "rounded-full"
+                        }
+                        onClick={() => handleCategorySelect(ALL_CATEGORY_ID)}
+                    >
+                        Todas
+                        <span className="ml-2 text-xs tabular-nums opacity-80">
+                            {filteredTables.length}
+                        </span>
+                    </Button>
+                    {categoryBuckets.map((bucket) => {
+                        const isActive =
+                            resolvedCategoryId === bucket.category.id;
+                        return (
+                            <Button
+                                key={bucket.category.id}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                    handleCategorySelect(bucket.category.id)
+                                }
+                                className={
+                                    isActive
+                                        ? "rounded-full border-primary/25 bg-primary/10 text-foreground"
+                                        : "rounded-full"
+                                }
+                            >
+                                {bucket.category.nombre}
+                                <span className="ml-2 text-xs tabular-nums opacity-80">
+                                    {bucket.tables.length}
+                                </span>
+                            </Button>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
     const handleTableSelect = (table: TableSchema) => {
         navigate(`/app/forms/${table.id}`);
     };
 
     return (
         <div className="min-h-screen bg-background">
-            <header className="bg-primary text-primary-foreground shadow-md">
-                <div className="container mx-auto px-4 py-6">
-                    <div className="flex items-center gap-4 mb-4">
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => navigate("/dashboard")}
-                            className="text-primary-foreground hover:bg-primary-foreground/10"
-                        >
-                            <ArrowLeft className="h-4 w-4 mr-2" />
-                            Volver
-                        </Button>
-                    </div>
-                    <div>
-                        <h1 className="text-3xl mb-2">
-                            <b>Añadir registro</b>
-                        </h1>
-                        <p className="text-primary-foreground/80">
-                            Seleccione una tabla
-                        </p>
+            <header className="border-b border-border/80 bg-card/80 backdrop-blur">
+                <div className="container mx-auto max-w-5xl px-4 py-5">
+                    <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => navigate("/dashboard")}
+                                className="text-foreground hover:bg-muted/60"
+                            >
+                                <ArrowLeft className="h-4 w-4 mr-2" />
+                                Volver
+                            </Button>
+                            <div className="h-8 w-px bg-border" aria-hidden />
+                            <div>
+                                <h1 className="text-2xl font-semibold leading-tight text-foreground">
+                                    Añadir registro
+                                </h1>
+
+                            </div>
+                        </div>
                     </div>
                 </div>
             </header>
 
-            <main className="container mx-auto px-4 py-8">
+            <main className="container mx-auto max-w-5xl px-4 py-8">
                 {loading && (
                     <div className="flex flex-col items-center justify-center py-16">
                         <Loader2 className="h-12 w-12 text-primary animate-spin mb-4" />
@@ -89,12 +207,13 @@ export default function TableSelection() {
                 {!loading && !error && (
                     <div className="flex flex-col gap-6 md:flex-row md:items-start">
                         <section className="min-w-0 flex-1">
-                            <div className="mb-6 md:hidden">
-                                <SearchBar
-                                    value={searchQuery}
-                                    onChange={setSearchQuery}
-                                />
+                            <div className="mb-6 space-y-4 md:hidden">
+                                <SearchBar value={searchQuery} onChange={setSearchQuery} />
+                                <div className="rounded-xl border border-border/80 bg-card/80 p-3">
+                                    {renderCategoryFilterControls()}
+                                </div>
                             </div>
+
 
                             {filteredTables.length === 0 ? (
                                 <div className="text-center py-16">
@@ -107,24 +226,26 @@ export default function TableSelection() {
                                     </p>
                                 </div>
                             ) : (
-                                <div className="space-y-6">
-                                    {categories.map((category) => {
-                                        const categoryTables = filteredTables.filter(
-                                            (table) =>
-                                                table.category === category.id,
-                                        );
-
-                                        if (categoryTables.length === 0) return null;
-
-                                        return (
+                                <div className="space-y-5">
+                                    <div className="space-y-4">
+                                        {visibleBuckets.map((bucket) => (
                                             <CategoryAccordion
-                                                key={category.id}
-                                                category={category}
-                                                tables={categoryTables}
+                                                key={bucket.category.id}
+                                                category={bucket.category}
+                                                tables={bucket.tables}
                                                 onTableSelect={handleTableSelect}
+                                                isOpen={isCategoryOpen(
+                                                    bucket.category.id,
+                                                )}
+                                                onOpenChange={(open) =>
+                                                    handleAccordionToggle(
+                                                        bucket.category.id,
+                                                        open,
+                                                    )
+                                                }
                                             />
-                                        );
-                                    })}
+                                        ))}
+                                    </div>
                                 </div>
                             )}
                         </section>
@@ -138,6 +259,9 @@ export default function TableSelection() {
                                     value={searchQuery}
                                     onChange={setSearchQuery}
                                 />
+
+                                <div className="my-4 h-px bg-border" aria-hidden />
+                                {renderCategoryFilterControls()}
                             </div>
                         </aside>
                     </div>

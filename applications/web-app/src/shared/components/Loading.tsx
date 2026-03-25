@@ -16,7 +16,7 @@ export default function App() {
     return (
         <div
             className="relative w-full h-screen overflow-hidden flex items-center justify-center"
-            style={{ backgroundColor: "#F6F5F0" }}
+            style={{ backgroundColor: "var(--background)" }}
         >
             {/* Texto Allstar gigante en el fondo con múltiples capas */}
 
@@ -59,7 +59,7 @@ export default function App() {
                     <motion.div
                         className="absolute inset-0 -z-10 blur-2xl"
                         style={{
-                            backgroundColor: currentStar === 0 ? "#122337" : "#C7664C",
+                            backgroundColor: currentStar === 0 ? "var(--primary)" : "var(--destructive)",
                             opacity: 0.3,
                         }}
                         animate={{

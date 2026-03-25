@@ -30,11 +30,11 @@ export const FormSelect = React.forwardRef<HTMLSelectElement, FormSelectProps>(
 
         return (
             <div className="space-y-1.5">
-                <label className="block text-sm text-[#2F3339] flex items-center gap-2">
+                <label className="block text-sm text-secondary-foreground flex items-center gap-2">
                     <span>
                         {label}
                         {required && (
-                            <span className="text-[#C7664C] ml-1">*</span>
+                            <span className="text-destructive ml-1">*</span>
                         )}
                     </span>
                     {aiStatus && (
@@ -52,15 +52,15 @@ export const FormSelect = React.forwardRef<HTMLSelectElement, FormSelectProps>(
             w-full px-4 py-2.5 pr-10 rounded-lg border bg-white
             appearance-none cursor-pointer
             transition-all duration-200
-            text-[#2F3339]
+            text-secondary-foreground
             focus:outline-none focus:ring-2 focus:ring-offset-1
-            disabled:bg-[#f3f4f6] disabled:cursor-not-allowed
+            disabled:bg-muted disabled:cursor-not-allowed
             ${
                 hasError
-                    ? "border-[#d4183d] focus:ring-[#d4183d]/20"
+                    ? "border-destructive focus:ring-destructive/20"
                     : aiStatus?.requiereRevision
-                      ? "border-[#C7664C] focus:ring-[#C7664C]/20"
-                      : "border-[rgba(47,51,57,0.15)] focus:ring-[#B69559]/20"
+                      ? "border-destructive focus:ring-destructive/20"
+                      : "border-input focus:ring-ring/20"
             }
             ${className}
           `}
@@ -73,14 +73,14 @@ export const FormSelect = React.forwardRef<HTMLSelectElement, FormSelectProps>(
                             </option>
                         ))}
                     </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#5a5c61] pointer-events-none" />
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
                     {hasError && (
-                        <AlertCircle className="absolute right-10 top-1/2 -translate-y-1/2 w-5 h-5 text-[#d4183d]" />
+                        <AlertCircle className="absolute right-10 top-1/2 -translate-y-1/2 w-5 h-5 text-destructive" />
                     )}
                 </div>
-                {hasError && <p className="text-xs text-[#d4183d]">{error}</p>}
+                {hasError && <p className="text-xs text-destructive">{error}</p>}
                 {aiStatus?.requiereRevision && !hasError && (
-                    <p className="text-xs text-[#C7664C]">
+                    <p className="text-xs text-destructive">
                         Este campo requiere revisión antes de enviar
                     </p>
                 )}

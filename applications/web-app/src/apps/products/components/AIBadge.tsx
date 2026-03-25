@@ -14,7 +14,7 @@ export function AIBadge({
 
     if (requiereRevision) {
         return (
-            <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#C7664C]/10 border border-[#C7664C]/30 rounded text-xs text-[#C7664C]">
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-destructive/10 border border-destructive/30 rounded text-xs text-destructive">
                 <AlertCircle className="w-3 h-3" />
                 Revisar
             </div>
@@ -23,7 +23,7 @@ export function AIBadge({
 
     if (autocompletado) {
         return (
-            <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#B69559]/10 border border-[#B69559]/30 rounded text-xs text-[#B69559]">
+            <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-accent/10 border border-accent/30 rounded text-xs text-accent">
                 <Sparkles className="w-3 h-3" />
                 IA
             </div>

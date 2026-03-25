@@ -5,7 +5,7 @@ export default function DataViewerApp() {
     const navigate = useNavigate();
 
     return (
-        <div className="h-screen w-full bg-[#f6f5f0]">
+        <div className="h-screen w-full bg-background">
             <DataViewerProModule
                 onBack={() => navigate("/dashboard")}
                 title="Data Viewer Pro"

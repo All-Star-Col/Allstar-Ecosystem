@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { Upload, X, File, AlertCircle, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { Button } from "@/shared/ui/button";
 
 interface UploadedFile {
     id: string;
@@ -101,7 +102,7 @@ export function FileUpload({
 
     return (
         <div className="space-y-3">
-            <label className="block text-sm text-[#2F3339]">{label}</label>
+            <label className="block text-sm text-secondary-foreground">{label}</label>
 
             {/* Drop Zone */}
             <div
@@ -114,17 +115,17 @@ export function FileUpload({
           transition-all duration-200
           ${
               isDragging
-                  ? "border-[#122337] bg-[#122337]/5"
-                  : "border-[rgba(47,51,57,0.2)] bg-white hover:border-[#B69559] hover:bg-[#B69559]/5"
+                  ? "border-foreground bg-primary/5"
+                  : "border-input bg-white hover:border-accent hover:bg-accent/5"
           }
         `}
             >
-                <Upload className="w-10 h-10 mx-auto mb-3 text-[#5a5c61]" />
-                <p className="text-sm text-[#2F3339] mb-1">
-                    <span className="text-[#122337]">Haz clic para cargar</span>{" "}
+                <Upload className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
+                <p className="text-sm text-secondary-foreground mb-1">
+                    <span className="text-foreground">Haz clic para cargar</span>{" "}
                     o arrastra archivos aquí
                 </p>
-                <p className="text-xs text-[#5a5c61]">
+                <p className="text-xs text-muted-foreground">
                     PDF, JPG, PNG hasta {maxSize}MB
                 </p>
             </div>
@@ -143,7 +144,7 @@ export function FileUpload({
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-2 text-xs text-[#d4183d] bg-[#d4183d]/10 px-3 py-2 rounded-lg"
+                    className="flex items-center gap-2 text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-lg"
                 >
                     <AlertCircle className="w-4 h-4" />
                     {error}
@@ -165,7 +166,7 @@ export function FileUpload({
                                 initial={{ opacity: 0, x: -20 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 exit={{ opacity: 0, x: 20 }}
-                                className="flex items-center gap-3 p-3 bg-white border border-[rgba(47,51,57,0.1)] rounded-lg"
+                                className="flex items-center gap-3 p-3 bg-white border border-border rounded-lg"
                             >
                                 {uploadedFile.preview ? (
                                     <img
@@ -174,16 +175,16 @@ export function FileUpload({
                                         className="w-12 h-12 object-cover rounded"
                                     />
                                 ) : (
-                                    <div className="w-12 h-12 bg-[#f3f4f6] rounded flex items-center justify-center">
-                                        <File className="w-6 h-6 text-[#5a5c61]" />
+                                    <div className="w-12 h-12 bg-muted rounded flex items-center justify-center">
+                                        <File className="w-6 h-6 text-muted-foreground" />
                                     </div>
                                 )}
 
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm text-[#2F3339] truncate">
+                                    <p className="text-sm text-secondary-foreground truncate">
                                         {uploadedFile.file.name}
                                     </p>
-                                    <p className="text-xs text-[#5a5c61]">
+                                    <p className="text-xs text-muted-foreground">
                                         {(
                                             uploadedFile.file.size / 1024
                                         ).toFixed(1)}{" "}
@@ -192,26 +193,27 @@ export function FileUpload({
                                 </div>
 
                                 {uploadedFile.status === "uploading" && (
-                                    <div className="w-5 h-5 border-2 border-[#B69559] border-t-transparent rounded-full animate-spin" />
+                                    <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
                                 )}
 
                                 {uploadedFile.status === "success" && (
-                                    <CheckCircle2 className="w-5 h-5 text-[#10b981]" />
+                                    <CheckCircle2 className="w-5 h-5 text-success" />
                                 )}
 
                                 {uploadedFile.status === "error" && (
-                                    <AlertCircle className="w-5 h-5 text-[#d4183d]" />
+                                    <AlertCircle className="w-5 h-5 text-destructive" />
                                 )}
 
-                                <button
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         removeFile(uploadedFile.id);
                                     }}
-                                    className="p-1 hover:bg-[#f3f4f6] rounded transition-colors"
                                 >
-                                    <X className="w-4 h-4 text-[#5a5c61]" />
-                                </button>
+                                    <X className="w-4 h-4 text-muted-foreground" />
+                                </Button>
                             </motion.div>
                         ))}
                     </motion.div>

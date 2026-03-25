@@ -1,5 +1,11 @@
 import { motion } from "motion/react";
 
+const INTERACTIVE_SPRING = {
+    type: "spring" as const,
+    stiffness: 300,
+    damping: 20,
+};
+
 interface RadioOption {
     value: string;
     label: string;
@@ -24,9 +30,9 @@ export function FormRadio({
 }: FormRadioProps) {
     return (
         <div className="space-y-3">
-            <label className="block text-sm text-[#2F3339]">
+            <label className="block text-sm text-secondary-foreground">
                 {label}
-                {required && <span className="text-[#C7664C] ml-1">*</span>}
+                {required && <span className="text-destructive ml-1">*</span>}
             </label>
             <div className="flex gap-4">
                 {options.map((option) => {
@@ -39,8 +45,8 @@ export function FormRadio({
                 transition-all duration-200
                 ${
                     isSelected
-                        ? "border-[#122337] bg-[#122337]/5"
-                        : "border-[rgba(47,51,57,0.15)] bg-white hover:border-[#B69559] hover:bg-[#B69559]/5"
+                        ? "border-foreground bg-primary/5"
+                        : "border-input bg-white hover:border-accent hover:bg-accent/5"
                 }
               `}
                             whileHover={{ scale: 1.02 }}
@@ -59,26 +65,22 @@ export function FormRadio({
                 transition-all duration-200
                 ${
                     isSelected
-                        ? "border-[#122337]"
-                        : "border-[rgba(47,51,57,0.3)]"
+                        ? "border-foreground"
+                        : "border-input"
                 }
               `}
                             >
                                 {isSelected && (
                                     <motion.div
-                                        className="w-2.5 h-2.5 rounded-full bg-[#122337]"
+                                        className="w-2.5 h-2.5 rounded-full bg-foreground"
                                         initial={{ scale: 0 }}
                                         animate={{ scale: 1 }}
-                                        transition={{
-                                            type: "spring",
-                                            stiffness: 300,
-                                            damping: 20,
-                                        }}
+                                        transition={INTERACTIVE_SPRING}
                                     />
                                 )}
                             </div>
                             <span
-                                className={`text-sm ${isSelected ? "text-[#122337]" : "text-[#2F3339]"}`}
+                                className={`text-sm ${isSelected ? "text-foreground" : "text-secondary-foreground"}`}
                             >
                                 {option.label}
                             </span>
@@ -86,7 +88,7 @@ export function FormRadio({
                     );
                 })}
             </div>
-            {error && <p className="text-xs text-[#d4183d]">{error}</p>}
+            {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
     );
 }

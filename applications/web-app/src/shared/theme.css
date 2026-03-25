@@ -1,4 +1,47 @@
 :root {
+    /* ── Typography: Font Family ── */
+    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+
+    /* ── Typography: Font Size Scale ── */
+    --text-2xs: 0.625rem; /* 10px */
+    --text-xs: 0.75rem; /* 12px */
+    --text-sm: 0.875rem; /* 14px */
+    --text-base: 1rem; /* 16px */
+    --text-lg: 1.125rem; /* 18px */
+    --text-xl: 1.25rem; /* 20px */
+    --text-2xl: 1.5rem; /* 24px */
+    --text-3xl: 1.875rem; /* 30px */
+    --text-4xl: 2.25rem; /* 36px */
+    --text-5xl: 3rem; /* 48px */
+    --text-6xl: 3.75rem; /* 60px */
+    --text-7xl: 4.5rem; /* 72px */
+
+    /* ── Typography: Line Height ── */
+    --leading-none: 1;
+    --leading-tight: 1.25;
+    --leading-snug: 1.375;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.625;
+    --leading-loose: 2;
+
+    /* ── Typography: Letter Spacing ── */
+    --tracking-tighter: -0.05em;
+    --tracking-tight: -0.025em;
+    --tracking-normal: 0em;
+    --tracking-wide: 0.025em;
+    --tracking-wider: 0.05em;
+    --tracking-widest: 0.1em;
+
+    /* ── Typography: Font Weight ── */
+    --font-weight-light: 300;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* ── Colors: Base ── */
     --font-size: 16px;
     --background: #f6f5f0;
     --foreground: #122337;
@@ -8,20 +51,22 @@
     --popover-foreground: #122337;
     --primary: #122337;
     --primary-foreground: #f6f5f0;
-    --secondary: #2f3339;
-    --secondary-foreground: #f6f5f0;
+    --secondary: #c5c8cd;
+    --secondary-foreground: #54534f;
     --muted: #e8e7e2;
     --muted-foreground: #6b6e73;
     --accent: #b69559;
     --accent-foreground: #122337;
+    --warning: #b69559;
+    --warning-foreground: #122337;
     --destructive: #c7664c;
     --destructive-foreground: #ffffff;
+    --success: #059669;
+    --success-foreground: #ffffff;
     --border: rgba(18, 35, 55, 0.15);
     --input: rgba(18, 35, 55, 0.2);
     --input-background: #ffffff;
     --switch-background: #d4d3cd;
-    --font-weight-medium: 500;
-    --font-weight-normal: 400;
     --ring: #b69559;
     --chart-1: #122337;
     --chart-2: #b69559;
@@ -37,9 +82,21 @@
     --sidebar-accent-foreground: #f6f5f0;
     --sidebar-border: rgba(246, 245, 240, 0.1);
     --sidebar-ring: #b69559;
+    --info: #2563eb;
+    --info-foreground: #ffffff;
+    --placeholder: #9ca3af;
+
+    /* ── Brand (login page CTA) ── */
+    --brand: #c7664c;
+    --brand-hover: #b0553e;
+    --brand-foreground: #ffffff;
 }
 
 .dark {
+    /* Typography: font-family overrides (Inter is the same font in both modes) */
+    /* Typography: font-size, line-height, letter-spacing, and font-weight are the same as :root */
+
+    /* Colors: Base */
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.145 0 0);
@@ -54,13 +111,15 @@
     --muted-foreground: oklch(0.708 0 0);
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.769 0.188 70.08);
+    --warning-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.396 0.141 25.723);
     --destructive-foreground: oklch(0.637 0.237 25.331);
+    --success: oklch(0.596 0.145 163.225);
+    --success-foreground: oklch(0.985 0 0);
     --border: oklch(0.269 0 0);
     --input: oklch(0.269 0 0);
     --ring: oklch(0.439 0 0);
-    --font-weight-medium: 500;
-    --font-weight-normal: 400;
     --chart-1: oklch(0.488 0.243 264.376);
     --chart-2: oklch(0.696 0.17 162.48);
     --chart-3: oklch(0.769 0.188 70.08);
@@ -74,9 +133,55 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(0.269 0 0);
     --sidebar-ring: oklch(0.439 0 0);
+    --info: oklch(0.623 0.214 259.815);
+    --info-foreground: oklch(0.985 0 0);
+    --placeholder: oklch(0.708 0 0);
 }
 
 @theme inline {
+    /* ── Font Families ── */
+    --font-family-sans: var(--font-sans);
+    --font-family-display: var(--font-display);
+    --font-family-mono: var(--font-mono);
+
+    /* ── Font Sizes ── */
+    --text-2xs: var(--text-2xs);
+    --text-xs: var(--text-xs);
+    --text-sm: var(--text-sm);
+    --text-base: var(--text-base);
+    --text-lg: var(--text-lg);
+    --text-xl: var(--text-xl);
+    --text-2xl: var(--text-2xl);
+    --text-3xl: var(--text-3xl);
+    --text-4xl: var(--text-4xl);
+    --text-5xl: var(--text-5xl);
+    --text-6xl: var(--text-6xl);
+    --text-7xl: var(--text-7xl);
+
+    /* ── Line Heights ── */
+    --leading-none: var(--leading-none);
+    --leading-tight: var(--leading-tight);
+    --leading-snug: var(--leading-snug);
+    --leading-normal: var(--leading-normal);
+    --leading-relaxed: var(--leading-relaxed);
+    --leading-loose: var(--leading-loose);
+
+    /* ── Letter Spacing ── */
+    --tracking-tighter: var(--tracking-tighter);
+    --tracking-tight: var(--tracking-tight);
+    --tracking-normal: var(--tracking-normal);
+    --tracking-wide: var(--tracking-wide);
+    --tracking-wider: var(--tracking-wider);
+    --tracking-widest: var(--tracking-widest);
+
+    /* ── Font Weights ── */
+    --font-weight-light: var(--font-weight-light);
+    --font-weight-normal: var(--font-weight-normal);
+    --font-weight-medium: var(--font-weight-medium);
+    --font-weight-semibold: var(--font-weight-semibold);
+    --font-weight-bold: var(--font-weight-bold);
+
+    /* ── Colors ── */
     --color-background: var(--background);
     --color-foreground: var(--foreground);
     --color-card: var(--card);
@@ -91,8 +196,12 @@
     --color-muted-foreground: var(--muted-foreground);
     --color-accent: var(--accent);
     --color-accent-foreground: var(--accent-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
     --color-destructive: var(--destructive);
     --color-destructive-foreground: var(--destructive-foreground);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
     --color-border: var(--border);
     --color-input: var(--input);
     --color-input-background: var(--input-background);
@@ -103,10 +212,6 @@
     --color-chart-3: var(--chart-3);
     --color-chart-4: var(--chart-4);
     --color-chart-5: var(--chart-5);
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
     --color-sidebar: var(--sidebar);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar-primary: var(--sidebar-primary);
@@ -115,6 +220,79 @@
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-ring: var(--sidebar-ring);
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-placeholder: var(--placeholder);
+    --color-brand: var(--brand);
+    --color-brand-hover: var(--brand-hover);
+    --color-brand-foreground: var(--brand-foreground);
+
+    /* ── Color Opacity Scales ── */
+    --color-primary-5: color-mix(in srgb, var(--primary) 5%, transparent);
+    --color-primary-10: color-mix(in srgb, var(--primary) 10%, transparent);
+    --color-primary-20: color-mix(in srgb, var(--primary) 20%, transparent);
+    --color-primary-50: color-mix(in srgb, var(--primary) 50%, transparent);
+    --color-destructive-5: color-mix(
+        in srgb,
+        var(--destructive) 5%,
+        transparent
+    );
+    --color-destructive-10: color-mix(
+        in srgb,
+        var(--destructive) 10%,
+        transparent
+    );
+    --color-destructive-20: color-mix(
+        in srgb,
+        var(--destructive) 20%,
+        transparent
+    );
+    --color-accent-5: color-mix(in srgb, var(--accent) 5%, transparent);
+    --color-accent-10: color-mix(in srgb, var(--accent) 10%, transparent);
+    --color-accent-20: color-mix(in srgb, var(--accent) 20%, transparent);
+    --color-info-5: color-mix(in srgb, var(--info) 5%, transparent);
+    --color-info-10: color-mix(in srgb, var(--info) 10%, transparent);
+    --color-info-20: color-mix(in srgb, var(--info) 20%, transparent);
+
+    /* ── Border Radii ── */
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+}
+
+@keyframes loader-steps {
+    to {
+        background-position: left;
+    }
+}
+
+@keyframes caret-blink {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0;
+    }
+}
+
+@keyframes accordion-down {
+    from {
+        height: 0;
+    }
+    to {
+        height: var(--radix-accordion-content-height);
+    }
+}
+
+@keyframes accordion-up {
+    from {
+        height: var(--radix-accordion-content-height);
+    }
+    to {
+        height: 0;
+    }
 }
 
 @layer base {
@@ -175,5 +353,38 @@
         font-size: var(--text-base);
         font-weight: var(--font-weight-normal);
         line-height: 1.5;
+    }
+
+    ::-webkit-scrollbar {
+        width: 5px;
+        height: 5px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb:horizontal {
+        background: rgb(138, 137, 137);
+        border-radius: 999px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: rgb(138, 137, 137);
+        border-radius: 999px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: rgb(124, 121, 121);
+    }
+
+    ::selection {
+        background: #9da3bc66;
+        color: #000000;
+    }
+
+    ::-moz-selection {
+        background: #9da3bc66;
+        color: #000000;
     }
 }

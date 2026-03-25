@@ -90,8 +90,11 @@ export function TablesProvider({ children }: { children: ReactNode }) {
             const isFullyFresh = isFresh(categoryMeta) && isFresh(tableMeta);
 
             // TTL fallback when backend does not provide validators.
-            if (cached && isFullyFresh && !hasValidators) {
-                console.log('until here')
+            const cacheHasContent =
+                (cached?.categories.length ?? 0) > 0 ||
+                (cached?.tables.length ?? 0) > 0;
+
+            if (cached && cacheHasContent && isFullyFresh && !hasValidators) {
                 return;
             }
             try {
@@ -150,6 +153,7 @@ export function TablesProvider({ children }: { children: ReactNode }) {
                     FORMS_CACHE_KEY,
                     JSON.stringify(updatedCache),
                 );
+
             } catch (err) {
                 console.error("❌ [Context] Error loading data:", err);
 
@@ -169,9 +173,9 @@ export function TablesProvider({ children }: { children: ReactNode }) {
     }, []);
 
     useEffect(() => {
-        console.log("[TablesProvider] state categories:", categories);
-    }, [categories])
-
+        console.log("Fetched tables: ", tables)
+    }, [tables]
+    )
     const getTableById = (id: string): TableSchema | undefined => {
         return tables.find((table) => table.id === id);
     };

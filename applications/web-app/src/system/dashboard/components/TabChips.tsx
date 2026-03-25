@@ -6,55 +6,53 @@ interface TabChipsProps {
 }
 
 const tabs = [
-    { id: "top-apps", label: "Top apps" },
-    { id: "recientes", label: "Recientes" },
     { id: "todas", label: "Todas" },
+    { id: "favorites", label: "Favoritas" },
+    { id: "recientes", label: "Recientes" },
 ];
+
+const EASE_SPRING: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 export function TabChips({ selectedTab, onTabChange }: TabChipsProps) {
     return (
-        <div className="flex gap-2">
-            {tabs.map((tab, index) => (
-                <motion.button
-                    key={tab.id}
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.3, delay: 0.4 + index * 0.05 }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => onTabChange(tab.id)}
-                    style={{
-                        height: "32px",
-                        padding: "6px 12px",
-                        borderRadius: "16px",
-                        backgroundColor:
-                            selectedTab === tab.id
-                                ? "#122337"
-                                : "rgba(47, 51, 57, 0.08)",
-                        color: selectedTab === tab.id ? "#f6f5f0" : "#2f3339",
-                        fontSize: "13px",
-                        fontWeight: 500,
-                        border: "none",
-                        cursor: "pointer",
-                        transition: "all 0.3s ease",
-                        position: "relative",
-                    }}
-                >
-                    {tab.label}
-                    {selectedTab === tab.id && (
-                        <motion.div
-                            layoutId="activeTab"
-                            style={{
-                                position: "absolute",
-                                inset: 0,
-                                backgroundColor: "#122337",
-                                borderRadius: "16px",
-                                zIndex: -1,
-                            }}
-                        />
-                    )}
-                </motion.button>
-            ))}
-        </div>
+        <motion.div className="flex gap-2">
+            {tabs.map((tab, index) => {
+                const isActive = selectedTab === tab.id;
+                return (
+                    <motion.button
+                        key={tab.id}
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+
+                        transition={{
+                            duration: 0.3,
+                            ease: EASE_SPRING,
+                            delay: index * 0.06,
+                        }}
+                        whileHover={{ y: -4 }}
+                        whileTap={{ scale: 0.96 }}
+                        onClick={() => onTabChange(tab.id)}
+                        className={`relative h-8 px-3 rounded-full text-[13px] font-medium border-none cursor-pointer overflow-hidden ${
+                            isActive
+                                ? "text-primary-foreground"
+                                : "bg-muted text-secondary-foreground hover:bg-muted/70"
+                        }`}
+                    >
+                        {isActive && (
+                            <motion.span
+                                layoutId="activeTab"
+                                className="absolute inset-0 rounded-full bg-primary"
+                                transition={{
+                                    duration: 0.3,
+                                    ease: EASE_SPRING,
+                                }}
+                            />
+                        )}
+
+                        <span className="relative z-10">{tab.label}</span>
+                    </motion.button>
+                );
+            })}
+        </motion.div>
     );
 }

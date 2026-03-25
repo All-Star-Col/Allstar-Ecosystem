@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import type { Email } from "../types";
+import { Button } from "@/shared/ui/button";
 
 interface EmailListProps {
     emails: Email[];
@@ -33,28 +34,28 @@ export function EmailList({
         switch (status) {
             case "nuevo":
                 return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#122337]/10 text-[#122337] rounded text-xs">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-foreground rounded text-xs">
                         <Mail className="w-3 h-3" />
                         Nuevo
                     </span>
                 );
             case "procesando_ia":
                 return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#B69559]/10 text-[#B69559] rounded text-xs">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-accent/10 text-accent rounded text-xs">
                         <Loader2 className="w-3 h-3 animate-spin" />
                         Procesando
                     </span>
                 );
             case "listo_revisar":
                 return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#10b981]/10 text-[#10b981] rounded text-xs">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-success/10 text-success rounded text-xs">
                         <CheckCircle2 className="w-3 h-3" />
                         Listo
                     </span>
                 );
             case "enviado":
                 return (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#5a5c61]/10 text-[#5a5c61] rounded text-xs">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-muted-foreground/10 text-muted-foreground rounded text-xs">
                         <Send className="w-3 h-3" />
                         Enviado
                     </span>
@@ -81,35 +82,35 @@ export function EmailList({
     };
 
     return (
-        <div className="h-full flex flex-col bg-white border-r border-[rgba(47,51,57,0.08)]">
+        <div className="h-full flex flex-col bg-white border-r border-border">
             {/* Header */}
-            <div className="p-4 border-b border-[rgba(47,51,57,0.08)]">
+            <div className="p-4 border-b border-border">
                 <div className="mb-3 flex items-center justify-between gap-2">
-                    <button
-                        type="button"
+                    <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => {
                             window.location.href = mainAppUrl;
                         }}
-                        className="inline-flex items-center gap-1 text-sm text-[#122337] hover:opacity-80 transition-opacity"
                     >
                         <ChevronLeft className="w-4 h-4" />
                         Regresar
-                    </button>
+                    </Button>
 
-                    <button
-                        type="button"
+                    <Button
+                        variant="outline"
+                        size="xs"
                         onClick={onRefresh}
                         disabled={isLoading}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs border border-[rgba(47,51,57,0.2)] rounded-md text-[#2F3339] hover:bg-[#F6F5F0] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
                         <RefreshCw
                             className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`}
                         />
                         Refrescar
-                    </button>
+                    </Button>
                 </div>
-                <h2 className="text-[#122337] mb-1">Correos de Clientes</h2>
-                <p className="text-xs text-[#5a5c61]">
+                <h2 className="text-foreground mb-1">Correos de Clientes</h2>
+                <p className="text-xs text-muted-foreground">
                     {emails.length} correos
                 </p>
             </div>
@@ -117,18 +118,18 @@ export function EmailList({
             {/* Email List */}
             <div className="flex-1 overflow-y-auto">
                 {isLoading && (
-                    <div className="p-4 text-sm text-[#5a5c61] flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 animate-spin text-[#122337]" />
+                    <div className="p-4 text-sm text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-foreground" />
                         Cargando correos...
                     </div>
                 )}
 
                 {!isLoading && !!error && (
-                    <div className="p-4 text-sm text-[#C7664C]">{error}</div>
+                    <div className="p-4 text-sm text-destructive">{error}</div>
                 )}
 
                 {!isLoading && !error && emails.length === 0 && (
-                    <div className="p-4 text-sm text-[#5a5c61]">
+                    <div className="p-4 text-sm text-muted-foreground">
                         No hay correos disponibles.
                     </div>
                 )}
@@ -143,31 +144,31 @@ export function EmailList({
                                 key={email.id}
                                 onClick={() => onSelectEmail(email.id)}
                                 className={`
-                w-full text-left p-4 border-b border-[rgba(47,51,57,0.05)]
+                w-full text-left p-4 border-b border-border
                 transition-colors relative
                 ${
                     isSelected
-                        ? "bg-[#122337]/5 border-l-4 border-l-[#122337]"
-                        : "hover:bg-[#F6F5F0]/50 border-l-4 border-l-transparent"
+                        ? "bg-primary/5 border-l-4 border-l-foreground"
+                        : "hover:bg-background/50 border-l-4 border-l-transparent"
                 }
                 `}
                                 whileHover={{ x: isSelected ? 0 : 4 }}
                                 transition={{ duration: 0.2 }}
                             >
                                 <div className="flex items-start justify-between gap-2 mb-1">
-                                    <p className="text-sm text-[#2F3339] truncate flex-1">
+                                    <p className="text-sm text-secondary-foreground truncate flex-1">
                                         {email.from}
                                     </p>
-                                    <span className="text-xs text-[#5a5c61] whitespace-nowrap">
+                                    <span className="text-xs text-muted-foreground whitespace-nowrap">
                                         {formatDate(email.receivedAt)}
                                     </span>
                                 </div>
 
-                                <p className="text-xs text-[#122337] mb-2 truncate">
+                                <p className="text-xs text-foreground mb-2 truncate">
                                     {email.subject}
                                 </p>
 
-                                <p className="text-xs text-[#5a5c61] mb-2 line-clamp-2">
+                                <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
                                     {email.preview}
                                 </p>
 
@@ -175,7 +176,7 @@ export function EmailList({
                                     {getStatusBadge(email.status)}
 
                                     {email.hasAttachments && (
-                                        <Paperclip className="w-3 h-3 text-[#5a5c61]" />
+                                        <Paperclip className="w-3 h-3 text-muted-foreground" />
                                     )}
                                 </div>
                             </motion.button>

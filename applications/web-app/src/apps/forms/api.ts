@@ -47,6 +47,25 @@ export interface RevalidateResult<T> {
     notModified: boolean;
 }
 
+function normalizeArrayPayload<T>(payload: unknown): T[] {
+    if (Array.isArray(payload)) {
+        return payload as T[];
+    }
+
+    if (payload && typeof payload === "object") {
+        const record = payload as Record<string, unknown>;
+        const candidates = [record.data, record.items, record.results];
+
+        for (const candidate of candidates) {
+            if (Array.isArray(candidate)) {
+                return candidate as T[];
+            }
+        }
+    }
+
+    return [];
+}
+
 async function fetchWithRevalidate<T>(
     url: string,
     options?: RevalidateOptions,
@@ -79,7 +98,8 @@ async function fetchWithRevalidate<T>(
         throw new Error(`Failed to fetch data: ${response.statusText}`);
     }
 
-    const data: T[] = await response.json();
+    const payload: unknown = await response.json();
+    const data = normalizeArrayPayload<T>(payload);
 
     return {
         data,
@@ -95,7 +115,6 @@ async function fetchWithRevalidate<T>(
 export async function fetchCategories(
     options?: RevalidateOptions,
 ): Promise<RevalidateResult<CategoriesFormsAPI>> {
-    console.log("using categories fetch");
     try {
         return await fetchWithRevalidate<CategoriesFormsAPI>(
             `${API_SERVER}/workspace/forms/categories`,
