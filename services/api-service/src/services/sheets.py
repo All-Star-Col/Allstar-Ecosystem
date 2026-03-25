@@ -628,7 +628,7 @@ class SheetsService:
             unknown_items = []
             for row in rows:
                 item_val = row[0] if len(row) > 0 else ""
-                estado = row[12] if len(row) > 12 else ""
+                estado = row[13] if len(row) > 13 else ""
                 if estado == "Por revisar y asignar item" and item_val:
                     unknown_items.append({
                         "item": item_val,
