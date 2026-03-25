@@ -467,6 +467,8 @@ class SheetsService:
                 Item.CodItem,
                 Clientes.Cliente,
                 Tela.Tela,
+                ReferenciaTela.Referencia,
+                Item.CodOCCliente,
                 Producto.Producto + ' ' + Referencia.Referencia + ' ' + Modelo.Modelo AS [REFERENCIA COMPLETA]
             FROM Item
             INNER JOIN Producto ON Item.CodProducto = Producto.CodProducto
@@ -490,7 +492,11 @@ class SheetsService:
 
             producto = getattr(sql_row, "REFERENCIA COMPLETA", "") or ""
             tela = sql_row.Tela if sql_row.Tela else ""
+            referenciatela = sql_row.Referencia if sql_row.Referencia else ""
             cliente = sql_row.Cliente if sql_row.Cliente else ""
+            orden = sql_row.CodOCCliente if sql_row.CodOCCliente else "DISPONIBLE"
+
+            tela_completa = f"{tela} {referenciatela}".strip()
 
             # 2. Verificar si el item YA existe en INVENTARIO
             sheet_api = service.spreadsheets()
@@ -508,14 +514,29 @@ class SheetsService:
                 if row and str(row[0]) == str(item):
                     return 409  # Ya existe en INVENTARIO
 
+            # Verificar si el item YA existe en DESPACHADO
+            result_dispatch = (
+                sheet_api.values()
+                .get(
+                    spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
+                    range=f"{self.SHEET_NAME_DISPATCH}!A:A",
+                )
+                .execute()
+            )
+            existing_values_dispatch = result_dispatch.get("values", [])
+
+            for row in existing_values_dispatch:
+                if row and str(row[0]) == str(item):
+                    return 409  # Ya existe en DESPACHADO
+
             # 3. Construir y escribir la nueva fila completa en INVENTARIO
             # A=ITEM B=PRODUCTO C=TELA D=CLIENTE E=ORDEN F=UBICACION G=FILA H=VALOR I=OBS
             new_row = [
                 str(item),           # A: ITEM
                 producto,            # B: PRODUCTO
-                tela,                # C: TELA
+                tela_completa,       # C: TELA
                 cliente,             # D: CLIENTE
-                "DISPONIBLE",        # E: ORDEN
+                orden,               # E: ORDEN
                 "Bodega 1 / Piso 1", # F: UBICACION
                 "1",                 # G: FILA
                 "",                  # H: VALOR PRODUCTO
