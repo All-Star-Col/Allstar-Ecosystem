@@ -6,7 +6,7 @@ from googleapiclient.errors import HttpError
 from fastapi.concurrency import run_in_threadpool
 from typing import List, Tuple, Optional, Any
 import json
-
+from zoneinfo import ZoneInfo
 
 from src.core.config import settings
 from src.core.logging_config import get_logger
@@ -95,7 +95,8 @@ class SheetsService:
             return
 
         try:
-            now = datetime.now()
+            tz_bogota = ZoneInfo("America/Bogota")
+            now = datetime.now(tz_bogota)
             row = [
                 "PDA",
                 str(item),
