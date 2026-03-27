@@ -729,10 +729,11 @@ class SheetsService:
             dev_rows = result_full.get("values", [])
             dev_data = dev_rows[0] if dev_rows else []
 
-            # DEVOLUCIONES: A=ITEM(0) B=PRODUCTO(1) C=TELA(2) D=CLIENTE(3) E=ORDEN(4)
-            #               F=VALOR_PRODUCTO(5) G=SALIDA/REMISION(6) H=FACTURA(7)
-            #               I=BODEGA(8) J=FILA(9) K=FECHA_DESPACHO(10) L=OBS_PRODUCTO(11)
-            #               M=Estado(12) N=Nota_Credito(13)
+            # DEVOLUCIONES: 
+            #               A=ITEM(0) B=PRODUCTO(1) C=TELA(2) D=CLIENTE(3) E=ORDEN(4)
+            #               F=SALIDA/REMISION(5) G=FACTURA(6) H=FECHA DE DESPACHO(7)
+            #               I=VALOR PRODUCTO(8) J=BODEGA(9) K=FILA(10) L=FECHA DEVOLUCION(11)
+            #               M=OBSERVACIONES PRODUCTO(12) N=Estado(13) O=Nota Credito(14)
 
             # 3. Verificar si el item ya existe en INVENTARIO (evitar duplicados)
             result_inv_check = (
@@ -755,9 +756,9 @@ class SheetsService:
                 self.get_val(dev_data, 2),    # C: TELA
                 self.get_val(dev_data, 3),    # D: CLIENTE
                 self.get_val(dev_data, 4),    # E: ORDEN
-                self.get_val(dev_data, 8),    # F: UBICACION (BODEGA de DEVOLUCIONES col I)
-                self.get_val(dev_data, 9),    # G: FILA (col J de DEVOLUCIONES)
-                self.get_val(dev_data, 5),    # H: VALOR PRODUCTO (col F de DEVOLUCIONES)
+                self.get_val(dev_data, 9),    # F: UBICACION (BODEGA de DEVOLUCIONES col I)
+                self.get_val(dev_data, 10),    # G: FILA (col J de DEVOLUCIONES)
+                self.get_val(dev_data, 8),    # H: VALOR PRODUCTO (col F de DEVOLUCIONES)
             ]
 
             sheet_api.values().append(
