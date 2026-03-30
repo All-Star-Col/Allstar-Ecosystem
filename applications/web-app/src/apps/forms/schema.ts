@@ -25,6 +25,9 @@ export interface ColumnSchema {
     maxLength?: number;
     enumValues?: string[];
     foreignKeyOptions?: { value: string; label: string }[];
+    foreignKeyTable?: string;
+    foreignKeyValueField?: string;
+    foreignKeyLabelField?: string;
     defaultValue?: any;
     placeholder?: string;
     hint?: string;
@@ -36,6 +39,7 @@ export interface TableSchema {
     displayName: string;
     description?: string;
     category: string;
+    columnCount?: number;
     columns: ColumnSchema[];
 }
 
@@ -99,12 +103,32 @@ export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
     const required = !nullable || Boolean(apiColumn.required);
     const enumValues =
         apiColumn.enum_values?.filter((value) => value.trim() !== "") ?? [];
+    const isForeignKey = Boolean(apiColumn.foreign_key);
+    const displayNameParts = apiColumn.name.toLowerCase().split("_");
+    const normalizedDisplayParts =
+        isForeignKey &&
+        displayNameParts.length > 1 &&
+        displayNameParts[0] === "id"
+            ? displayNameParts.slice(1)
+            : displayNameParts;
+    const foreignKeyOptions =
+        apiColumn.foreign_key_options
+            ?.filter(
+                (option) =>
+                    option &&
+                    option.value !== undefined &&
+                    option.value !== null &&
+                    option.label !== undefined &&
+                    option.label !== null,
+            )
+            .map((option) => ({
+                value: String(option.value),
+                label: String(option.label),
+            })) ?? [];
 
     return {
         name: apiColumn.name,
-        displayName: apiColumn.name
-            .toLowerCase()
-            .split("_")
+        displayName: normalizedDisplayParts
             .map((part, index) => {
                 if (part === "id") return "ID";
                 if (index === 0)
@@ -113,7 +137,9 @@ export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
             })
             .join(" "),
         type:
-            enumValues.length > 0
+            isForeignKey
+                ? "foreign_key"
+                : enumValues.length > 0
                 ? "enum"
                 : mapDatabaseTypeToDataType(apiColumn.type),
         required,
@@ -121,6 +147,26 @@ export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
         maxLength: apiColumn.max_length ?? undefined,
         defaultValue: apiColumn.default_value ?? undefined,
         enumValues: enumValues.length > 0 ? enumValues : undefined,
+        foreignKeyOptions:
+            foreignKeyOptions.length > 0 ? foreignKeyOptions : undefined,
+        foreignKeyTable: apiColumn.foreign_key_table ?? undefined,
+        foreignKeyValueField: apiColumn.foreign_key_value_field ?? undefined,
+        foreignKeyLabelField: apiColumn.foreign_key_label_field ?? undefined,
+    };
+}
+
+/**
+ * Map API Table to lightweight UI TableSchema (without heavy columns payload)
+ */
+export function mapAPITableSummary(apiTable: TableFormsAPI): TableSchema {
+    return {
+        id: apiTable.id.toString(),
+        name: apiTable.name_sql,
+        displayName: apiTable.name_form,
+        description: undefined,
+        category: apiTable.category_id.toString(),
+        columnCount: apiTable.columns?.length ?? 0,
+        columns: [],
     };
 }
 
@@ -128,12 +174,14 @@ export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
  * Map API Table to UI TableSchema
  */
 export function mapAPITable(apiTable: TableFormsAPI): TableSchema {
+    const columns = apiTable.columns.map(mapAPIColumn);
     return {
         id: apiTable.id.toString(),
         name: apiTable.name_sql,
         displayName: apiTable.name_form,
         description: undefined, // API doesn't provide description
         category: apiTable.category_id.toString(),
-        columns: apiTable.columns.map(mapAPIColumn),
+        columnCount: columns.length,
+        columns,
     };
 }
