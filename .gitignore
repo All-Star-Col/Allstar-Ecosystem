@@ -24,6 +24,7 @@
 # Local tooling
 .alc/
 .claude/
+.docs/
 TASKS.md
 
 # Optional: generic virtual environments anywhere in the repo
