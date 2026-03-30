@@ -8,6 +8,8 @@ interface TableCardProps {
 }
 
 export function TableCard({ table, onClick }: TableCardProps) {
+    const fieldCount = table.columnCount ?? table.columns.length;
+
     return (
         <Card
             className="cursor-pointer transition-all bg-card/90 hover:bg-primary/5 hover:border-primary/40 hover:shadow-sm group border border-border/80"
@@ -27,7 +29,7 @@ export function TableCard({ table, onClick }: TableCardProps) {
                         variant="secondary"
                         className="ml-auto shrink-0 whitespace-nowrap bg-info/15 text-info border border-info/30"
                     >
-                        {table.columns.length} campos
+                        {fieldCount} campos
                     </Badge>
                 </div>
             </CardHeader>
