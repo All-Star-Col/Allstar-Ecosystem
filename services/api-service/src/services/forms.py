@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.schemas.models import SubmitForm, CategoriesForms, TableForms, ColumnTable
 from src.core.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 
@@ -59,13 +60,12 @@ async def get_tables(db: AsyncSession) -> List[Dict[str, Any]]:
         results = []
         for t in tables_config:
             table_name = t["nombre_tabla_sql"]
-
-            # 2. Obtener columnas del schema 'access' usando Information Schema (más compatible con async)
+            logger.debug(table_name)
             query_cols = text(
                 """
                 SELECT column_name, data_type
                 FROM information_schema.columns
-                WHERE table_schema = 'access'
+                WHERE table_schema = 'data'
                 AND table_name = :table_name
             """
             )
@@ -73,6 +73,7 @@ async def get_tables(db: AsyncSession) -> List[Dict[str, Any]]:
                 query_cols, {"table_name": table_name.lower()}
             )
             columns = result_cols.mappings().all()
+            logger.debug(columns)
 
             if not columns:
                 continue
@@ -90,7 +91,6 @@ async def get_tables(db: AsyncSession) -> List[Dict[str, Any]]:
                     "columns": col_data,
                 }
             )
-
         return results
     except Exception as e:
         raise DBCommunicationError(f"Error obteniendo tablas: {e}")
@@ -116,7 +116,9 @@ async def new_tabledata(db: AsyncSession, submit_form: SubmitForm) -> str:
         placeholders = ", ".join([f":{key}" for key in row_data.keys()])
 
         # Ojo: Validar que table_name sea seguro o venga de una lista permitida (get_tables)
-        query = text(f"INSERT INTO access.{table_name} ({columns}) VALUES ({placeholders})")
+        query = text(
+            f"INSERT INTO access.{table_name} ({columns}) VALUES ({placeholders})"
+        )
 
         await db.execute(query, row_data)
         await db.commit()
@@ -166,12 +168,16 @@ async def get_allowed_columns(db: AsyncSession, table_name: str) -> set[str]:
         raise DBCommunicationError(f"No se pudo obtener columnas permitidas: {e}")
 
 
-async def validate_submit_identifiers(db: AsyncSession, submit_form: SubmitForm) -> None:
+async def validate_submit_identifiers(
+    db: AsyncSession, submit_form: SubmitForm
+) -> None:
     table_name = submit_form.table_name.lower()
     allowed_tables = await get_allowed_tables(db)
 
     if table_name not in allowed_tables:
-        raise IdentifierValidationError(f"Invalid table identifier: {submit_form.table_name}")
+        raise IdentifierValidationError(
+            f"Invalid table identifier: {submit_form.table_name}"
+        )
 
     allowed_columns = await get_allowed_columns(db, table_name)
     submitted_columns = [item.column for item in submit_form.data]

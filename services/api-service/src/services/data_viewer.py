@@ -230,7 +230,10 @@ def _extract_check_enum_values(definition: str) -> tuple[str, list[str]] | None:
 
         column = _normalize_identifier(match.group("column")).lower()
         raw_values = match.group("values")
-        values = [value.replace("''", "'") for value in CHECK_VALUES_PATTERN.findall(raw_values)]
+        values = [
+            value.replace("''", "'")
+            for value in CHECK_VALUES_PATTERN.findall(raw_values)
+        ]
         if values:
             return column, values
 
@@ -295,6 +298,13 @@ class DataViewerService:
             ):
                 order_error_code = "NO_STABLE_ORDER_COLUMN"
 
+            filtered_columns = [
+                DataViewerColumn(**column)
+                for column in metadata.columns
+                if column.get("name") != "timestamp"
+            ]
+            logger.info(filtered_columns)
+
             tables.append(
                 DataViewerTable(
                     table_id=metadata.config.table_id,
@@ -308,13 +318,15 @@ class DataViewerService:
                     can_insert=metadata.can_insert,
                     can_delete=metadata.can_delete,
                     pk_columns=metadata.pk_columns,
-                    columns=[DataViewerColumn(**column) for column in metadata.columns],
+                    columns=filtered_columns,
                 )
             )
 
         return tables
 
-    async def query(self, request_data: DataViewerQueryRequest) -> DataViewerQueryResponse:
+    async def query(
+        self, request_data: DataViewerQueryRequest
+    ) -> DataViewerQueryResponse:
         if request_data.limit > 200:
             raise LimitExceededError()
 
@@ -385,7 +397,9 @@ class DataViewerService:
             raise TableNotEditableError(request_data.table_id)
 
         normalized_pk = self._validate_pk_payload(request_data.pk, metadata)
-        normalized_changes = self._validate_changes_payload(request_data.changes, metadata)
+        normalized_changes = self._validate_changes_payload(
+            request_data.changes, metadata
+        )
 
         table_ref = (
             f"{_quote_identifier(table_config.schema_name)}."
@@ -482,8 +496,7 @@ class DataViewerService:
         try:
             available_columns_result = await self.db.execute(available_columns_query)
             available_columns = {
-                row["column_name"]
-                for row in available_columns_result.mappings().all()
+                row["column_name"] for row in available_columns_result.mappings().all()
             }
         except Exception as error:
             raise DBCommunicationError(
@@ -628,7 +641,9 @@ class DataViewerService:
             column_rows = columns_result.mappings().all()
             pk_result = await self.db.execute(pk_query, query_params)
             pk_columns = [
-                row["column_name"] for row in pk_result.mappings().all() if row["column_name"]
+                row["column_name"]
+                for row in pk_result.mappings().all()
+                if row["column_name"]
             ]
             checks_result = await self.db.execute(checks_query, query_params)
             check_rows = checks_result.mappings().all()
@@ -707,11 +722,7 @@ class DataViewerService:
             else None
         )
 
-        can_update = (
-            config.can_update
-            if config.can_update is not None
-            else has_pk
-        )
+        can_update = config.can_update if config.can_update is not None else has_pk
         if not has_pk:
             can_update = False
 
@@ -742,7 +753,9 @@ class DataViewerService:
             default_order_column=default_order_column,
         )
 
-    async def _build_query_plan(self, request_data: DataViewerQueryRequest) -> QueryPlan:
+    async def _build_query_plan(
+        self, request_data: DataViewerQueryRequest
+    ) -> QueryPlan:
         allowlist = await self._get_allowlist_map()
         table_config = allowlist.get(request_data.table_id)
         if not table_config:
@@ -901,9 +914,7 @@ class DataViewerService:
                     in_placeholders.append(f":{value_placeholder}")
                     params[value_placeholder] = value
 
-                clauses.append(
-                    f"{quoted_column} IN ({', '.join(in_placeholders)})"
-                )
+                clauses.append(f"{quoted_column} IN ({', '.join(in_placeholders)})")
                 continue
 
             if operator == "between":
@@ -965,18 +976,16 @@ class DataViewerService:
         if metadata.pk_columns:
             for pk_column in metadata.pk_columns:
                 if pk_column not in already_ordered:
-                    order_parts.append(
-                        f"{_quote_identifier(pk_column)} ASC NULLS LAST"
-                    )
+                    order_parts.append(f"{_quote_identifier(pk_column)} ASC NULLS LAST")
                     already_ordered.add(pk_column)
         else:
-            stable_column = metadata.stable_order_column or metadata.default_order_column
+            stable_column = (
+                metadata.stable_order_column or metadata.default_order_column
+            )
             if not stable_column:
                 raise NoStableOrderColumnError(request_data.table_id)
             if stable_column not in already_ordered:
-                order_parts.append(
-                    f"{_quote_identifier(stable_column)} ASC NULLS LAST"
-                )
+                order_parts.append(f"{_quote_identifier(stable_column)} ASC NULLS LAST")
 
         return " ORDER BY " + ", ".join(order_parts)
 
@@ -1008,7 +1017,9 @@ class DataViewerService:
         ]
 
         if missing_columns or extra_columns:
-            missing_text = ", ".join(sorted(missing_columns)) if missing_columns else "-"
+            missing_text = (
+                ", ".join(sorted(missing_columns)) if missing_columns else "-"
+            )
             extra_text = ", ".join(sorted(extra_columns)) if extra_columns else "-"
             raise PKRequiredError(
                 detail=f"pk must include exactly the PK columns. missing=[{missing_text}] extra=[{extra_text}]"
@@ -1044,7 +1055,9 @@ class DataViewerService:
         return normalized_changes
 
     def _build_returning_sql(self, metadata: TableMetadata) -> str:
-        table_columns = [_quote_identifier(column["name"]) for column in metadata.columns]
+        table_columns = [
+            _quote_identifier(column["name"]) for column in metadata.columns
+        ]
         return ", ".join(table_columns)
 
     async def _run_count_query(
@@ -1054,7 +1067,9 @@ class DataViewerService:
         timeout_ms: int,
     ) -> int:
         try:
-            await self.db.execute(text(f"SET LOCAL statement_timeout = {int(timeout_ms)}"))
+            await self.db.execute(
+                text(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
+            )
             count_sql = f"SELECT COUNT(*) AS total_count {base_from_where_sql}"
             count_result = await self.db.execute(text(count_sql), where_params)
             count_row = count_result.mappings().first()
@@ -1119,7 +1134,10 @@ class DataViewerService:
 
             for row in chunk_rows:
                 chunk_writer.writerow(
-                    [self._serialize_csv_value(row.get(column)) for column in plan.selected_columns]
+                    [
+                        self._serialize_csv_value(row.get(column))
+                        for column in plan.selected_columns
+                    ]
                 )
 
             exported_rows += len(chunk_rows)

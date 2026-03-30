@@ -119,7 +119,7 @@ class Settings(BaseSettings):
             self.GOOGLE_CREDENTIALS_JSON = get_secret(
                 self.ID_GOOGLE_CREDENTIALS_JSON, "GOOGLE_CREDENTIALS_JSON"
             )
-
+            logger.info("SECRETS LOADED SUCESSFULLY")
         except Exception as e:
             logger.exception(f"Error cargando configuraciones: {e}")
             raise

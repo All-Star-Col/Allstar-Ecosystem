@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, createElement } from "react";
+import { createContext, useCallback, useContext, useState, useEffect, createElement } from "react";
 import { fetchCategories, fetchTables } from "./api";
 import { mapAPICategory, mapAPITable } from "./schema";
 import type { ReactNode } from "react";
@@ -172,17 +172,13 @@ export function TablesProvider({ children }: { children: ReactNode }) {
         loadData();
     }, []);
 
-    useEffect(() => {
-        console.log("Fetched tables: ", tables)
-    }, [tables]
-    )
-    const getTableById = (id: string): TableSchema | undefined => {
+    const getTableById = useCallback((id: string): TableSchema | undefined => {
         return tables.find((table) => table.id === id);
-    };
+    }, [tables]);
 
-    const getCategoryById = (id: string): Category | undefined => {
+    const getCategoryById = useCallback((id: string): Category | undefined => {
         return categories.find((cat) => cat.id === id);
-    };
+    }, [categories]);
 
     return createElement(
         TablesContext.Provider,

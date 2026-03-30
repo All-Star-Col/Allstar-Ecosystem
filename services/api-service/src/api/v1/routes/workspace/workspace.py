@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Importaciones de tu estructura
-from src.db.database import get_db
 from src.api.deps import get_current_user, get_current_active_apps
 from src.schemas.models import User, App
 from src.core.logging_config import get_logger

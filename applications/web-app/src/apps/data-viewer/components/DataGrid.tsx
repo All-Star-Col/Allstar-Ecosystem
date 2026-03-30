@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Pencil } from "lucide-react";
 import { Switch } from "@/shared/ui/switch";
 import { Button } from "@/shared/ui/button";
@@ -19,7 +20,10 @@ interface DataGridProps {
     sort: DataViewerSort | null;
     onSortChange: (sort: DataViewerSort | null) => void;
     onEditRow?: (row: DataViewerRow) => void;
-    getRowEditState?: (row: DataViewerRow) => { enabled: boolean; reason?: string };
+    getRowEditState?: (row: DataViewerRow) => {
+        enabled: boolean;
+        reason?: string;
+    };
 }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
@@ -68,7 +72,11 @@ function CellRenderer({ value }: { value: unknown }) {
     if (cellType === "date" && typeof value === "string") {
         const parsed = Date.parse(value);
         if (!Number.isNaN(parsed)) {
-            return <span className="text-foreground">{DATE_FORMATTER.format(parsed)}</span>;
+            return (
+                <span className="text-foreground">
+                    {DATE_FORMATTER.format(parsed)}
+                </span>
+            );
         }
     }
 
@@ -91,7 +99,7 @@ function SortIcon({
     sort: DataViewerSort | null;
 }) {
     if (!sort || sort.column !== column) {
-        return <ArrowUpDown className="w-3.5 h-3.5 text-primary-foreground/60" />;
+        return <ArrowUpDown className="w-3.5 h-3.5 text-primary/50" />;
     }
 
     if (sort.direction === "asc") {
@@ -101,7 +109,11 @@ function SortIcon({
     return <ArrowDown className="w-3.5 h-3.5 text-accent" />;
 }
 
-function getStableRowKey(row: DataViewerRow, rowIndex: number, tableLabel: string): string {
+function getStableRowKey(
+    row: DataViewerRow,
+    rowIndex: number,
+    tableLabel: string,
+): string {
     const preferredKeys = ["id", "uuid", "code"];
 
     for (const key of preferredKeys) {
@@ -112,6 +124,34 @@ function getStableRowKey(row: DataViewerRow, rowIndex: number, tableLabel: strin
     }
 
     return `${tableLabel}-${rowIndex}`;
+}
+
+function EditCell({
+    row,
+    onEditRow,
+    getRowEditState,
+}: {
+    row: DataViewerRow;
+    onEditRow?: (row: DataViewerRow) => void;
+    getRowEditState?: (row: DataViewerRow) => { enabled: boolean; reason?: string };
+}) {
+    const editState = getRowEditState?.(row) ?? { enabled: true };
+
+    return (
+        <TableCell className="px-4 py-3 text-foreground align-middle">
+            <div className="flex items-center justify-center w-full">
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onEditRow?.(row)}
+                    disabled={!editState.enabled}
+                    title={editState.enabled ? "Editar fila" : editState.reason}
+                >
+                    <Pencil className="w-3.5 h-3.5" />
+                </Button>
+            </div>
+        </TableCell>
+    );
 }
 
 export function DataGrid({
@@ -125,7 +165,7 @@ export function DataGrid({
 }: DataGridProps) {
     const showEditColumn = typeof onEditRow === "function";
 
-    const handleSortToggle = (column: string) => {
+    const handleSortToggle = useCallback((column: string) => {
         if (!sort || sort.column !== column) {
             onSortChange({ column, direction: "asc" });
             return;
@@ -137,15 +177,18 @@ export function DataGrid({
         }
 
         onSortChange(null);
-    };
+    }, [sort, onSortChange]);
 
     if (rows.length === 0) {
         return (
             <div className="flex items-center justify-center h-full bg-card rounded-lg">
                 <div className="text-center">
-                    <h3 className="text-lg font-semibold mb-2">No hay registros</h3>
+                    <h3 className="text-lg font-semibold mb-2">
+                        No hay registros
+                    </h3>
                     <p className="text-sm text-muted-foreground">
-                        La tabla {tableLabel || "seleccionada"} no contiene datos.
+                        La tabla {tableLabel || "seleccionada"} no contiene
+                        datos.
                     </p>
                 </div>
             </div>
@@ -156,27 +199,34 @@ export function DataGrid({
         <div className="h-full bg-card rounded-lg shadow-sm border border-border flex flex-col overflow-hidden">
             <div className="flex-1 overflow-auto">
                 <Table>
-                    <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur border-b border-border/80 [&_tr]:border-b-0">
+                    <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur border-b border-border/70 [&_tr]:border-b-0">
                         <tr>
                             {visibleColumnKeys.map((columnKey) => (
                                 <TableHead
                                     key={columnKey}
-                                    className="text-foreground px-4 py-3"
+                                    className="text-foreground px-4 py-3 text-center align-middle"
                                 >
                                     <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => handleSortToggle(columnKey)}
-                                        className="text-foreground hover:bg-primary/5 hover:text-foreground"
+                                        onClick={() =>
+                                            handleSortToggle(columnKey)
+                                        }
+                                        className="w-full flex items-center justify-center gap-2 text-foreground hover:bg-primary/5 hover:text-foreground"
                                     >
-                                        <span>{humanizeColumnName(columnKey)}</span>
-                                        <SortIcon column={columnKey} sort={sort} />
+                                        <span>
+                                            {humanizeColumnName(columnKey)}
+                                        </span>
+                                        <SortIcon
+                                            column={columnKey}
+                                            sort={sort}
+                                        />
                                     </Button>
                                 </TableHead>
                             ))}
                             {showEditColumn && (
-                                <TableHead className="text-foreground px-4 py-3 text-right">
-                                    Acciones
+                                <TableHead className="text-foreground px-4 py-3 text-center">
+                                    Editar
                                 </TableHead>
                             )}
                         </tr>
@@ -186,40 +236,26 @@ export function DataGrid({
                         {rows.map((row, rowIndex) => (
                             <TableRow
                                 key={getStableRowKey(row, rowIndex, tableLabel)}
-                                className="hover:bg-accent/10"
+                                className="hover:bg-accent/20"
                             >
                                 {visibleColumnKeys.map((columnKey) => (
                                     <TableCell
                                         key={`${rowIndex}-${columnKey}`}
-                                        className="px-4 py-3 text-[13px] text-foreground"
+                                        className="px-4 py-3 text-[13px] text-foreground align-middle"
                                     >
-                                        <CellRenderer value={row[columnKey]} />
+                                        <div className="flex items-center justify-center w-full">
+                                            <CellRenderer
+                                                value={row[columnKey]}
+                                            />
+                                        </div>
                                     </TableCell>
                                 ))}
                                 {showEditColumn && (
-                                    <TableCell className="px-4 py-3 text-right">
-                                        {(() => {
-                                            const editState = getRowEditState?.(row) ?? {
-                                                enabled: true,
-                                            };
-                                            return (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => onEditRow?.(row)}
-                                                    disabled={!editState.enabled}
-                                                    title={
-                                                        editState.enabled
-                                                            ? "Editar fila"
-                                                            : editState.reason
-                                                    }
-                                                >
-                                                    <Pencil className="w-3.5 h-3.5" />
-                                                    Editar
-                                                </Button>
-                                            );
-                                        })()}
-                                    </TableCell>
+                                    <EditCell
+                                        row={row}
+                                        onEditRow={onEditRow}
+                                        getRowEditState={getRowEditState}
+                                    />
                                 )}
                             </TableRow>
                         ))}

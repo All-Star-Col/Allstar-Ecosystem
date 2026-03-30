@@ -52,7 +52,6 @@ async def get_data_viewer_tables(
     try:
         tables = await data_viewer_service.get_tables()
         response.headers["X-Request-ID"] = request_id
-
         log_operation(
             request_id=request_id,
             username=current_user.username,
@@ -93,7 +92,6 @@ async def get_data_viewer_tables(
             detail="Internal server error",
             code="INTERNAL_ERROR",
         )
-
 
 @router.post("/query", response_model=DataViewerQueryResponse | None)
 async def query_data_viewer(

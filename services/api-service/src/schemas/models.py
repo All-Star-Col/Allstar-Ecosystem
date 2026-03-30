@@ -3,23 +3,28 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Any, List, Literal
 from uuid import UUID
 from src.core.logging_config import get_logger
+
 logger = get_logger(__name__)
 
 
-#_____________________________________________________
+# _____________________________________________________
 #   /api/v1/login | auth
-#_____________________________________________________
+# _____________________________________________________
+
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 class TokenData(BaseModel):
     username: Optional[str] = None
 
-#_____________________________________________________
+
+# _____________________________________________________
 #   /api/v1/register, /api/v1/workspace | users
-#_____________________________________________________
+# _____________________________________________________
+
 
 class User(BaseModel):
     id: UUID
@@ -27,23 +32,59 @@ class User(BaseModel):
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
 
+
 class UserCreate(BaseModel):
     email: Optional[str] = None
     username: str
     full_name: str
     password: str
 
+
 class UserInDB(User):
     password_hash: str
 
-#_____________________________________________________
+
+class UserAdminCreate(BaseModel):
+    email: str
+    username: str
+    full_name: str
+    password: str
+
+
+class UserAdminResponse(BaseModel):
+    id: UUID
+    username: str
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    is_active: bool
+    is_email_verified: bool
+
+
+class UserUpdate(BaseModel):
+    username: Optional[str]
+    full_name: Optional[str]
+    email: Optional[str]
+    password_hash: Optional[str]
+
+
+class UserListResponse(BaseModel):
+    users: List[UserAdminResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+# _____________________________________________________
 #   /api/v1/workspace | roles, apps
-#_____________________________________________________
+# _____________________________________________________
+
 
 class Role(BaseModel):
-    id: int
+    id: UUID
+    code: str
     name: str
-    description :Optional[str] = None
+    description: Optional[str] = None
+
 
 class App(BaseModel):
     id: str
@@ -55,9 +96,11 @@ class App(BaseModel):
     icon_bg_color: str
     badge_color: str
 
-#_____________________________________________________
+
+# _____________________________________________________
 #   /api/v1/sheets/inventory | sheets
-#_____________________________________________________
+# _____________________________________________________
+
 
 class Item_LookupResponse(BaseModel):
     item: int
@@ -70,11 +113,13 @@ class Item_LookupResponse(BaseModel):
     opt_row: List[str]
     opt_conveyor: List[str]
 
+
 class Returned_Item(BaseModel):
     item: str
     product: str
     fabric: str
     client: str
+
 
 class DispatchItem(BaseModel):
     dispatch_date: str
@@ -82,18 +127,22 @@ class DispatchItem(BaseModel):
     referral: str
     conveyor: str
 
+
 class LocationItem(BaseModel):
     new_warehouse: str
     new_row: str
     referral: Optional[str] = None
 
-#_____________________________________________________
+
+# _____________________________________________________
 #   /api/v1/workspace/forms | forms
-#_____________________________________________________
+# _____________________________________________________
+
 
 class CategoriesForms(BaseModel):
     id: int
     nombre: str
+
 
 class ColumnTable(BaseModel):
     name: str
@@ -104,12 +153,14 @@ class ColumnTable(BaseModel):
     default_value: str | None = None
     enum_values: List[str] | None = None
 
+
 class TableForms(BaseModel):
     id: int
     name_sql: str
     name_form: str
     category_id: int
     columns: List[ColumnTable]
+
 
 class TableData(BaseModel):
     column: str = Field(
@@ -119,6 +170,7 @@ class TableData(BaseModel):
     )
     value: Any
 
+
 class SubmitForm(BaseModel):
     table_name: str = Field(
         min_length=1,
@@ -127,13 +179,15 @@ class SubmitForm(BaseModel):
     )
     data: List[TableData]
 
+
 class SubmitFormResponse(BaseModel):
     status: str
     correlation_id: str
 
-#_____________________________________________________
+
+# _____________________________________________________
 #   /api/v1/workspace/data-viewer | data_viewer
-#_____________________________________________________
+# _____________________________________________________
 
 DATA_VIEWER_IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]{0,62}$"
 DATA_VIEWER_TABLE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
@@ -290,32 +344,35 @@ class DataViewerRowUpdateResponse(BaseModel):
     row: dict[str, Any]
     updated_columns: List[str]
 
-#_____________________________________________________
+
+# _____________________________________________________
 #   /api/v1/orders | orders
-#_____________________________________________________
+# _____________________________________________________
+
 
 class EmailOrder(BaseModel):
     id: str
-    subject: str | None  = None
+    subject: str | None = None
     text: str | None = None
     to: str
     source_email: str
 
+
 class Product(BaseModel):
-    product_name : str
-    quantity : int
-    value : float
+    product_name: str
+    quantity: int
+    value: float
+
 
 class Client(BaseModel):
-    name : str
-    email : str
-    telephone : str
+    name: str
+    email: str
+    telephone: str
+
 
 class Order(BaseModel):
-    OCI : str
-    OCC : str
-    email_order : EmailOrder
-    products : List[Product]
-    client : Client
-
-
+    OCI: str
+    OCC: str
+    email_order: EmailOrder
+    products: List[Product]
+    client: Client

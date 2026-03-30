@@ -201,6 +201,7 @@ function Dashboard() {
                     timeString={timeString}
                     dateString={dateString}
                     name={workspaceData?.full_name}
+                    username={workspaceData?.username}
                 />
 
                 <motion.div

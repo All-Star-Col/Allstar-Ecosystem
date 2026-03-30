@@ -1,13 +1,28 @@
 import { motion } from "motion/react";
-// import { duration, stagger } from "../../../shared/animations";
+import { LogOut, User } from "lucide-react";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "../../../shared/ui/dropdown-menu";
 
 interface HeaderProps {
     timeString: string;
     dateString: string;
     name?: string;
+    username?: string;
 }
 
-export function Header({ timeString, dateString, name }: HeaderProps) {
+const handleLogOut = () => {
+    localStorage.removeItem("access_token");
+    sessionStorage.removeItem("access_token");
+    window.location.href = "/login";
+};
+
+export function Header({ timeString, dateString, name, username }: HeaderProps) {
     return (
         <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -51,13 +66,52 @@ export function Header({ timeString, dateString, name }: HeaderProps) {
                     </div>
                 </div>
 
-                <motion.div
-                    whileHover={{ scale: 1.1, rotate: 5 }}
-                    whileTap={{ scale: 0.95 }}
-                    className="w-9 h-9 rounded-full flex items-center justify-center bg-primary text-primary-foreground text-sm font-semibold cursor-pointer"
-                >
-                    {name ? name.charAt(0).toUpperCase() : "U"}
-                </motion.div>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <motion.div
+                            whileHover={{ scale: 1.1, rotate: 5 }}
+                            whileTap={{ scale: 0.95 }}
+                            className="w-9 h-9 rounded-full flex items-center justify-center bg-primary text-primary-foreground text-sm font-semibold cursor-pointer select-none outline-none"
+                        >
+                            {name ? name.charAt(0).toUpperCase() : "U"}
+                        </motion.div>
+                    </DropdownMenuTrigger>
+
+                    <DropdownMenuContent align="end" className="min-w-[220px]">
+                        {/* Cabecera informativa: nombre y email */}
+                        <DropdownMenuLabel className="flex flex-col gap-0.5">
+                            <span className="text-sm font-semibold text-foreground leading-tight">
+                                {name ?? "Usuario"}
+                            </span>
+                            <span className="text-xs font-normal text-muted-foreground truncate">
+                                {username ?? ""}
+                            </span>
+                        </DropdownMenuLabel>
+
+                        <DropdownMenuSeparator />
+
+                        {/* Mi perfil — deshabilitado hasta implementación futura */}
+                        <DropdownMenuItem disabled>
+                            <User />
+                            <span>Mi perfil</span>
+                            <span className="ml-auto text-[10px] text-muted-foreground">
+                                Próximamente
+                            </span>
+                        </DropdownMenuItem>
+
+                        <DropdownMenuSeparator />
+
+                        {/* Cerrar sesión */}
+                        <DropdownMenuItem
+                            variant="destructive"
+                            onClick={handleLogOut}
+                            className="cursor-pointer"
+                        >
+                            <LogOut />
+                            <span>Cerrar sesión</span>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </motion.div>
         </motion.div>
     );

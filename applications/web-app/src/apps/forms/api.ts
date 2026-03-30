@@ -132,7 +132,6 @@ export async function fetchCategories(
 export async function fetchTables(
     options?: RevalidateOptions,
 ): Promise<RevalidateResult<TableFormsAPI>> {
-    console.log("using table fetch");
     try {
         return await fetchWithRevalidate<TableFormsAPI>(
             `${API_SERVER}/workspace/forms/tables`,

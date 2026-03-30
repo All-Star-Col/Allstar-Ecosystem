@@ -107,17 +107,11 @@ export function Sidebar({
                                         : "bg-card text-muted-foreground border-border/70 hover:bg-primary/5 hover:text-foreground",
                                 )}
                             >
-                                <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center justify-center">
                                     <span className="text-sm font-medium text-inherit">
                                         {table.displayName}
                                     </span>
-                                    <span className="text-xs text-muted-foreground truncate">
-                                        {table.id}
-                                    </span>
                                 </div>
-                                <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                                    {table.technicalName}
-                                </p>
                                 {isBlocked && (
                                     <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-warning/10 border border-warning/20 px-2 py-0.5 text-[11px] text-warning-foreground">
                                         <AlertTriangle className="w-3 h-3" />
@@ -136,7 +130,7 @@ export function Sidebar({
                 )}
             </div>
 
-            <div className="flex center-align justify-center center-text px-5 py-4 border-t border-border/70">
+            <div className="flex items-center justify-center text-center px-5 py-4 border-t border-border/70">
                 <p className="text-xs text-muted-foreground">
                     {tables.length} {tables.length === 1 ? "tabla" : "tablas"} disponibles
                 </p>

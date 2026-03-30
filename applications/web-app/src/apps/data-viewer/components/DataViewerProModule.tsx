@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-    Search,
     Filter,
     AlertTriangle,
     ChevronLeft,
@@ -9,6 +8,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Toaster } from "@/shared/ui/sonner";
+import { Button } from "@/shared/ui/button";
+import { Input } from "@/shared/ui/input";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/shared/ui/select";
 import { Sidebar } from "./Sidebar";
 import { DataGrid } from "./DataGrid";
 import { DataToolbar } from "./DataToolbar";
@@ -43,6 +51,14 @@ import type {
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const FILTER_OPERATOR_LABELS: Record<DataViewerFilterOperator, string> = {
+    eq: "igual a",
+    contains: "contiene",
+    gt: "mayor que",
+    lt: "menor que",
+    in: "incluye",
+    between: "entre",
+};
 
 interface UiErrorState {
     code?: string;
@@ -191,18 +207,36 @@ function normalizeError(error: unknown): UiErrorState {
 }
 
 function getFilterSummary(filter: DataViewerFilter): string {
+    const columnLabel = humanizeColumnName(filter.column);
+
     if (filter.operator === "between") {
-        return `${humanizeColumnName(filter.column)} entre ${String(filter.value)} y ${String(filter.value_to)}`;
+        return `${columnLabel} entre ${String(filter.value)} y ${String(filter.value_to)}`;
     }
 
     if (filter.operator === "in") {
         const values = Array.isArray(filter.value)
             ? filter.value.map((value) => String(value)).join(", ")
             : String(filter.value);
-        return `${humanizeColumnName(filter.column)} in (${values})`;
+        return `${columnLabel} en (${values})`;
     }
 
-    return `${humanizeColumnName(filter.column)} ${filter.operator} ${String(filter.value)}`;
+    if (filter.operator === "eq") {
+        return `${columnLabel} = ${String(filter.value)}`;
+    }
+
+    if (filter.operator === "gt") {
+        return `${columnLabel} > ${String(filter.value)}`;
+    }
+
+    if (filter.operator === "lt") {
+        return `${columnLabel} < ${String(filter.value)}`;
+    }
+
+    return `${columnLabel} ${FILTER_OPERATOR_LABELS[filter.operator]} ${String(filter.value)}`;
+}
+
+function isIdLikeColumn(columnName: string): boolean {
+    return columnName === "id" || columnName.endsWith("_id");
 }
 
 function triggerCsvDownload(blob: Blob, filename: string) {
@@ -300,6 +334,14 @@ export function DataViewerProModule({
     const activeTable = useMemo(
         () => tables.find((table) => table.table_id === activeTableId),
         [activeTableId, tables],
+    );
+
+    const activeDraftColumn = useMemo(
+        () =>
+            activeTable?.columns.find(
+                (column) => column.name === draftFilter.column,
+            ),
+        [activeTable, draftFilter.column],
     );
 
     const tableEditDisabledReason = useMemo(
@@ -427,6 +469,7 @@ export function DataViewerProModule({
                 }
 
                 setTables(tableResponse);
+
                 setActiveTableId((current) => {
                     if (
                         current &&
@@ -611,13 +654,13 @@ export function DataViewerProModule({
         handleRefresh();
     };
 
-    const getGridRowEditState = (row: DataViewerRow) => {
+    const getGridRowEditState = useCallback((row: DataViewerRow) => {
         const rowEditState = canEditRow(activeTable, row);
         return {
             enabled: rowEditState.allowed,
             reason: rowEditState.reason,
         };
-    };
+    }, [activeTable]);
 
     const handleEditRow = (row: DataViewerRow) => {
         const rowEditState = canEditRow(activeTable, row);
@@ -818,11 +861,31 @@ export function DataViewerProModule({
     const canGoPrev = queryResult.offset > 0;
     const canGoNext = queryResult.has_more;
 
-    const technicalStatusText = includeTotal
-        ? queryResult.total_count === null
-            ? "Total no disponible"
-            : `${queryResult.total_count.toLocaleString("es-CO")} registros`
-        : "Conteo total desactivado";
+    const draftValuePlaceholder = useMemo(() => {
+        if (draftFilter.operator === "between") {
+            return "Valor inicial";
+        }
+
+        if (draftFilter.operator === "in") {
+            return isIdLikeColumn(draftFilter.column)
+                ? "Ej: 1001,1002,1003"
+                : "valor1, valor2";
+        }
+
+        if (isIdLikeColumn(draftFilter.column)) {
+            return "Ej: 1001";
+        }
+
+        if (!activeDraftColumn) {
+            return "Valor";
+        }
+
+        return `Valor de ${humanizeColumnName(activeDraftColumn.name)}`;
+    }, [activeDraftColumn, draftFilter.column, draftFilter.operator]);
+
+    const handleClearFilters = () => {
+        setFilters([]);
+    };
 
     return (
         <div
@@ -851,7 +914,7 @@ export function DataViewerProModule({
 
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <div className="bg-card border-b border-border px-8 py-6">
-                    <div className="flex items-center justify-between mb-4 gap-6">
+                    <div className="flex items-center justify-between gap-6">
                         <div className="flex items-center gap-4">
                             <div className="flex items-center gap-3">
                                 <h1 className="text-2xl font-semibold text-foreground">
@@ -889,150 +952,185 @@ export function DataViewerProModule({
                                         </span>
                                     </div>
                                 )}
-                                <p className="text-sm text-muted-foreground">
-                                    {technicalStatusText}
-                                </p>
+                            </div>
+                        </div>
+
+                        <div className="flex gap-4 flex-wrap items-end">
+                            <div className="min-w-[320px] flex-1 rounded-xl border border-border/70 bg-muted/30 px-3 py-3">
+                                <div className="flex flex-wrap items-end gap-2">
+                                    <Select
+                                        value={draftFilter.column || undefined}
+                                        onValueChange={(nextColumn) =>
+                                            setDraftFilter((previous) => ({
+                                                ...previous,
+                                                column: nextColumn,
+                                                operator: isIdLikeColumn(
+                                                    nextColumn,
+                                                )
+                                                    ? "eq"
+                                                    : previous.operator,
+                                            }))
+                                        }
+                                        disabled={!activeTable}
+                                    >
+                                        <SelectTrigger
+                                            size="sm"
+                                            className="w-[190px]"
+                                        >
+                                            <SelectValue placeholder="Columna" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {(activeTable?.columns ?? []).map(
+                                                (column) => (
+                                                    <SelectItem
+                                                        key={column.name}
+                                                        value={column.name}
+                                                    >
+                                                        {humanizeColumnName(
+                                                            column.name,
+                                                        )}
+                                                    </SelectItem>
+                                                ),
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+
+                                    <Select
+                                        value={draftFilter.operator}
+                                        onValueChange={(nextOperator) =>
+                                            setDraftFilter((previous) => ({
+                                                ...previous,
+                                                operator:
+                                                    nextOperator as DataViewerFilterOperator,
+                                            }))
+                                        }
+                                        disabled={!activeTable}
+                                    >
+                                        <SelectTrigger
+                                            size="sm"
+                                            className="w-[160px]"
+                                        >
+                                            <SelectValue placeholder="Operador" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="eq">
+                                                igual a
+                                            </SelectItem>
+                                            <SelectItem value="contains">
+                                                contiene
+                                            </SelectItem>
+                                            <SelectItem value="gt">
+                                                mayor que
+                                            </SelectItem>
+                                            <SelectItem value="lt">
+                                                menor que
+                                            </SelectItem>
+                                            <SelectItem value="in">
+                                                incluye
+                                            </SelectItem>
+                                            <SelectItem value="between">
+                                                entre
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+
+                                    <Input
+                                        value={draftFilter.value}
+                                        onChange={(event) =>
+                                            setDraftFilter((previous) => ({
+                                                ...previous,
+                                                value: event.target.value,
+                                            }))
+                                        }
+                                        placeholder={draftValuePlaceholder}
+                                        className="h-8 min-w-[170px] flex-1"
+                                        disabled={!activeTable}
+                                    />
+
+                                    {draftFilter.operator === "between" && (
+                                        <Input
+                                            value={draftFilter.valueTo}
+                                            onChange={(event) =>
+                                                setDraftFilter((previous) => ({
+                                                    ...previous,
+                                                    valueTo: event.target.value,
+                                                }))
+                                            }
+                                            placeholder="Valor final"
+                                            className="h-8 min-w-[170px] flex-1"
+                                            disabled={!activeTable}
+                                        />
+                                    )}
+
+                                    <Button
+                                        type="button"
+                                        onClick={handleAddFilter}
+                                        disabled={!activeTable}
+                                        size="sm"
+                                        variant="primary"
+                                        className="shrink-0"
+                                    >
+                                        <Filter className="h-3.5 w-3.5" />
+                                        Agregar
+                                    </Button>
+
+                                    {filters.length > 0 && (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="shrink-0"
+                                            onClick={handleClearFilters}
+                                        >
+                                            Limpiar
+                                        </Button>
+                                    )}
+                                </div>
+
+                                {filters.length > 0 && (
+                                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                                        {filters.map((filter, index) => (
+                                            <span
+                                                key={`${filter.column}-${filter.operator}-${index}`}
+                                                className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs text-primary"
+                                            >
+                                                <span className="truncate">
+                                                    {getFilterSummary(filter)}
+                                                </span>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon-sm"
+                                                    onClick={() =>
+                                                        setFilters((previous) =>
+                                                            previous.filter(
+                                                                (
+                                                                    _,
+                                                                    candidateIndex,
+                                                                ) =>
+                                                                    candidateIndex !==
+                                                                    index,
+                                                            ),
+                                                        )
+                                                    }
+                                                    className="size-5 rounded-full text-primary hover:text-destructive"
+                                                >
+                                                    <X className="w-3.5 h-3.5" />
+                                                </Button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
                         <DataToolbar
                             onExportCSV={handleExport}
-                            onRefresh={handleRefresh}
-                            columns={activeTable?.columns ?? []}
-                            visibleColumns={visibleColumns}
-                            onToggleColumn={handleToggleColumn}
-                            includeTotal={includeTotal}
-                            onIncludeTotalChange={setIncludeTotal}
                             disabled={
                                 !activeTable || isTablesLoading || isExporting
                             }
                         />
                     </div>
-
-                    <div className="flex gap-4 flex-wrap items-end">
-                        <div className="relative max-w-md w-full">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                            <input
-                                type="text"
-                                placeholder="Buscar en todos los campos..."
-                                value={globalFilterInput}
-                                onChange={(event) =>
-                                    setGlobalFilterInput(event.target.value)
-                                }
-                                className="w-full bg-muted border border-border rounded-lg pl-11 pr-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-                            />
-                        </div>
-
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <select
-                                value={draftFilter.column}
-                                onChange={(event) =>
-                                    setDraftFilter((previous) => ({
-                                        ...previous,
-                                        column: event.target.value,
-                                    }))
-                                }
-                                className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
-                                disabled={!activeTable}
-                            >
-                                {(activeTable?.columns ?? []).map((column) => (
-                                    <option
-                                        key={column.name}
-                                        value={column.name}
-                                    >
-                                        {humanizeColumnName(column.name)}
-                                    </option>
-                                ))}
-                            </select>
-
-                            <select
-                                value={draftFilter.operator}
-                                onChange={(event) =>
-                                    setDraftFilter((previous) => ({
-                                        ...previous,
-                                        operator: event.target
-                                            .value as DataViewerFilterOperator,
-                                    }))
-                                }
-                                className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
-                                disabled={!activeTable}
-                            >
-                                <option value="eq">eq</option>
-                                <option value="contains">contains</option>
-                                <option value="gt">gt</option>
-                                <option value="lt">lt</option>
-                                <option value="in">in</option>
-                                <option value="between">between</option>
-                            </select>
-
-                            <input
-                                value={draftFilter.value}
-                                onChange={(event) =>
-                                    setDraftFilter((previous) => ({
-                                        ...previous,
-                                        value: event.target.value,
-                                    }))
-                                }
-                                placeholder={
-                                    draftFilter.operator === "in"
-                                        ? "valor1,valor2"
-                                        : "Valor"
-                                }
-                                className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
-                                disabled={!activeTable}
-                            />
-
-                            {draftFilter.operator === "between" && (
-                                <input
-                                    value={draftFilter.valueTo}
-                                    onChange={(event) =>
-                                        setDraftFilter((previous) => ({
-                                            ...previous,
-                                            valueTo: event.target.value,
-                                        }))
-                                    }
-                                    placeholder="Valor final"
-                                    className="bg-card border border-border rounded-lg px-3 py-2.5 text-sm"
-                                    disabled={!activeTable}
-                                />
-                            )}
-
-                            <button
-                                onClick={handleAddFilter}
-                                disabled={!activeTable}
-                                className="px-3 py-2.5 rounded-lg text-sm bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed"
-                            >
-                                Agregar filtro
-                            </button>
-                        </div>
-                    </div>
-
-                    {filters.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                            {filters.map((filter, index) => (
-                                <span
-                                    key={`${filter.column}-${filter.operator}-${index}`}
-                                    className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-3 py-1 text-xs text-primary"
-                                >
-                                    {getFilterSummary(filter)}
-                                    <button
-                                        onClick={() =>
-                                            setFilters((previous) =>
-                                                previous.filter(
-                                                    (_, candidateIndex) =>
-                                                        candidateIndex !==
-                                                        index,
-                                                ),
-                                            )
-                                        }
-                                        className="text-primary hover:text-destructive"
-                                    >
-                                        <X className="w-3.5 h-3.5" />
-                                    </button>
-                                </span>
-                            ))}
-                        </div>
-                    )}
                 </div>
 
                 <div className="flex-1 overflow-hidden p-8 min-h-0 flex flex-col gap-4">

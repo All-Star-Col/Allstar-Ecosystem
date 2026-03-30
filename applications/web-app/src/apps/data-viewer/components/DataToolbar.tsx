@@ -1,19 +1,8 @@
-import { Download, RefreshCw, Eye, EyeOff } from "lucide-react";
-import { Popover, PopoverTrigger, PopoverContent } from "@/shared/ui/popover";
-import { Checkbox } from "@/shared/ui/checkbox";
-import { Switch } from "@/shared/ui/switch";
+import { Download } from "lucide-react";
 import { Button } from "@/shared/ui/button";
-import { humanizeColumnName } from "../data/columnUtils";
-import type { DataViewerColumn } from "../types";
 
 interface DataToolbarProps {
     onExportCSV: () => void;
-    onRefresh: () => void;
-    columns: DataViewerColumn[];
-    visibleColumns: Set<string>;
-    onToggleColumn: (columnId: string) => void;
-    includeTotal: boolean;
-    onIncludeTotalChange: (value: boolean) => void;
     disabled?: boolean;
 }
 

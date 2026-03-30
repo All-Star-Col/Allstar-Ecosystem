@@ -1,3 +1,6 @@
+// Import API types
+import type { CategoriesFormsAPI, TableFormsAPI, ColumnTableAPI } from "./api";
+
 export type DataType =
     | "string"
     | "varchar"
@@ -41,13 +44,6 @@ export interface Category {
     nombre: string;
     description?: string;
 }
-
-// Import API types
-import type {
-    CategoriesFormsAPI,
-    TableFormsAPI,
-    ColumnTableAPI,
-} from "./api";
 
 /**
  * Map database type string to DataType enum
@@ -99,8 +95,7 @@ export function mapAPICategory(apiCategory: CategoriesFormsAPI): Category {
  * Map API Column to UI ColumnSchema
  */
 export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
-    const nullable =
-        apiColumn.nullable ?? !(apiColumn.required ?? false);
+    const nullable = apiColumn.nullable ?? !(apiColumn.required ?? false);
     const required = !nullable || Boolean(apiColumn.required);
     const enumValues =
         apiColumn.enum_values?.filter((value) => value.trim() !== "") ?? [];
@@ -108,8 +103,15 @@ export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
     return {
         name: apiColumn.name,
         displayName: apiColumn.name
-            .replace(/_/g, " ")
-            .replace(/\b\w/g, (l) => l.toUpperCase()),
+            .toLowerCase()
+            .split("_")
+            .map((part, index) => {
+                if (part === "id") return "ID";
+                if (index === 0)
+                    return part.charAt(0).toUpperCase() + part.slice(1);
+                return part;
+            })
+            .join(" "),
         type:
             enumValues.length > 0
                 ? "enum"
