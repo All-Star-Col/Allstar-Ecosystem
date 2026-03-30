@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
 from src.db.database import get_db
 from src.schemas.models import (
-    SubmitForm,
     CategoriesForms,
+    ForeignKeyLookupResponse,
+    SubmitForm,
     TableForms,
     SubmitFormResponse,
     User,
@@ -25,15 +26,13 @@ def get_forms_service(db: AsyncSession = Depends(get_db)) -> forms.FormsService:
 
 
 @router.get("/categories", response_model=List[CategoriesForms] | None)
-async def get_categories_endpoint(
-    request: Request,
-    _current_user: User = Depends(get_current_user),
-    forms_service: forms.FormsService = Depends(get_forms_service),
-):
+async def get_categories_endpoint(request: Request,_current_user: User = Depends(get_current_user),forms_service: forms.FormsService = Depends(get_forms_service)):
     try:
         data = await forms_service.get_categories()
         return build_etag_response(request, data)
+    
     except forms.DBCommunicationError as e:
+        
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -46,6 +45,53 @@ async def get_tables_endpoint(
     try:
         data = await forms_service.get_tables()
         return build_etag_response(request, data)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tables/{table_name}", response_model=TableForms | None)
+async def get_table_endpoint(
+    table_name: str,
+    request: Request,
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        data = await forms_service.get_table(table_name)
+        return build_etag_response(request, data)
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/lookups/{table_name}/{column_name}",
+    response_model=ForeignKeyLookupResponse | None,
+)
+async def get_foreign_key_lookup_endpoint(
+    table_name: str,
+    column_name: str,
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(
+        default=forms.DEFAULT_LOOKUP_LIMIT,
+        ge=1,
+        le=forms.MAX_LOOKUP_LIMIT,
+    ),
+    offset: int = Query(default=0, ge=0),
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.get_foreign_key_lookup(
+            table_name=table_name,
+            column_name=column_name,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
     except forms.DBCommunicationError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
