@@ -144,6 +144,22 @@ class CategoriesForms(BaseModel):
     nombre: str
 
 
+class ForeignKeyOption(BaseModel):
+    value: str
+    label: str
+
+
+class ForeignKeyLookupItem(BaseModel):
+    value: str
+    label: str
+
+
+class ForeignKeyLookupResponse(BaseModel):
+    items: List[ForeignKeyLookupItem]
+    total: int | None = None
+    has_more: bool | None = None
+
+
 class ColumnTable(BaseModel):
     name: str
     type: str
@@ -152,6 +168,11 @@ class ColumnTable(BaseModel):
     max_length: int | None = None
     default_value: str | None = None
     enum_values: List[str] | None = None
+    foreign_key: bool | None = None
+    foreign_key_table: str | None = None
+    foreign_key_value_field: str | None = None
+    foreign_key_label_field: str | None = None
+    foreign_key_options: List[ForeignKeyOption] | None = None
 
 
 class TableForms(BaseModel):

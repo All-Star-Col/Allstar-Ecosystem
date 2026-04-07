@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useState, useEffect, createElement } from "react";
-import { fetchCategories, fetchTables } from "./api";
-import { mapAPICategory, mapAPITable } from "./schema";
+import { fetchCategories, fetchTableByName, fetchTables } from "./api";
+import { mapAPICategory, mapAPITable, mapAPITableSummary } from "./schema";
 import type { ReactNode } from "react";
 import type { Category, TableSchema } from "./schema";
 
-const FORMS_CACHE_KEY = "forms:tables-cache:v1";
+const FORMS_CACHE_KEY = "forms:tables-cache:v2";
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const TABLE_DETAILS_TTL_MS = 2 * 60 * 1000;
 
 interface EndpointCacheMeta {
     etag: string | null;
@@ -22,12 +23,18 @@ interface FormsCache {
     };
 }
 
+interface TableDetailCacheEntry {
+    table: TableSchema;
+    fetchedAt: number;
+}
+
 interface TablesContextType {
     categories: Category[];
     tables: TableSchema[];
     loading: boolean;
     error: string | null;
     getTableById: (id: string) => TableSchema | undefined;
+    loadTableById: (id: string) => Promise<TableSchema | undefined>;
     getCategoryById: (id: string) => Category | undefined;
 }
 
@@ -68,6 +75,9 @@ function isFresh(meta: EndpointCacheMeta): boolean {
 export function TablesProvider({ children }: { children: ReactNode }) {
     const [categories, setCategories] = useState<Category[]>([]);
     const [tables, setTables] = useState<TableSchema[]>([]);
+    const [tableDetailsById, setTableDetailsById] = useState<
+        Record<string, TableDetailCacheEntry>
+    >({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
@@ -118,7 +128,7 @@ export function TablesProvider({ children }: { children: ReactNode }) {
                     : (categoriesResponse.data ?? []).map(mapAPICategory);
                 const mappedTables = tablesResponse.notModified
                     ? (cached?.tables ?? [])
-                    : (tablesResponse.data ?? []).map(mapAPITable);
+                    : (tablesResponse.data ?? []).map(mapAPITableSummary);
 
                 setCategories(mappedCategories);
                 setTables(mappedTables);
@@ -173,8 +183,36 @@ export function TablesProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const getTableById = useCallback((id: string): TableSchema | undefined => {
-        return tables.find((table) => table.id === id);
-    }, [tables]);
+        return tableDetailsById[id]?.table ?? tables.find((table) => table.id === id);
+    }, [tableDetailsById, tables]);
+
+    const loadTableById = useCallback(async (id: string): Promise<TableSchema | undefined> => {
+        const summaryTable = tables.find((table) => table.id === id);
+        if (!summaryTable) return undefined;
+
+        const cachedDetail = tableDetailsById[id];
+        if (
+            cachedDetail &&
+            Date.now() - cachedDetail.fetchedAt < TABLE_DETAILS_TTL_MS
+        ) {
+            return cachedDetail.table;
+        }
+
+        const detailResponse = await fetchTableByName(summaryTable.name);
+        const resolvedTable = detailResponse.data
+            ? mapAPITable(detailResponse.data)
+            : summaryTable;
+
+        setTableDetailsById((previous) => ({
+            ...previous,
+            [id]: {
+                table: resolvedTable,
+                fetchedAt: Date.now(),
+            },
+        }));
+
+        return resolvedTable;
+    }, [tableDetailsById, tables]);
 
     const getCategoryById = useCallback((id: string): Category | undefined => {
         return categories.find((cat) => cat.id === id);
@@ -189,6 +227,7 @@ export function TablesProvider({ children }: { children: ReactNode }) {
                 loading,
                 error,
                 getTableById,
+                loadTableById,
                 getCategoryById,
             },
         },

@@ -1,14 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useTables } from "../store";
-import { submitFormData } from "../api";
+import { fetchForeignKeyLookup, submitFormData } from "../api";
 import type { SubmitFormAPI } from "../api";
 import { DynamicFormField } from "../components/DynamicFormField";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { buildSubmitData } from "./formBuilderSubmit";
+import {
+    filterForeignKeyOptions,
+    FOREIGN_KEY_INLINE_OPTIONS_LIMIT,
+    FOREIGN_KEY_REMOTE_DEFAULT_LIMIT,
+} from "../foreignKey";
+import type { ColumnSchema, TableSchema } from "../schema";
 
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -29,9 +36,12 @@ export default function FormBuilder() {
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [tableDetails, setTableDetails] = useState<TableSchema | undefined>();
+    const [tableLoadError, setTableLoadError] = useState<string | null>(null);
 
-    const { getTableById } = useTables();
-    const table = tableId ? getTableById(tableId) : undefined;
+    const { getTableById, loadTableById } = useTables();
+    const tableSummary = tableId ? getTableById(tableId) : undefined;
+    const table = tableDetails ?? tableSummary;
 
     const visibleColumns = useMemo(() => {
         if (!table) return [];
@@ -41,23 +51,92 @@ export default function FormBuilder() {
     }, [table]);
 
     useEffect(() => {
-        setIsLoading(true);
-        const timer = setTimeout(() => {
-            setIsLoading(false);
+        let cancelled = false;
 
-            if (table) {
-                const initialData: Record<string, any> = {};
-                visibleColumns.forEach((column) => {
-                    if (column.defaultValue !== undefined) {
-                        initialData[column.name] = column.defaultValue;
-                    }
-                });
-                setFormData(initialData);
+        async function loadTableDetailsForForm() {
+            if (!tableId || !tableSummary) {
+                setTableDetails(undefined);
+                setIsLoading(false);
+                return;
             }
-        }, 500);
 
-        return () => clearTimeout(timer);
-    }, [tableId, table, visibleColumns]);
+            try {
+                setIsLoading(true);
+                setTableLoadError(null);
+
+                const resolvedTable = await loadTableById(tableId);
+                if (cancelled) return;
+
+                const nextTable = resolvedTable ?? tableSummary;
+                setTableDetails(nextTable);
+
+                const initialData: Record<string, any> = {};
+                nextTable.columns
+                    .filter((column) => !isSystemManagedColumn(column.name))
+                    .forEach((column) => {
+                        if (column.defaultValue !== undefined) {
+                            initialData[column.name] = column.defaultValue;
+                        }
+                    });
+                setFormData(initialData);
+                setErrors({});
+            } catch (error) {
+                if (cancelled) return;
+                setTableDetails(tableSummary);
+                setTableLoadError(
+                    error instanceof Error
+                        ? error.message
+                        : "No se pudo cargar el detalle de la tabla",
+                );
+            } finally {
+                if (!cancelled) {
+                    setIsLoading(false);
+                }
+            }
+        }
+
+        loadTableDetailsForForm();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [tableId, tableSummary, loadTableById]);
+
+    const handleForeignKeyLookup = useCallback(
+        async (
+            column: ColumnSchema,
+            query: string,
+            limit = FOREIGN_KEY_REMOTE_DEFAULT_LIMIT,
+        ) => {
+            const localOptions = column.foreignKeyOptions ?? [];
+            const isSmallLookup =
+                localOptions.length > 0 &&
+                localOptions.length <= FOREIGN_KEY_INLINE_OPTIONS_LIMIT;
+
+            if (isSmallLookup) {
+                return filterForeignKeyOptions(localOptions, query, limit);
+            }
+
+            if (!table) {
+                return filterForeignKeyOptions(localOptions, query, limit);
+            }
+
+            try {
+                return await fetchForeignKeyLookup({
+                    tableName: table.name,
+                    columnName: column.name,
+                    query,
+                    limit,
+                });
+            } catch (error) {
+                if (localOptions.length > 0) {
+                    return filterForeignKeyOptions(localOptions, query, limit);
+                }
+                throw error;
+            }
+        },
+        [table],
+    );
 
     const handleFieldChange = (fieldName: string, value: any) => {
         setFormData((prev) => ({ ...prev, [fieldName]: value }));
@@ -114,12 +193,7 @@ export default function FormBuilder() {
         try {
             const payload: SubmitFormAPI = {
                 table_name: table.name,
-                data: visibleColumns
-                    .filter((column) => formData[column.name] !== undefined)
-                    .map((column) => ({
-                        column: column.name,
-                        value: formData[column.name],
-                    })),
+                data: buildSubmitData(visibleColumns, formData),
             };
 
             const result = await submitFormData(payload);
@@ -163,7 +237,7 @@ export default function FormBuilder() {
         toast.info("Formulario limpiado");
     };
 
-    if (!table) {
+    if (!tableSummary && !isLoading) {
         return <NotFound />;
     }
 
@@ -202,6 +276,11 @@ export default function FormBuilder() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="pt-6">
+                        {tableLoadError && (
+                            <p className="mb-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                                {tableLoadError}
+                            </p>
+                        )}
                         {isLoading ? (
                             <div className="space-y-6">
                                 {[1, 2, 3, 4].map((i) => (
@@ -231,6 +310,9 @@ export default function FormBuilder() {
                                                         column.name,
                                                         value,
                                                     )
+                                                }
+                                                onForeignKeyLookup={
+                                                    handleForeignKeyLookup
                                                 }
                                                 error={errors[column.name]}
                                             />

@@ -54,11 +54,12 @@ export const humanizeColumnName = (columnName: string): string => {
         columnName
             .toLowerCase()
             .split("_")
+            .map((part) => (part === "id" ? "" : part))
+            .filter((part) => part !== "")
             .map((part, index) => {
-                if (part === "id") return "ID";
-                // Solo la primera palabra lleva mayúscula inicial
-                if (index === 0)
+                if (index === 0) {
                     return part.charAt(0).toUpperCase() + part.slice(1);
+                }
                 return part;
             })
             .join(" ")
