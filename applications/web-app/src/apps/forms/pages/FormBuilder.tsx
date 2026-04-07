@@ -258,7 +258,7 @@ export default function FormBuilder() {
                         <div className="h-8 w-px bg-border" aria-hidden />
                         <div>
                             <h1 className="text-2xl font-semibold leading-tight text-foreground">
-                                {table.displayName}
+                                {table?.displayName}
                             </h1>
                             <p className="text-sm text-muted-foreground">
                                 Nuevo registro
@@ -272,7 +272,7 @@ export default function FormBuilder() {
                 <Card className="border border-border/80 shadow-sm bg-card">
                     <CardHeader className="border-b bg-muted/20">
                         <CardTitle className="text-xl font-semibold text-foreground">
-                            Nuevo registro: {table.displayName}
+                            Nuevo registro: {table?.displayName}
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="pt-6">
@@ -355,7 +355,7 @@ export default function FormBuilder() {
                 open={showConfirmModal}
                 onOpenChange={setShowConfirmModal}
                 onConfirm={handleConfirm}
-                tableName={table.displayName}
+                tableName={table?.displayName ?? ""}
             />
         </div>
     );
