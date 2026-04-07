@@ -10,7 +10,7 @@ from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 if not settings.POSTGRES_URL_DATABASE:
-    raise RuntimeError("DATABASE_URL no está definido en variables de entorno")
+    raise RuntimeError("POSTGRES_URL_DATABASE no está definido en variables de entorno")
 if not settings.SQLSERVER_URL_DATABASE:
     raise RuntimeError(
         "SQLSERVER_URL_DATABASE no está definido en variables de entorno"
