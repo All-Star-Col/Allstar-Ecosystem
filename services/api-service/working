@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+PROJECT_NAME="${PROJECT_NAME:-api-service}"
+CORE_SERVICE="${CORE_SERVICE:-allstar-api-dev}"
+MIN_SLEEP="${MIN_SLEEP:-1}"
+MAX_SLEEP="${MAX_SLEEP:-5}"
+
+log() {
+  printf "\n[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
+}
+
+ok() {
+  printf "[OK] %s\n" "$1"
+}
+
+warn() {
+  printf "[WARN] %s\n" "$1"
+}
+
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+rand_between() {
+  local min="$1"
+  local max="$2"
+  echo $(( RANDOM % (max - min + 1) + min ))
+}
+
+pause_random() {
+  local s
+  s="$(rand_between "$MIN_SLEEP" "$MAX_SLEEP")"
+  sleep "$s"
+}
+
+run_safe() {
+  local title="$1"
+  shift
+  log "$title"
+  timeout 12s bash -lc "$*" 2>&1 || warn "La tarea no pudo completarse: $title"
+}
+
+task_time() {
+  run_safe "Consultando hora del sistema" \
+    'date; echo; timedatectl 2>/dev/null | sed -n "1,6p" || true'
+}
+
+task_uptime() {
+  run_safe "Revisando carga y uptime" \
+    'uptime; echo; cat /proc/loadavg'
+}
+
+task_memory() {
+  run_safe "Tomando snapshot de memoria" \
+    'free -h; echo; vmstat 1 2 | tail -n 1'
+}
+
+task_disk() {
+  run_safe "Validando uso de disco" \
+    'df -h /; echo; du -sh . 2>/dev/null || true'
+}
+
+task_top_cpu() {
+  run_safe "Listando procesos con más CPU" \
+    'ps -eo pid,ppid,comm,%cpu,%mem --sort=-%cpu | head -n 12'
+}
+
+task_top_mem() {
+  run_safe "Listando procesos con más memoria" \
+    'ps -eo pid,ppid,comm,%cpu,%mem --sort=-%mem | head -n 12'
+}
+
+task_recent_files() {
+  run_safe "Buscando archivos recientes del proyecto" \
+    'find . -maxdepth 2 -type f -printf "%TY-%Tm-%Td %TH:%TM %p\n" 2>/dev/null | sort -r | head -n 12'
+}
+
+task_repo_status() {
+  if has_cmd git && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    run_safe "Revisando estado del repositorio" \
+      'git status --short --branch; echo; git log --oneline -n 3 2>/dev/null || true'
+  else
+    warn "No es un repo git o git no está disponible"
+  fi
+}
+
+task_env_preview() {
+  run_safe "Leyendo variables visibles del entorno" \
+    'printf "PWD=%s\nUSER=%s\nSHELL=%s\n" "$PWD" "${USER:-unknown}" "${SHELL:-unknown}"; echo; env | sort | grep -E "^(BW_|DOCKER_|COMPOSE_|NODE_|PYTHON|PATH=)" | head -n 20 || true'
+}
+
+task_network() {
+  if has_cmd ss; then
+    run_safe "Revisando sockets y puertos activos" \
+      'ss -tulpn 2>/dev/null | head -n 20 || ss -tul 2>/dev/null | head -n 20'
+  else
+    warn "ss no está disponible"
+  fi
+}
+
+task_ip() {
+  run_safe "Consultando red local" \
+    'hostname; echo; hostname -I 2>/dev/null || true; echo; ip -brief addr 2>/dev/null || true'
+}
+
+task_dmesg_tail() {
+  if has_cmd dmesg; then
+    run_safe "Leyendo eventos recientes del kernel" \
+      'dmesg --ctime --nopager 2>/dev/null | tail -n 15 || dmesg 2>/dev/null | tail -n 15'
+  else
+    warn "dmesg no está disponible"
+  fi
+}
+
+task_journal_tail() {
+  if has_cmd journalctl; then
+    run_safe "Leyendo eventos recientes del sistema" \
+      'journalctl -n 15 --no-pager 2>/dev/null || true'
+  else
+    warn "journalctl no está disponible"
+  fi
+}
+
+task_open_files() {
+  if has_cmd lsof; then
+    run_safe "Inspeccionando archivos abiertos del proyecto" \
+      'lsof +D . 2>/dev/null | head -n 20 || true'
+  else
+    warn "lsof no está instalado"
+  fi
+}
+
+task_docker_ps() {
+  if has_cmd docker; then
+    run_safe "Consultando contenedores" \
+      'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
+  else
+    warn "Docker no está disponible"
+  fi
+}
+
+task_docker_compose_ps() {
+  if has_cmd docker; then
+    run_safe "Consultando estado del compose" \
+      'docker compose ps 2>/dev/null || true'
+  else
+    warn "Docker no está disponible"
+  fi
+}
+
+task_docker_logs() {
+  if has_cmd docker; then
+    run_safe "Leyendo últimas trazas del servicio principal" \
+      "docker compose logs --tail=$(rand_between 10 30) ${CORE_SERVICE} 2>/dev/null || docker compose logs --tail=15 2>/dev/null || true"
+  else
+    warn "Docker no está disponible"
+  fi
+}
+
+task_docker_restart() {
+  if has_cmd docker; then
+    run_safe "Reiniciando servicio principal" \
+      "docker compose restart ${CORE_SERVICE} 2>/dev/null || true"
+  else
+    warn "Docker no está disponible"
+  fi
+}
+
+task_docker_stats() {
+  if has_cmd docker; then
+    run_safe "Tomando snapshot de consumo de contenedores" \
+      'docker stats --no-stream 2>/dev/null || true'
+  else
+    warn "Docker no está disponible"
+  fi
+}
+
+task_healthcheck() {
+  if has_cmd curl; then
+    run_safe "Ejecutando healthcheck local" \
+      'for url in http://localhost:8000/health http://localhost:8000/docs http://localhost:3000 http://localhost:8080; do echo "Probando $url"; curl -fsS -m 4 "$url" >/dev/null && echo "OK $url" && exit 0; done; echo "No respondió ningún endpoint"; exit 0'
+  else
+    warn "curl no está disponible"
+  fi
+}
+
+task_tree_view() {
+  if has_cmd tree; then
+    run_safe "Mostrando estructura del proyecto" \
+      'tree -L 2 -a -I ".git|node_modules|.venv|venv|dist|build|__pycache__" | head -n 80'
+  else
+    run_safe "Mostrando estructura básica del proyecto" \
+      'find . -maxdepth 2 | sed "s#^\./##" | sort | head -n 80'
+  fi
+}
+
+task_python_info() {
+  if has_cmd python3; then
+    run_safe "Consultando entorno Python" \
+      'python3 --version; echo; python3 - <<PY
+import sys, platform
+print("Executable:", sys.executable)
+print("Version:", sys.version.split()[0])
+print("Platform:", platform.platform())
+PY'
+  else
+    warn "python3 no está disponible"
+  fi
+}
+
+task_node_info() {
+  if has_cmd node; then
+    run_safe "Consultando entorno Node" \
+      'node --version; npm --version 2>/dev/null || true'
+  else
+    warn "node no está disponible"
+  fi
+}
+
+task_permissions() {
+  run_safe "Revisando permisos relevantes del proyecto" \
+    'ls -lah .; echo; stat . 2>/dev/null || true; echo; [ -f ./working ] && ls -lah ./working || true'
+}
+
+pick_task() {
+  local n
+  n="$(rand_between 1 21)"
+
+  case "$n" in
+    1)  task_time ;;
+    2)  task_uptime ;;
+    3)  task_memory ;;
+    4)  task_disk ;;
+    5)  task_top_cpu ;;
+    6)  task_top_mem ;;
+    7)  task_recent_files ;;
+    8)  task_repo_status ;;
+    9)  task_env_preview ;;
+    10) task_network ;;
+    11) task_ip ;;
+    12) task_dmesg_tail ;;
+    13) task_journal_tail ;;
+    14) task_open_files ;;
+    15) task_docker_ps ;;
+    16) task_docker_compose_ps ;;
+    17) task_docker_logs ;;
+    18) task_docker_restart ;;
+    19) task_docker_stats ;;
+    20) task_healthcheck ;;
+    21) task_tree_view ;;
+    *)  task_permissions ;;
+  esac
+}
+
+banner() {
+  echo "======================================================"
+  echo "   ${PROJECT_NAME} | Continuous Local Activity Monitor"
+  echo "======================================================"
+  echo "Proyecto   : ${PROJECT_NAME}"
+  echo "Directorio : ${SCRIPT_DIR}"
+  echo "Servicio   : ${CORE_SERVICE}"
+  echo "Sleep min  : ${MIN_SLEEP}s"
+  echo "Sleep max  : ${MAX_SLEEP}s"
+  echo "Inicio     : $(date '+%Y-%m-%d %H:%M:%S')"
+  echo "Detener    : Ctrl+C"
+  echo
+}
+
+shutdown() {
+  echo
+  log "Señal recibida. Cerrando monitor."
+  ok "Finalizado correctamente"
+  exit 0
+}
+
+main() {
+  trap shutdown INT TERM
+  banner
+
+  while true; do
+    pick_task
+    pause_random
+  done
+}
+
+main "$@"

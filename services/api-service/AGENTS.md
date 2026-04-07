@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-26  
-**Commit:** 14238c8  
+**Generated:** 2026-03-30  
+**Commit:** 41bea06  
 **Branch:** main
 
 ## OVERVIEW
@@ -16,7 +16,7 @@ api-service/
 │   ├── main.py                # FastAPI app + router mounting
 │   ├── api/                   # deps + v1 routers by domain
 │   ├── core/                  # config/auth/security/logging/scheduler
-│   ├── db/                    # async SQLAlchemy session wiring
+│   ├── db/                    # async SQLAlchemy session wiring + SQL Server connector
 │   ├── services/              # business logic + integrations
 │   └── schemas/               # Pydantic models & error shapes
 ├── tests/                     # API + service tests (unittest style)
@@ -33,6 +33,8 @@ api-service/
 | Routes | `src/api/v1/routes/` | Domain routers (workspace, sheets, login/register/public) |
 | Services | `src/services/` | Forms, data viewer, sheets sync, roles/users/apps |
 | Common HTTP helpers | `src/api/v1/common/http_helpers.py` | Request ID, error/validation formatting, op logging |
+| Schemas | `src/schemas/models.py` | Pydantic models for auth/workspace/forms/data viewer/sheets/orders |
+| DB wiring | `src/db/database.py` | Async Postgres session + SQL Server connector |
 | Tests | `tests/api/`, `tests/services/`, `tests/test_docker_paths.py` | Unittest + TestClient overrides |
 
 ## CONVENTIONS
@@ -66,3 +68,4 @@ pytest
 ## NOTES
 - Large modules: `src/services/data_viewer.py`, `src/services/sheets.py`; prefer helpers/refactors over route-layer duplication.
 - Scheduler triggers inventory sync every 10 minutes (see `src/core/scheduler.py`).
+- `scripts/ensure_module_loggers.py` is referenced in docs; if missing locally, recreate or fetch before running.

@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 from bitwarden_sdk import BitwardenClient, ClientSettings
 from src.core.logging_config import get_logger
@@ -44,13 +44,9 @@ class Settings(BaseSettings):
     # --- CONFIGURACIONES DE GOOGLE SHEETS Y DB EXTERNA ---
     SPREADSHEET_ID: str = ""
 
-    class Config:
-        env_file = "keys.dev.env"
-        env_file_encoding = "utf-8"
-
-    def __init__(self, **values):
-        super().__init__(**values)
-        self.load_secrets_from_bw()
+    model_config = SettingsConfigDict(
+        env_file="keys.dev.env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     def _normalize_environment(self) -> str:
         environment = (self.ENVIRONMENT or "prod").strip().lower()

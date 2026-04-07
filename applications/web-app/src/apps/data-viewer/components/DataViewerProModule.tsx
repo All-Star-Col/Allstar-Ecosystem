@@ -296,7 +296,7 @@ export function DataViewerProModule({
     const [filters, setFilters] = useState<DataViewerFilter[]>([]);
     const [sort, setSort] = useState<DataViewerSort | null>(null);
 
-    const [includeTotal, setIncludeTotal] = useState(true);
+    const [includeTotal] = useState(true);
     const [limit, setLimit] = useState(clampLimit(defaultLimit));
     const [offset, setOffset] = useState(0);
 
@@ -616,23 +616,23 @@ export function DataViewerProModule({
         queryColumnKeys,
     ]);
 
-    const handleToggleColumn = (columnId: string) => {
-        setVisibleColumns((previous) => {
-            if (previous.has(columnId) && previous.size === 1) {
-                toast.warning("Debe quedar al menos una columna visible");
-                return previous;
-            }
+    // const handleToggleColumn = (columnId: string) => {
+    //     setVisibleColumns((previous) => {
+    //         if (previous.has(columnId) && previous.size === 1) {
+    //             toast.warning("Debe quedar al menos una columna visible");
+    //             return previous;
+    //         }
 
-            const next = new Set(previous);
-            if (next.has(columnId)) {
-                next.delete(columnId);
-            } else {
-                next.add(columnId);
-            }
+    //         const next = new Set(previous);
+    //         if (next.has(columnId)) {
+    //             next.delete(columnId);
+    //         } else {
+    //             next.add(columnId);
+    //         }
 
-            return next;
-        });
-    };
+    //         return next;
+    //     });
+    // };
 
     const handleRefresh = () => {
         toast.info("Actualizando datos...");
@@ -654,13 +654,16 @@ export function DataViewerProModule({
         handleRefresh();
     };
 
-    const getGridRowEditState = useCallback((row: DataViewerRow) => {
-        const rowEditState = canEditRow(activeTable, row);
-        return {
-            enabled: rowEditState.allowed,
-            reason: rowEditState.reason,
-        };
-    }, [activeTable]);
+    const getGridRowEditState = useCallback(
+        (row: DataViewerRow) => {
+            const rowEditState = canEditRow(activeTable, row);
+            return {
+                enabled: rowEditState.allowed,
+                reason: rowEditState.reason,
+            };
+        },
+        [activeTable],
+    );
 
     const handleEditRow = (row: DataViewerRow) => {
         const rowEditState = canEditRow(activeTable, row);

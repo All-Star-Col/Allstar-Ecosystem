@@ -128,6 +128,7 @@ async def list_users(
             UserAdminResponse(
                 id=row["id"],
                 username=row["username"],
+                email=row["email"],
                 full_name=row["full_name"],
                 is_active=row["is_active"],
                 is_email_verified=row["is_email_verified"],
@@ -140,15 +141,13 @@ async def list_users(
 
 async def update_user(db: AsyncSession, data: UserUpdate, user_id: UUID) -> None:
 
-    q_values = [str(value) + ":" + str(value) for value in data.model_fields_set]
+    q_values = [str(value) + "=:" + str(value) for value in data.model_fields_set]
 
-    query = f"UPDATE auth.users SET {", ".join(q_values)} WHERE id = :id"
-    q = text(query)
+    q = text(f"UPDATE auth.users SET {", ".join(q_values)} WHERE id = :id")
 
-    await db.execute(
-        q,
-        {"id": (user_id)},
-    )
+    update_values = data.model_dump()
+    print("data", update_values, type(update_values))
+    await db.execute(q, {"id": user_id} | update_values)
     await db.commit()
 
 
