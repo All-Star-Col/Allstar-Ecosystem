@@ -39,7 +39,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://purple-water-03112dc0f.1.azurestaticapps.net",
+        "https://api-vm.tail6cef8e.ts.net",  # API backend domain for preflight requests
     ]
 
     # --- CONFIGURACIONES DE GOOGLE SHEETS Y DB EXTERNA ---

@@ -26,8 +26,9 @@ app.add_middleware(
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_origin_regex=r"http://100\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\.\d+\.\d+(:\d+)?",
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    max_age=600,
 )
 
 app.include_router(login.router, prefix="/api/v1", tags=["Auth"])
