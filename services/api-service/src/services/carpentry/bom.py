@@ -1,3 +1,5 @@
+from datetime import date, datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging_config import get_logger
@@ -29,6 +31,38 @@ def _calibre_con_mm(value):
         return None
     without_mm = str(calibre).replace("mm", "").replace("MM", "").strip()
     return f"{without_mm} mm" if without_mm else None
+
+
+def _int_or_none(value, field_name: str) -> int | None:
+    value = clean(value)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(f"Valor inválido para {field_name}.", 400, "VALIDATION") from exc
+
+
+def _int_or_zero(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _date_or_none(value, field_name: str) -> date | None:
+    value = clean(value)
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text[:10]).date()
+    except ValueError as exc:
+        raise AppError(f"Fecha inválida en {field_name}.", 400, "VALIDATION") from exc
 
 
 def _nombre_canonico_por_categoria(data: dict) -> str | None:
@@ -126,7 +160,7 @@ async def _find_material_id_by_variant(db: AsyncSession, data: dict) -> int | No
 
 async def listar_items_por_proyecto(db: AsyncSession, payload: dict | None = None) -> list[dict]:
     payload = payload or {}
-    proyecto_id = payload.get("proyecto_id")
+    proyecto_id = _int_or_none(payload.get("proyecto_id"), "proyecto_id")
 
     if not proyecto_id:
         return []
@@ -146,11 +180,16 @@ async def listar_items_por_proyecto(db: AsyncSession, payload: dict | None = Non
 
 async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
+    piso_raw = clean(payload.get("piso"))
+    try:
+        piso = int(piso_raw) if piso_raw is not None else None
+    except (TypeError, ValueError) as exc:
+        raise AppError("Valor inválido para piso.", 400, "VALIDATION") from exc
 
     data = {
-        "proyecto_id": clean(payload.get("proyecto_id")),
+        "proyecto_id": _int_or_none(payload.get("proyecto_id"), "proyecto_id"),
         "nombre": clean(payload.get("nombre")),
-        "piso": int(payload["piso"]) if payload.get("piso") not in (None, "") else None,
+        "piso": piso,
         "apartamento": clean(payload.get("apartamento")),
     }
 
@@ -171,11 +210,16 @@ async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def actualizar_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
+    piso_raw = clean(payload.get("piso"))
+    try:
+        piso = int(piso_raw) if piso_raw is not None else None
+    except (TypeError, ValueError) as exc:
+        raise AppError("Valor inválido para piso.", 400, "VALIDATION") from exc
 
     data = {
-        "id": clean(payload.get("id")),
+        "id": _int_or_none(payload.get("id"), "id"),
         "nombre": clean(payload.get("nombre")),
-        "piso": int(payload["piso"]) if payload.get("piso") not in (None, "") else None,
+        "piso": piso,
         "apartamento": clean(payload.get("apartamento")),
     }
 
@@ -202,7 +246,7 @@ async def actualizar_item(db: AsyncSession, payload: dict | None = None) -> dict
 
 async def eliminar_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    item_id = payload.get("id")
+    item_id = _int_or_none(payload.get("id"), "id")
 
     if not item_id:
         raise AppError("ID del ítem es obligatorio.", 400, "VALIDATION")
@@ -230,8 +274,8 @@ async def eliminar_item(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def asignar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    item_id = payload.get("id")
-    lote_id = payload.get("lote_id")
+    item_id = _int_or_none(payload.get("id"), "id")
+    lote_id = _int_or_none(payload.get("lote_id"), "lote_id")
 
     if not item_id or not lote_id:
         raise AppError("ID del ítem y del lote son obligatorios.", 400, "VALIDATION")
@@ -255,7 +299,7 @@ async def asignar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def desasignar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    item_id = payload.get("id")
+    item_id = _int_or_none(payload.get("id"), "id")
 
     if not item_id:
         raise AppError("ID del ítem es obligatorio.", 400, "VALIDATION")
@@ -279,8 +323,14 @@ async def desasignar_lote(db: AsyncSession, payload: dict | None = None) -> dict
 
 async def copiar_bom_a_items(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    item_origen_id = payload.get("item_origen_id")
-    item_destinos_ids = payload.get("item_destinos_ids")
+    item_origen_id = _int_or_none(payload.get("item_origen_id"), "item_origen_id")
+    raw_destinos = payload.get("item_destinos_ids")
+    item_destinos_ids: list[int] = []
+    if isinstance(raw_destinos, list):
+        for item in raw_destinos:
+            parsed = _int_or_none(item, "item_destinos_ids")
+            if parsed is not None:
+                item_destinos_ids.append(parsed)
 
     if not item_origen_id or not isinstance(item_destinos_ids, list) or not item_destinos_ids:
         raise AppError(
@@ -334,6 +384,9 @@ async def copiar_bom_a_items(db: AsyncSession, payload: dict | None = None) -> d
 
 async def listar_bom_por_item(db: AsyncSession, payload: dict | None = None) -> list[dict]:
     payload = payload or {}
+    item_id = _int_or_none(payload.get("item_id"), "item_id")
+    if not item_id:
+        return []
 
     return await fetch_all(
         db,
@@ -344,16 +397,16 @@ async def listar_bom_por_item(db: AsyncSession, payload: dict | None = None) -> 
            JOIN materiales_catalogo mc ON mc.id = bi.material_id
            WHERE bi.item_id = $1
            ORDER BY mc.nombre""",
-        [payload.get("item_id")],
+        [item_id],
     )
 
 
 async def guardar_material_bom(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
     data = {
-        "item_id": clean(payload.get("item_id")),
-        "material_id": clean(payload.get("material_id")),
-        "cantidad_requerida": float(payload.get("cantidad_requerida")) if payload.get("cantidad_requerida") not in (None, "") else None,
+        "item_id": _int_or_none(payload.get("item_id"), "item_id"),
+        "material_id": _int_or_none(payload.get("material_id"), "material_id"),
+        "cantidad_requerida": decimal_or_none(payload.get("cantidad_requerida")),
         "notas": clean(payload.get("notas")),
     }
 
@@ -386,8 +439,11 @@ async def guardar_material_bom(db: AsyncSession, payload: dict | None = None) ->
 
 async def eliminar_material_bom(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
+    bom_id = _int_or_none(payload.get("id"), "id")
+    if not bom_id:
+        raise AppError("ID del BOM es obligatorio.", 400, "VALIDATION")
     async with db.begin():
-        await execute(db, "DELETE FROM bom_items WHERE id = $1", [payload.get("id")])
+        await execute(db, "DELETE FROM bom_items WHERE id = $1", [bom_id])
     return {"ok": True}
 
 
@@ -448,7 +504,7 @@ async def listar_materiales(db: AsyncSession, filters: dict | None = None) -> li
 async def guardar_material(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
     data = {
-        "id": clean(payload.get("id")),
+        "id": _int_or_none(payload.get("id"), "id"),
         "nombre": clean(payload.get("nombre")),
         "categoria": clean(payload.get("categoria")),
         "unidad_medida": clean(payload.get("unidad_medida")),
@@ -591,6 +647,9 @@ async def guardar_material(db: AsyncSession, payload: dict | None = None) -> dic
 
 async def desactivar_material(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
+    material_id = _int_or_none(payload.get("id"), "id")
+    if not material_id:
+        raise AppError("ID del material es obligatorio.", 400, "VALIDATION")
 
     async with db.begin():
         rows = await execute(
@@ -599,7 +658,7 @@ async def desactivar_material(db: AsyncSession, payload: dict | None = None) -> 
                SET activo = FALSE
                WHERE id = $1
                RETURNING id""",
-            [payload.get("id")],
+            [material_id],
         )
 
     if not rows:
@@ -610,17 +669,14 @@ async def desactivar_material(db: AsyncSession, payload: dict | None = None) -> 
 
 async def crear_items_bulk(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    proyecto_id = payload.get("proyecto_id")
+    proyecto_id = _int_or_none(payload.get("proyecto_id"), "proyecto_id")
     nombre = payload.get("nombre")
     cantidad = payload.get("cantidad")
 
     if not proyecto_id or not nombre:
         raise AppError("Proyecto y nombre son obligatorios.", 400, "VALIDATION")
 
-    try:
-        n = int(cantidad)
-    except (TypeError, ValueError):
-        n = 0
+    n = _int_or_zero(cantidad)
 
     if n < 1 or n > 500:
         raise AppError("La cantidad debe ser un número entre 1 y 500.", 400, "VALIDATION")

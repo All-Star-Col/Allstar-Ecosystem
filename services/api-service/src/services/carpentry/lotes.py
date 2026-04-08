@@ -1,4 +1,5 @@
 import unicodedata
+from datetime import date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,28 +24,61 @@ def _es_seccionado(proceso_nombre: str | None) -> bool:
     return "seccionado" in _normalize_text(proceso_nombre)
 
 
+def _int_or_none(value, field_name: str) -> int | None:
+    value = clean(value)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(f"Valor inválido para {field_name}.", 400, "VALIDATION") from exc
+
+
+def _date_or_none(value, field_name: str) -> date | None:
+    value = clean(value)
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text[:10]).date()
+    except ValueError as exc:
+        raise AppError(f"Fecha inválida en {field_name}.", 400, "VALIDATION") from exc
+
+
 def _normalize_input(data: dict) -> dict:
+    prioridad_raw = clean(data.get("prioridad"))
+    try:
+        prioridad = int(prioridad_raw or 2)
+    except (TypeError, ValueError) as exc:
+        raise AppError("Valor inválido para prioridad.", 400, "VALIDATION") from exc
+
     return {
-        "proyecto_id": clean(data.get("proyecto_id")),
+        "proyecto_id": _int_or_none(data.get("proyecto_id"), "proyecto_id"),
         "nombre": clean(data.get("nombre")),
         "descripcion": clean(data.get("descripcion")),
         "material_ref": clean(data.get("material_ref")),
         "estado": clean(data.get("estado")) or "pendiente",
-        "proceso_actual_id": clean(data.get("proceso_actual_id")),
-        "fecha_inicio_prog": clean(data.get("fecha_inicio_prog")),
-        "fecha_entrega_prog": clean(data.get("fecha_entrega_prog")),
-        "prioridad": int(data.get("prioridad") or 2),
+        "proceso_actual_id": _int_or_none(data.get("proceso_actual_id"), "proceso_actual_id"),
+        "fecha_inicio_prog": _date_or_none(data.get("fecha_inicio_prog"), "fecha_inicio_prog"),
+        "fecha_entrega_prog": _date_or_none(data.get("fecha_entrega_prog"), "fecha_entrega_prog"),
+        "prioridad": prioridad,
         "notas": clean(data.get("notas")),
     }
 
 
 async def listar_lotes(db: AsyncSession, filters: dict | None = None) -> list[dict]:
     filters = filters or {}
+    proyecto_id = _int_or_none(filters.get("proyecto_id"), "proyecto_id")
+    proceso_actual_id = _int_or_none(filters.get("proceso_actual_id"), "proceso_actual_id")
     where_sql, values, _ = build_where(
         {
             "estado": filters.get("estado"),
-            "proyecto_id": filters.get("proyecto_id"),
-            "proceso_actual_id": filters.get("proceso_actual_id"),
+            "proyecto_id": proyecto_id,
+            "proceso_actual_id": proceso_actual_id,
         },
         {
             "estado": "l.estado",
@@ -72,6 +106,7 @@ async def listar_lotes(db: AsyncSession, filters: dict | None = None) -> list[di
 async def guardar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
     data = _normalize_input(payload)
+    lote_id = _int_or_none(payload.get("id"), "id")
 
     if not data["proyecto_id"] or not data["nombre"]:
         raise AppError("Proyecto y nombre del lote son obligatorios.", 400, "VALIDATION")
@@ -94,7 +129,7 @@ async def guardar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
                     "VALIDATION",
                 )
 
-        if payload.get("id"):
+        if lote_id:
             rows = await execute(
                 db,
                 """UPDATE lotes
@@ -121,7 +156,7 @@ async def guardar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
                     data["fecha_entrega_prog"],
                     data["prioridad"],
                     data["notas"],
-                    payload["id"],
+                    lote_id,
                 ],
             )
 
@@ -184,7 +219,9 @@ async def guardar_lote(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def obtener_lote_detalle(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    lote_id = payload.get("id")
+    lote_id = _int_or_none(payload.get("id"), "id")
+    if not lote_id:
+        raise AppError("Debes indicar el lote.", 400, "VALIDATION")
 
     lote = await fetch_one(
         db,
@@ -261,7 +298,7 @@ async def obtener_lote_detalle(db: AsyncSession, payload: dict | None = None) ->
 
 async def actualizar_lote_proceso(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    process_row_id = payload.get("id")
+    process_row_id = _int_or_none(payload.get("id"), "id")
 
     if not process_row_id:
         raise AppError("Falta el identificador del proceso del lote.", 400, "VALIDATION")
@@ -280,7 +317,8 @@ async def actualizar_lote_proceso(db: AsyncSession, payload: dict | None = None)
         if not proceso:
             raise AppError("Proceso del lote no encontrado.", 404, "NOT_FOUND")
 
-        maquina_id = clean(payload.get("maquina_id"))
+        maquina_id = _int_or_none(payload.get("maquina_id"), "maquina_id")
+        responsable_id = _int_or_none(payload.get("responsable_id"), "responsable_id")
 
         if _requiere_maquina(proceso.get("proceso_nombre")) and not maquina_id:
             if _es_seccionado(proceso.get("proceso_nombre")):
@@ -336,11 +374,11 @@ async def actualizar_lote_proceso(db: AsyncSession, payload: dict | None = None)
                RETURNING lote_id, proceso_id, estado""",
             [
                 clean(payload.get("estado")),
-                clean(payload.get("responsable_id")),
+                responsable_id,
                 maquina_id,
-                clean(payload.get("fecha_programada")),
-                clean(payload.get("fecha_inicio_real")),
-                clean(payload.get("fecha_fin_real")),
+                _date_or_none(payload.get("fecha_programada"), "fecha_programada"),
+                _date_or_none(payload.get("fecha_inicio_real"), "fecha_inicio_real"),
+                _date_or_none(payload.get("fecha_fin_real"), "fecha_fin_real"),
                 clean(payload.get("motivo_bloqueo")),
                 clean(payload.get("notas")),
                 process_row_id,
@@ -390,7 +428,7 @@ async def actualizar_lote_proceso(db: AsyncSession, payload: dict | None = None)
 
 async def iniciar_lote_proceso(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    lote_id = payload.get("lote_id")
+    lote_id = _int_or_none(payload.get("lote_id"), "lote_id")
 
     if not lote_id:
         raise AppError("Debes indicar el lote.", 400, "VALIDATION")
@@ -467,7 +505,7 @@ async def iniciar_lote_proceso(db: AsyncSession, payload: dict | None = None) ->
 
 async def avanzar_lote_proceso(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    lote_id = payload.get("lote_id")
+    lote_id = _int_or_none(payload.get("lote_id"), "lote_id")
 
     if not lote_id:
         raise AppError("Debes indicar el lote.", 400, "VALIDATION")
@@ -554,7 +592,7 @@ async def avanzar_lote_proceso(db: AsyncSession, payload: dict | None = None) ->
 
 async def listar_items_por_lote(db: AsyncSession, payload: dict | None = None) -> list[dict]:
     payload = payload or {}
-    lote_id = payload.get("lote_id")
+    lote_id = _int_or_none(payload.get("lote_id"), "lote_id")
 
     if not lote_id:
         return []
