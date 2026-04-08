@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # --- CONFIGS LOCALES ---
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 600
+    CARPENTRY_DB_SCHEMA: str = "carpentry"
 
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:5173",
@@ -49,6 +50,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = "keys.dev.env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
     def __init__(self, **values):
         super().__init__(**values)

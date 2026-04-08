@@ -12,6 +12,7 @@ from src.api.v1.routes.register import register
 from src.api.v1.routes.sheets import sheets
 from src.api.v1.routes.sheets.inventory import inventory
 from src.api.v1.routes.workspace import workspace
+from src.api.v1.routes.workspace.carpentry import carpentry
 from src.api.v1.routes.workspace.forms import forms
 from src.api.v1.routes.workspace.data_viewer import data_viewer
 from src.api.v1.routes.workspace.orders import orders
@@ -45,6 +46,7 @@ app.include_router(
     data_viewer.router, prefix="/api/v1/workspace/data-viewer", tags=["Workspace"]
 )
 app.include_router(users.router, prefix="/api/v1/workspace/users", tags=["Workspace"])
+app.include_router(carpentry.router, prefix="/api/v1/workspace/carpentry", tags=["Workspace"])
 
 
 @app.on_event("startup")
