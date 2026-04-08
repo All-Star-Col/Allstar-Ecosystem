@@ -63,6 +63,31 @@ def _validate_sql_identifier(identifier: str, *, field_name: str) -> str:
     return normalized
 
 
+def _extract_table_name(identifier: str, *, field_name: str) -> str:
+    normalized = _normalize_identifier(identifier)
+    parts = [part.strip() for part in normalized.split(".") if part.strip()]
+
+    if len(parts) == 1:
+        return _validate_sql_identifier(parts[0], field_name=field_name).lower()
+
+    if len(parts) == 2:
+        schema_name = _validate_sql_identifier(parts[0], field_name=field_name).lower()
+        table_name = _validate_sql_identifier(parts[1], field_name=field_name).lower()
+
+        if schema_name != FORMS_SCHEMA:
+            raise IdentifierValidationError(
+                detail=(
+                    f"Invalid schema in {field_name}: {parts[0]}. "
+                    f"Expected schema '{FORMS_SCHEMA}'"
+                )
+            )
+        return table_name
+
+    raise IdentifierValidationError(
+        detail=f"Invalid identifier in {field_name}: {identifier}",
+    )
+
+
 def _quote_identifier(identifier: str, *, field_name: str) -> str:
     validated = _validate_sql_identifier(identifier, field_name=field_name)
     return f'"{validated}"'
@@ -119,29 +144,30 @@ async def _get_visible_table_configs(
     *,
     table_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    if table_name is None:
-        query = text(
-            """
-            SELECT id, nombre_tabla_sql, nombre_tabla_ui, categoria_id
-            FROM workspace.ui_config_tablas
-            WHERE es_visible = true
-            ORDER BY id
-            """
-        )
-        result = await db.execute(query)
-        return [dict(row) for row in result.mappings().all()]
-
     query = text(
         """
         SELECT id, nombre_tabla_sql, nombre_tabla_ui, categoria_id
         FROM workspace.ui_config_tablas
         WHERE es_visible = true
-          AND lower(nombre_tabla_sql) = :table_name
         ORDER BY id
         """
     )
-    result = await db.execute(query, {"table_name": table_name})
-    return [dict(row) for row in result.mappings().all()]
+    result = await db.execute(query)
+    rows = [dict(row) for row in result.mappings().all()]
+
+    if table_name is None:
+        return rows
+
+    target_table = _extract_table_name(table_name, field_name="table_name")
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        current_table = _extract_table_name(
+            row["nombre_tabla_sql"],
+            field_name="workspace.ui_config_tablas.nombre_tabla_sql",
+        )
+        if current_table == target_table:
+            filtered.append(row)
+    return filtered
 
 
 async def _get_table_columns(
@@ -429,10 +455,10 @@ async def _build_tables_payload(
     visible_tables: set[str] = set()
     for table_config in tables_config:
         visible_tables.add(
-            _validate_sql_identifier(
+            _extract_table_name(
                 table_config["nombre_tabla_sql"],
                 field_name="workspace.ui_config_tablas.nombre_tabla_sql",
-            ).lower()
+            )
         )
 
     foreign_keys = await _get_foreign_key_metadata(
@@ -445,10 +471,10 @@ async def _build_tables_payload(
 
     payload: list[dict[str, Any]] = []
     for table_config in tables_config:
-        table_name = _validate_sql_identifier(
+        table_name = _extract_table_name(
             table_config["nombre_tabla_sql"],
             field_name="workspace.ui_config_tablas.nombre_tabla_sql",
-        ).lower()
+        )
         columns = await _get_table_columns(
             db,
             schema_name=FORMS_SCHEMA,
@@ -550,9 +576,7 @@ async def get_tables(db: AsyncSession) -> list[dict[str, Any]]:
 
 
 async def get_table(db: AsyncSession, table_name: str) -> dict[str, Any]:
-    table_identifier = _validate_sql_identifier(
-        table_name, field_name="table_name"
-    ).lower()
+    table_identifier = _extract_table_name(table_name, field_name="table_name")
 
     try:
         tables_config = await _get_visible_table_configs(
@@ -578,9 +602,7 @@ async def get_foreign_key_lookup(
     limit: int = DEFAULT_LOOKUP_LIMIT,
     offset: int = 0,
 ) -> dict[str, Any]:
-    table_identifier = _validate_sql_identifier(
-        table_name, field_name="table_name"
-    ).lower()
+    table_identifier = _extract_table_name(table_name, field_name="table_name")
     column_identifier = _validate_sql_identifier(
         column_name, field_name="column_name"
     ).lower()
@@ -652,9 +674,7 @@ async def new_tabledata(db: AsyncSession, submit_form: SubmitForm) -> str:
     Inserta datos dinamicamente en la tabla especificada.
     """
     correlation_id = f"tb_{int(datetime.now(timezone.utc).timestamp())}"
-    table_name = _validate_sql_identifier(
-        submit_form.table_name, field_name="table_name"
-    ).lower()
+    table_name = _extract_table_name(submit_form.table_name, field_name="table_name")
 
     await validate_submit_identifiers(db, submit_form)
 
@@ -698,9 +718,9 @@ async def get_allowed_tables(db: AsyncSession) -> set[str]:
         )
         result = await db.execute(query)
         return {
-            _validate_sql_identifier(
+            _extract_table_name(
                 row["nombre_tabla_sql"], field_name="allowed_table"
-            ).lower()
+            )
             for row in result.mappings()
             if row["nombre_tabla_sql"]
         }
@@ -740,9 +760,7 @@ async def get_allowed_columns(db: AsyncSession, table_name: str) -> set[str]:
 async def validate_submit_identifiers(
     db: AsyncSession, submit_form: SubmitForm
 ) -> None:
-    table_name = _validate_sql_identifier(
-        submit_form.table_name, field_name="table_name"
-    ).lower()
+    table_name = _extract_table_name(submit_form.table_name, field_name="table_name")
     allowed_tables = await get_allowed_tables(db)
 
     if table_name not in allowed_tables:

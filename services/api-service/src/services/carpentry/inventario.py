@@ -1,6 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import AppError, clean, execute, fetch_all
+
+logger = get_logger(__name__)
 
 
 async def listar_stock(db: AsyncSession, filters: dict | None = None) -> list[dict]:

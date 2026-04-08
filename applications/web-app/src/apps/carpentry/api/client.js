@@ -10,9 +10,50 @@ function normalizeBaseUrl(value) {
 
 const API_BASE_URL = normalizeBaseUrl(API_SERVER);
 const CARPENTRY_API_PATH = '/workspace/carpentry';
+const SHORT_CACHE_TTL_MS = 5000;
+const VERY_SHORT_CACHE_TTL_MS = 2500;
+const requestCache = new Map();
+const inflightRequests = new Map();
 
 function buildUrl(path) {
   return `${API_BASE_URL}${CARPENTRY_API_PATH}${path}`;
+}
+
+function stableStringify(value) {
+  if (value === null || value === undefined) return '';
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  if (typeof value === 'object') {
+    const entries = Object.entries(value)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function cacheKey(action, payload) {
+  return `${action}|${stableStringify(payload || {})}`;
+}
+
+function readCache(key) {
+  const entry = requestCache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    requestCache.delete(key);
+    return undefined;
+  }
+  return entry.data;
+}
+
+function writeCache(key, data, ttlMs) {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) return;
+  requestCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+function clearCarpentryCache() {
+  requestCache.clear();
+  inflightRequests.clear();
 }
 
 async function request(path, options = {}) {
@@ -45,12 +86,39 @@ async function request(path, options = {}) {
   return body;
 }
 
-async function invoke(action, payload = {}) {
-  const response = await request('/invoke', {
+async function invoke(action, payload = {}, options = {}) {
+  const ttlMs = Number(options.ttlMs || 0);
+  const useCache = ttlMs > 0;
+  const key = cacheKey(action, payload);
+
+  if (useCache) {
+    const cached = readCache(key);
+    if (cached !== undefined) return cached;
+    const inflight = inflightRequests.get(key);
+    if (inflight) return inflight;
+  }
+
+  const execution = request('/invoke', {
     method: 'POST',
     body: JSON.stringify({ action, payload }),
-  });
-  return response?.data;
+    signal: options.signal,
+  }).then((response) => response?.data);
+
+  if (useCache) inflightRequests.set(key, execution);
+
+  try {
+    const data = await execution;
+    if (useCache) writeCache(key, data, ttlMs);
+    return data;
+  } finally {
+    if (useCache) inflightRequests.delete(key);
+  }
+}
+
+async function mutate(action, payload = {}, options = {}) {
+  const data = await invoke(action, payload, options);
+  clearCarpentryCache();
+  return data;
 }
 
 function downloadCsv(filename, csvContent) {
@@ -73,79 +141,79 @@ export const api = {
   },
 
   catalogos: {
-    procesos: () => invoke('catalogos.procesos'),
-    etapas: () => invoke('catalogos.etapas'),
-    areas: () => invoke('catalogos.areas'),
-    guardarArea: (payload) => invoke('catalogos.areas.guardar', payload),
-    eliminarArea: (payload) => invoke('catalogos.areas.eliminar', payload),
-    personasActivas: () => invoke('catalogos.personasActivas'),
-    maquinasActivas: () => invoke('catalogos.maquinasActivas'),
-    proyectosActivos: () => invoke('catalogos.proyectosActivos'),
-    lotesActivos: () => invoke('catalogos.lotesActivos'),
+    procesos: () => invoke('catalogos.procesos', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
+    etapas: () => invoke('catalogos.etapas', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
+    areas: () => invoke('catalogos.areas', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
+    guardarArea: (payload) => mutate('catalogos.areas.guardar', payload),
+    eliminarArea: (payload) => mutate('catalogos.areas.eliminar', payload),
+    personasActivas: () => invoke('catalogos.personasActivas', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
+    maquinasActivas: () => invoke('catalogos.maquinasActivas', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
+    proyectosActivos: () => invoke('catalogos.proyectosActivos', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
+    lotesActivos: () => invoke('catalogos.lotesActivos', {}, { ttlMs: SHORT_CACHE_TTL_MS }),
   },
 
   proyectos: {
     listar: (filters) => invoke('proyectos.listar', filters),
-    guardar: (payload) => invoke('proyectos.guardar', payload),
-    archivar: (payload) => invoke('proyectos.archivar', payload),
+    guardar: (payload) => mutate('proyectos.guardar', payload),
+    archivar: (payload) => mutate('proyectos.archivar', payload),
     detalle: (payload) => invoke('proyectos.detalle', payload),
-    actualizarEtapa: (payload) => invoke('proyectos.etapa.actualizar', payload),
+    actualizarEtapa: (payload) => mutate('proyectos.etapa.actualizar', payload),
   },
 
   lotes: {
     listar: (filters) => invoke('lotes.listar', filters),
-    guardar: (payload) => invoke('lotes.guardar', payload),
+    guardar: (payload) => mutate('lotes.guardar', payload),
     detalle: (payload) => invoke('lotes.detalle', payload),
-    actualizarProceso: (payload) => invoke('lotes.proceso.actualizar', payload),
-    iniciarProceso: (payload) => invoke('lotes.proceso.iniciar', payload),
-    avanzarProceso: (payload) => invoke('lotes.proceso.avanzar', payload),
+    actualizarProceso: (payload) => mutate('lotes.proceso.actualizar', payload),
+    iniciarProceso: (payload) => mutate('lotes.proceso.iniciar', payload),
+    avanzarProceso: (payload) => mutate('lotes.proceso.avanzar', payload),
     listarItems: (payload) => invoke('lotes.listarItems', payload),
   },
 
   items: {
     listarPorProyecto: (payload) => invoke('items.listarPorProyecto', payload),
-    crear: (payload) => invoke('items.crear', payload),
-    crearBulk: (payload) => invoke('items.crearBulk', payload),
-    actualizar: (payload) => invoke('items.actualizar', payload),
-    eliminar: (payload) => invoke('items.eliminar', payload),
-    asignarLote: (payload) => invoke('items.asignarLote', payload),
-    desasignarLote: (payload) => invoke('items.desasignarLote', payload),
-    copiarBom: (payload) => invoke('items.copiarBom', payload),
+    crear: (payload) => mutate('items.crear', payload),
+    crearBulk: (payload) => mutate('items.crearBulk', payload),
+    actualizar: (payload) => mutate('items.actualizar', payload),
+    eliminar: (payload) => mutate('items.eliminar', payload),
+    asignarLote: (payload) => mutate('items.asignarLote', payload),
+    desasignarLote: (payload) => mutate('items.desasignarLote', payload),
+    copiarBom: (payload) => mutate('items.copiarBom', payload),
   },
 
   bom: {
     listarPorItem: (payload) => invoke('bom.listarPorItem', payload),
-    guardarMaterial: (payload) => invoke('bom.guardarMaterial', payload),
-    eliminarMaterial: (payload) => invoke('bom.eliminarMaterial', payload),
+    guardarMaterial: (payload) => mutate('bom.guardarMaterial', payload),
+    eliminarMaterial: (payload) => mutate('bom.eliminarMaterial', payload),
   },
 
   materiales: {
-    listar: (filters) => invoke('materiales.listar', filters),
-    guardar: (payload) => invoke('materiales.guardar', payload),
-    desactivar: (payload) => invoke('materiales.desactivar', payload),
+    listar: (filters) => invoke('materiales.listar', filters, { ttlMs: VERY_SHORT_CACHE_TTL_MS }),
+    guardar: (payload) => mutate('materiales.guardar', payload),
+    desactivar: (payload) => mutate('materiales.desactivar', payload),
   },
 
   inventario: {
     stock: (filters) => invoke('inventario.stock', filters),
-    guardarMovimiento: (payload) => invoke('inventario.movimiento.guardar', payload),
+    guardarMovimiento: (payload) => mutate('inventario.movimiento.guardar', payload),
     movimientos: (filters) => invoke('inventario.movimientos', filters),
     necesidades: (filters) => invoke('inventario.necesidades', filters),
   },
 
   produccion: {
-    lotesDisponibles: () => invoke('produccion.lotesDisponibles'),
-    registrar: (payload) => invoke('produccion.registrar', payload),
+    lotesDisponibles: () => invoke('produccion.lotesDisponibles', {}, { ttlMs: VERY_SHORT_CACHE_TTL_MS }),
+    registrar: (payload) => mutate('produccion.registrar', payload),
     historial: (filters) => invoke('produccion.historial', filters),
     resumenDia: (payload) => invoke('produccion.resumenDia', payload),
   },
 
   recursos: {
     listarPersonas: (filters) => invoke('recursos.personas.listar', filters),
-    guardarPersona: (payload) => invoke('recursos.personas.guardar', payload),
-    desactivarPersona: (payload) => invoke('recursos.personas.desactivar', payload),
+    guardarPersona: (payload) => mutate('recursos.personas.guardar', payload),
+    desactivarPersona: (payload) => mutate('recursos.personas.desactivar', payload),
     listarMaquinas: (filters) => invoke('recursos.maquinas.listar', filters),
-    guardarMaquina: (payload) => invoke('recursos.maquinas.guardar', payload),
-    desactivarMaquina: (payload) => invoke('recursos.maquinas.desactivar', payload),
+    guardarMaquina: (payload) => mutate('recursos.maquinas.guardar', payload),
+    desactivarMaquina: (payload) => mutate('recursos.maquinas.desactivar', payload),
     cargaSemanal: (filters) => invoke('recursos.cargaSemanal', filters),
   },
 
@@ -156,6 +224,10 @@ export const api = {
     bloqueos: (filters) => invoke('reportes.bloqueos', filters),
     avance: (filters) => invoke('reportes.avance', filters),
     exportarCsv: (payload) => invoke('reportes.exportarCsv', payload),
+  },
+
+  cache: {
+    clear: clearCarpentryCache,
   },
 };
 

@@ -8,6 +8,9 @@ from sqlalchemy.exc import DBAPIError, ResourceClosedError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+from src.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 _SCHEMA_IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -115,6 +118,8 @@ def map_database_error(error: Exception) -> AppError:
             )
         if code == "22P02":
             return AppError("Formato de dato inválido.", 400, "DB_INVALID_TEXT_REPRESENTATION")
+        if code and str(code).startswith("22"):
+            return AppError("Formato o valor de dato inválido.", 400, "DB_INVALID_DATA")
         if code == "42P01":
             return AppError(
                 "No se encontraron tablas/vistas en el esquema configurado.",
@@ -154,10 +159,19 @@ async def _get_carpentry_connection(db: AsyncSession):
 
 
 async def fetch_all(db: AsyncSession, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
-    conn = await _get_carpentry_connection(db)
-    result = await conn.exec_driver_sql(sql, tuple(params or []))
-    rows = result.fetchall()
-    return [dict(row._mapping) for row in rows]
+    params_list = list(params or [])
+    try:
+        conn = await _get_carpentry_connection(db)
+        result = await conn.exec_driver_sql(sql, tuple(params_list))
+        rows = result.fetchall()
+        return [dict(row._mapping) for row in rows]
+    except Exception:
+        logger.exception(
+            "Error leyendo SQL de Carpinteria: %s | params=%s",
+            " ".join(sql.split())[:240],
+            params_list,
+        )
+        raise
 
 
 async def fetch_one(db: AsyncSession, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> dict[str, Any] | None:
@@ -166,10 +180,19 @@ async def fetch_one(db: AsyncSession, sql: str, params: list[Any] | tuple[Any, .
 
 
 async def execute(db: AsyncSession, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
-    conn = await _get_carpentry_connection(db)
-    result = await conn.exec_driver_sql(sql, tuple(params or []))
+    params_list = list(params or [])
     try:
-        rows = result.fetchall()
-    except ResourceClosedError:
-        return []
-    return [dict(row._mapping) for row in rows]
+        conn = await _get_carpentry_connection(db)
+        result = await conn.exec_driver_sql(sql, tuple(params_list))
+        try:
+            rows = result.fetchall()
+        except ResourceClosedError:
+            return []
+        return [dict(row._mapping) for row in rows]
+    except Exception:
+        logger.exception(
+            "Error ejecutando SQL en Carpinteria: %s | params=%s",
+            " ".join(sql.split())[:240],
+            params_list,
+        )
+        raise

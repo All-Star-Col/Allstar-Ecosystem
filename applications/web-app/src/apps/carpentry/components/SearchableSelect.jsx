@@ -69,6 +69,8 @@ export default function SearchableSelect({
 
     useEffect(() =>
     {
+        if (!open) return undefined;
+
         const handler = (event) =>
         {
             if (ref.current && !ref.current.contains(event.target))
@@ -79,7 +81,7 @@ export default function SearchableSelect({
 
         document.addEventListener('mousedown', handler);
         return () => document.removeEventListener('mousedown', handler);
-    }, []);
+    }, [open]);
 
     const selectOption = (option) =>
     {

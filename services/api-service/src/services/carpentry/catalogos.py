@@ -1,6 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import AppError, clean, execute, fetch_all, fetch_one
+
+logger = get_logger(__name__)
 
 
 _CACHE: dict[str, dict] = {}
@@ -41,8 +44,10 @@ def _invalidate(*names: str):
 async def _cached_query(name: str, query_fn):
     cached = _get_cached(name)
     if cached is not None:
+        logger.debug("Catalogo carpinteria en cache | nombre=%s", name)
         return cached
 
+    logger.debug("Catalogo carpinteria sin cache | nombre=%s", name)
     rows = await query_fn()
     _set_cached(name, rows)
     return rows

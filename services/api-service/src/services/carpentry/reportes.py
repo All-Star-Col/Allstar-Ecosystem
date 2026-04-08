@@ -1,6 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import AppError, fetch_all, to_csv
+
+logger = get_logger(__name__)
 
 
 async def reporte_productividad(db: AsyncSession, filters: dict | None = None) -> list[dict]:

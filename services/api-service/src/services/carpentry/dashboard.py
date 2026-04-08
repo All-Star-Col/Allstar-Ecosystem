@@ -1,11 +1,15 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import fetch_all, fetch_one
+
+logger = get_logger(__name__)
 
 
 async def obtener_dashboard(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
     alerta = payload.get("alerta")
+    logger.debug("Dashboard carpinteria | alerta=%s", alerta or "todos")
 
     params: list = []
     where_alerta = ""

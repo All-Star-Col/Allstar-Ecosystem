@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry import (
     bom,
     catalogos,
@@ -14,6 +15,8 @@ from src.services.carpentry import (
     reportes,
 )
 from src.services.carpentry.common import fetch_one
+
+logger = get_logger(__name__)
 
 
 async def _ping(db: AsyncSession, _payload: dict | None = None) -> dict:
@@ -88,6 +91,7 @@ def list_actions() -> list[str]:
 
 
 async def execute_action(db: AsyncSession, action: str, payload: dict | None = None):
+    logger.debug("Ejecutando accion carpinteria | action=%s", action)
     fn = ACTION_MAP.get(action)
     if not fn:
         raise ValueError(f"Acción no soportada: {action}")

@@ -1,6 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import AppError, clean, execute, fetch_all, fetch_one
+
+logger = get_logger(__name__)
 
 
 def _to_id_array(value) -> list[int]:

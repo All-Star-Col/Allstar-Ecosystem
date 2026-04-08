@@ -45,6 +45,8 @@ async def get_tables_endpoint(
     try:
         data = await forms_service.get_tables()
         return build_etag_response(request, data)
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
     except forms.DBCommunicationError as e:
         raise HTTPException(status_code=500, detail=str(e))
 

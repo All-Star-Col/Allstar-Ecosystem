@@ -1,6 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import AppError, clean, decimal_or_none, execute, fetch_all, fetch_one, to_bool
+
+logger = get_logger(__name__)
 
 
 def _unidad_por_categoria(categoria: str | None) -> str:

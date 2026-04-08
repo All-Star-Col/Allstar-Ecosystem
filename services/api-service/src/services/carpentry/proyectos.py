@@ -1,17 +1,55 @@
+from datetime import date, datetime
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.logging_config import get_logger
 from src.services.carpentry.common import AppError, build_where, clean, execute, fetch_all, fetch_one
+
+logger = get_logger(__name__)
+
+
+def _date_or_none(value):
+    value = clean(value)
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text[:10]).date()
+    except ValueError as exc:
+        raise AppError(
+            f"Fecha inválida: {value}",
+            400,
+            "VALIDATION_DATE",
+        ) from exc
+
+
+def _int_or_none(value, field_name: str) -> int | None:
+    value = clean(value)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise AppError(
+            f"Valor inválido para {field_name}.",
+            400,
+            "VALIDATION",
+        ) from exc
 
 
 def _normalize_input(data: dict) -> dict:
     return {
         "nombre": clean(data.get("nombre")),
         "cliente": clean(data.get("cliente")),
-        "fecha_inicio": clean(data.get("fecha_inicio")),
-        "fecha_compromiso": clean(data.get("fecha_compromiso")),
-        "fecha_fin": clean(data.get("fecha_fin")),
+        "fecha_inicio": _date_or_none(data.get("fecha_inicio")),
+        "fecha_compromiso": _date_or_none(data.get("fecha_compromiso")),
+        "fecha_fin": _date_or_none(data.get("fecha_fin")),
         "prioridad": int(data.get("prioridad") or 2),
-        "responsable_id": clean(data.get("responsable_id")),
+        "responsable_id": _int_or_none(data.get("responsable_id"), "responsable_id"),
         "estado": clean(data.get("estado")) or "pendiente",
         "notas": clean(data.get("notas")),
     }
@@ -52,6 +90,7 @@ async def listar_proyectos(db: AsyncSession, filters: dict | None = None) -> lis
 async def guardar_proyecto(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
     data = _normalize_input(payload)
+    proyecto_id = _int_or_none(payload.get("id"), "id")
 
     if not data["nombre"] or not data["cliente"] or not data["fecha_compromiso"]:
         raise AppError(
@@ -61,7 +100,7 @@ async def guardar_proyecto(db: AsyncSession, payload: dict | None = None) -> dic
         )
 
     async with db.begin():
-        if payload.get("id"):
+        if proyecto_id:
             rows = await execute(
                 db,
                 """UPDATE proyectos
@@ -86,7 +125,7 @@ async def guardar_proyecto(db: AsyncSession, payload: dict | None = None) -> dic
                     data["responsable_id"],
                     data["estado"],
                     data["notas"],
-                    payload["id"],
+                    proyecto_id,
                 ],
             )
 
