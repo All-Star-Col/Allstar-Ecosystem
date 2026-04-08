@@ -2002,7 +2002,7 @@
   max-width: none;
 }
 
-.carousel-arrow {
+.carpentry-app button.carousel-arrow {
   position: relative;
   top: auto;
   left: auto;
@@ -2020,8 +2020,8 @@
   z-index: 4;
 }
 
-.carousel-arrow::before,
-.carousel-arrow::after {
+.carpentry-app button.carousel-arrow::before,
+.carpentry-app button.carousel-arrow::after {
   content: '';
   position: absolute;
   inset: 7px;
@@ -2029,33 +2029,47 @@
   pointer-events: none;
 }
 
-.carousel-arrow::before {
+.carpentry-app button.carousel-arrow::before {
   border: 2px solid color-mix(in srgb, var(--surface-elevated) 70%, #FFFFFF 30%);
   background: color-mix(in srgb, var(--surface) 84%, rgba(15, 23, 42, 0.16) 16%);
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18);
+  width: auto;
+  height: auto;
+  z-index: 0;
   transition: opacity 0.35s cubic-bezier(0.77, 0, 0.175, 1) 80ms,
     transform 0.45s cubic-bezier(0.455, 0.03, 0.515, 0.955) 80ms;
 }
 
-.carousel-arrow::after {
+.carpentry-app button.carousel-arrow::after {
   border: 2px solid color-mix(in srgb, var(--accent) 74%, #7DD3FC 26%);
   background: color-mix(in srgb, var(--surface) 70%, rgba(37, 99, 235, 0.22) 30%);
   transform: scale(1.26);
   opacity: 0;
+  z-index: 1;
   transition: opacity 0.35s cubic-bezier(0.165, 0.84, 0.44, 1),
     transform 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-.carousel-arrow:hover::before,
-.carousel-arrow:focus-visible::before {
+.carpentry-app button.carousel-arrow:hover,
+.carpentry-app button.carousel-arrow:focus-visible,
+.carpentry-app button.carousel-arrow:active {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  transform: none;
+}
+
+.carpentry-app button.carousel-arrow:hover::before,
+.carpentry-app button.carousel-arrow:focus-visible::before {
   opacity: 0;
   transform: scale(0.7);
   transition: opacity 0.35s cubic-bezier(0.165, 0.84, 0.44, 1),
     transform 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-.carousel-arrow:hover::after,
-.carousel-arrow:focus-visible::after {
+.carpentry-app button.carousel-arrow:hover::after,
+.carpentry-app button.carousel-arrow:focus-visible::after {
   opacity: 1;
   transform: scale(1);
   transition: opacity 0.35s cubic-bezier(0.77, 0, 0.175, 1) 80ms,
@@ -2099,7 +2113,7 @@
   transform: translateX(-56px);
 }
 
-.carousel-arrow:focus-visible {
+.carpentry-app button.carousel-arrow:focus-visible {
   outline: none;
 }
 
@@ -2675,13 +2689,13 @@
     min-width: clamp(198px, 44vw, 238px);
   }
 
-  .carousel-arrow {
+  .carpentry-app button.carousel-arrow {
     width: 46px;
     height: 46px;
   }
 
-  .carousel-arrow::before,
-  .carousel-arrow::after {
+  .carpentry-app button.carousel-arrow::before,
+  .carpentry-app button.carousel-arrow::after {
     inset: 6px;
   }
 
