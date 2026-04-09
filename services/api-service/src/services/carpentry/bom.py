@@ -251,22 +251,22 @@ async def eliminar_item(db: AsyncSession, payload: dict | None = None) -> dict:
     if not item_id:
         raise AppError("ID del ítem es obligatorio.", 400, "VALIDATION")
 
-    bom_check = await fetch_one(
-        db,
-        """SELECT COUNT(*)::INTEGER AS total
-           FROM bom_items
-           WHERE item_id = $1""",
-        [item_id],
-    )
-
-    if bom_check and bom_check["total"] > 0:
-        raise AppError(
-            "No se puede eliminar el ítem porque tiene materiales BOM asociados. Elimina el BOM primero.",
-            400,
-            "HAS_BOM",
+    async with db.begin():
+        bom_check = await fetch_one(
+            db,
+            """SELECT COUNT(*)::INTEGER AS total
+               FROM bom_items
+               WHERE item_id = $1""",
+            [item_id],
         )
 
-    async with db.begin():
+        if bom_check and bom_check["total"] > 0:
+            raise AppError(
+                "No se puede eliminar el ítem porque tiene materiales BOM asociados. Elimina el BOM primero.",
+                400,
+                "HAS_BOM",
+            )
+
         await execute(db, "DELETE FROM items_proyecto WHERE id = $1", [item_id])
 
     return {"ok": True}
@@ -339,18 +339,18 @@ async def copiar_bom_a_items(db: AsyncSession, payload: dict | None = None) -> d
             "VALIDATION",
         )
 
-    bom_origen = await fetch_all(
-        db,
-        """SELECT material_id, cantidad_requerida, notas
-           FROM bom_items
-           WHERE item_id = $1""",
-        [item_origen_id],
-    )
-
-    if not bom_origen:
-        raise AppError("El ítem origen no tiene materiales BOM para copiar.", 400, "EMPTY_BOM")
-
     async with db.begin():
+        bom_origen = await fetch_all(
+            db,
+            """SELECT material_id, cantidad_requerida, notas
+               FROM bom_items
+               WHERE item_id = $1""",
+            [item_origen_id],
+        )
+
+        if not bom_origen:
+            raise AppError("El ítem origen no tiene materiales BOM para copiar.", 400, "EMPTY_BOM")
+
         item_ids = []
         material_ids = []
         cantidades = []
