@@ -28,6 +28,8 @@ interface WorkspaceResponse {
     apps: App[];
     username: string;
     full_name: string;
+    role_code?: string | null;
+    is_admin?: boolean;
     message: string;
 }
 
@@ -63,36 +65,13 @@ const useWorkspace = () => {
 
 // 3️⃣ Componente Dashboard (separado)
 function Dashboard() {
-    const [currentDate, setCurrentDate] = React.useState(() => new Date());
+    const timeString = "09:05";
+    const dateString = "VIERNES, 17 DE ABRIL DE 2026";
 
-    React.useEffect(() => {
-        const intervalId = window.setInterval(() => {
-            setCurrentDate(new Date());
-        }, 1000);
-
-        return () => {
-            window.clearInterval(intervalId);
-        };
-    }, []);
-
-    const timeString = currentDate.toLocaleTimeString("es-ES", {
-        hour: "2-digit",
-        minute: "2-digit"
-    });
-    const dateString = currentDate.toLocaleDateString("es-ES", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-    });
-
-    const [selectedTab, setSelectedTab] = React.useState<string>(() => {
-        return localStorage.getItem("selected-tab") || "favorites";
-    });
+    const [selectedTab, setSelectedTab] = React.useState<string>("todas");
 
     const handleTabChange = (tab: string) => {
         setSelectedTab(tab);
-        localStorage.setItem("selected-tab", tab);
     };
     const [searchQuery, setSearchQuery] = React.useState("");
 
@@ -186,22 +165,23 @@ function Dashboard() {
 
     return (
         <div
-            className="min-h-screen w-full flex items-center justify-center
+            className="relative isolate min-h-screen w-full flex items-center justify-center
                     bg-[url('@/assets/bg.jpg')] bg-cover bg-center bg-no-repeat"
         >
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-md" />
+            <div className="pointer-events-none fixed inset-0 z-0 bg-black/70 backdrop-blur-md" />
 
             <motion.div
                 initial={{ opacity: 0, scale: 0.75 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.35, ease: [0.23, 1, 0.32, 1] }}
-                className="relative flex flex-col w-[1200px] h-[650px] bg-background border border-border/10 rounded-2xl shadow-lg p-8"
+                className="relative z-10 flex flex-col w-[1200px] h-[650px] bg-background border border-border/10 rounded-2xl shadow-lg p-8"
             >
                 <Header
                     timeString={timeString}
                     dateString={dateString}
-                    name={workspaceData?.full_name}
+                    name="Camila"
                     username={workspaceData?.username}
+                    isAdmin={workspaceData?.is_admin ?? false}
                 />
 
                 <motion.div

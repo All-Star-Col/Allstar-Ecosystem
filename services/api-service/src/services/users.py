@@ -109,7 +109,7 @@ async def get_user_by_id(db: AsyncSession, id: UUID) -> Optional[UserAdminRespon
 
 async def list_users(
     db: AsyncSession, limit: int, offset: int
-) -> Optional[tuple[list[UserAdminResponse], int]]:
+) -> list[UserAdminResponse]:
 
     q = text(
         """
@@ -119,34 +119,41 @@ async def list_users(
     )
 
     r = await db.execute(q, {"limit": limit, "offset": offset})
-    rows = r.mappings()
+    rows = r.mappings().all()
     if not rows:
-        return None
+        return []
 
-    return (
-        [
-            UserAdminResponse(
-                id=row["id"],
-                username=row["username"],
-                email=row["email"],
-                full_name=row["full_name"],
-                is_active=row["is_active"],
-                is_email_verified=row["is_email_verified"],
-            )
-            for row in rows
-        ],
-        limit,
-    )
+    return [
+        UserAdminResponse(
+            id=row["id"],
+            username=row["username"],
+            email=row["email"],
+            full_name=row["full_name"],
+            is_active=row["is_active"],
+            is_email_verified=row["is_email_verified"],
+        )
+        for row in rows
+    ]
 
 
 async def update_user(db: AsyncSession, data: UserUpdate, user_id: UUID) -> None:
+    raw_values = data.model_dump(exclude_unset=True, exclude_none=True)
 
-    q_values = [str(value) + "=:" + str(value) for value in data.model_fields_set]
+    # Backward-compatibility: if clients send plain password, hash it server-side.
+    raw_password = raw_values.pop("password", None)
+    if isinstance(raw_password, str) and raw_password:
+        raw_values["password_hash"] = get_password_hash(raw_password)
 
-    q = text(f"UPDATE auth.users SET {", ".join(q_values)} WHERE id = :id")
+    allowed_fields = {"username", "full_name", "email", "is_active", "password_hash"}
+    update_values = {k: v for k, v in raw_values.items() if k in allowed_fields}
+    if not update_values:
+        return
 
-    update_values = data.model_dump()
-    print("data", update_values, type(update_values))
+    assignments = [f"{field} = :{field}" for field in update_values]
+    q = text(
+        f"UPDATE auth.users SET {', '.join(assignments)}, updated_at = NOW() "
+        "WHERE id = :id"
+    )
     await db.execute(q, {"id": user_id} | update_values)
     await db.commit()
 
@@ -156,7 +163,7 @@ async def delete_user(db: AsyncSession, user_id: UUID, hard: bool = False) -> No
     if hard:
         q = text(
             """
-            SELECT FROM auth.users
+            DELETE FROM auth.users
             WHERE id = :id
             """
         )
@@ -173,5 +180,5 @@ async def delete_user(db: AsyncSession, user_id: UUID, hard: bool = False) -> No
         """
     )
 
-    await db.execute(q, {"user_id": user_id})
+    await db.execute(q, {"id": user_id})
     await db.commit()

@@ -88,18 +88,38 @@ export function Footer() {
                     />
 
                     <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        className="flex items-center gap-2 h-8 px-3 rounded-lg bg-destructive/10 text-destructive text-[13px] font-medium hover:bg-destructive/20 transition-all cursor-pointer border-none"
+                        type="button"
+                        initial="rest"
+                        whileHover="hover"
+                        whileTap="tap"
+                        className="group relative flex items-center h-8 px-3 rounded-lg text-destructive text-[13px] font-medium cursor-pointer border-none overflow-hidden"
                         onClick={handleLogOut}
                     >
-                        <motion.div
-                            whileHover={{ rotate: 180 }}
-                            transition={{ duration: 0.3 }}
-                        >
-                            <Power size={16} />
-                        </motion.div>
-                        SALIR
+                        <motion.span
+                            aria-hidden="true"
+                            className="absolute inset-0 rounded-lg bg-destructive/10"
+                            variants={{
+                                rest: { scale: 1, opacity: 1 },
+                                hover: { scale: 1.06, opacity: 1 },
+                                tap: { scale: 0.98, opacity: 1 },
+                            }}
+                            transition={{ duration: 0.2 }}
+                        />
+
+                        <span className="relative z-10 flex items-center gap-2">
+                            <motion.span
+                                className="flex items-center"
+                                variants={{
+                                    rest: { rotate: 0 },
+                                    hover: { rotate: 180 },
+                                    tap: { rotate: 0 },
+                                }}
+                                transition={{ duration: 0.3 }}
+                            >
+                                <Power size={16} />
+                            </motion.span>
+                            <span>SALIR</span>
+                        </span>
                     </motion.button>
                 </motion.div>
             </motion.div>

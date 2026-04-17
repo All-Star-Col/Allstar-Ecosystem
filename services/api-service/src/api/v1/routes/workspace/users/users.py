@@ -19,12 +19,21 @@ router = APIRouter()
 
 @router.get("/")
 async def get_list(
-    limit: int,
-    offset: int,
+    limit: int = 100,
+    offset: int = 0,
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    return {"list_users": await list_users(db, limit, offset)} if admin else None
+    if not admin:
+        return None
+
+    users = await list_users(db, limit, offset)
+    return {
+        "list_users": users,
+        "limit": limit,
+        "offset": offset,
+        "total": len(users),
+    }
 
 
 @router.get("/{user_id}")

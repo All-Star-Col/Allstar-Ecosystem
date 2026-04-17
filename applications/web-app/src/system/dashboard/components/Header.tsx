@@ -1,5 +1,6 @@
 import { motion } from "motion/react";
 import { LogOut, User } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -14,6 +15,8 @@ interface HeaderProps {
     dateString: string;
     name?: string;
     username?: string;
+    isAdmin?: boolean;
+    isProfilePage?: boolean;
 }
 
 const handleLogOut = () => {
@@ -22,7 +25,16 @@ const handleLogOut = () => {
     window.location.href = "/login";
 };
 
-export function Header({ timeString, dateString, name, username }: HeaderProps) {
+export function Header({
+    timeString,
+    dateString,
+    name,
+    username,
+    isAdmin = false,
+    isProfilePage = false,
+}: HeaderProps) {
+    const navigate = useNavigate();
+
     return (
         <motion.div
             initial={{ opacity: 0, y: -20 }}
@@ -90,14 +102,26 @@ export function Header({ timeString, dateString, name, username }: HeaderProps) 
 
                         <DropdownMenuSeparator />
 
-                        {/* Mi perfil — deshabilitado hasta implementación futura */}
-                        <DropdownMenuItem disabled>
-                            <User />
-                            <span>Mi perfil</span>
-                            <span className="ml-auto text-[10px] text-muted-foreground">
-                                Próximamente
-                            </span>
-                        </DropdownMenuItem>
+                        {isAdmin ? (
+                            <DropdownMenuItem
+                                onClick={() => navigate("/dashboard/profile")}
+                                className="cursor-pointer"
+                            >
+                                <User />
+                                <span>Mi perfil</span>
+                                <span className="ml-auto text-[10px] text-muted-foreground">
+                                    {isProfilePage ? "Abierto" : "Admin"}
+                                </span>
+                            </DropdownMenuItem>
+                        ) : (
+                            <DropdownMenuItem disabled>
+                                <User />
+                                <span>Mi perfil</span>
+                                <span className="ml-auto text-[10px] text-muted-foreground">
+                                    Solo admin
+                                </span>
+                            </DropdownMenuItem>
+                        )}
 
                         <DropdownMenuSeparator />
 

@@ -61,10 +61,12 @@ class UserAdminResponse(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    username: Optional[str]
-    full_name: Optional[str]
-    email: Optional[str]
-    password_hash: Optional[str]
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    is_active: Optional[bool] = None
+    password: Optional[str] = None
+    password_hash: Optional[str] = None
 
 
 class UserListResponse(BaseModel):

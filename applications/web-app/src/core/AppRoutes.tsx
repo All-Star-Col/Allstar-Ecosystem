@@ -10,6 +10,7 @@ import MinimalLayout from "./layout/MinimalLayout";
 
 const Login = lazy(() => import("@/system/login/Login"));
 const Dashboard = lazy(() => import("@/system/dashboard/Dashboard"));
+const Profile = lazy(() => import("@/system/profile/Profile"));
 const NotFound = lazy(() => import("@/shared/components/NotFound"));
 
 function RootRedirect() {
@@ -35,6 +36,7 @@ export function AppRoutes() {
                 <Route element={<RequireAuth />}>
                     <Route element={<AppLayout />}>
                         <Route path="/dashboard" element={<Dashboard />} />
+                        <Route path="/dashboard/profile" element={<Profile />} />
                         {modules.map((module) => (
                             <Route
                                 key={module.name}
