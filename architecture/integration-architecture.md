@@ -1,106 +1,130 @@
 # Integration Architecture
 
-This document describes the observed integration points between components in this repository.
+Scope note: documenta integraciones observables en el repo a fecha 2026-04-22. Si falta evidencia en archivos versionados, se marca como `TBD`.
 
-Scope note: this is documentation of what is visible in the repo today. If something is not in the inspected files, it is marked as TBD.
+## Mapa de integracion (alto nivel)
 
-## Integration map (high level)
-
-1. `applications/web-app` (React) calls `services/api-service` over HTTP.
-2. `services/api-service` reads runtime secrets from Bitwarden via `BW_ACCESS_TOKEN`.
-3. `services/api-service` uses:
-   - PostgreSQL (async) for auth/workspace/forms metadata and dynamic inserts.
-   - SQL Server (pyodbc) as an upstream source for inventory synchronization.
-   - Google Sheets API as the inventory spreadsheet target.
-4. GitHub Actions builds and deploys the API service container image to a VM over SSH via a Tailscale network.
+1. `applications/web-app` consume HTTP del API FastAPI.
+2. `services/api-service` carga secretos desde Bitwarden al iniciar.
+3. El API usa PostgreSQL para auth/workspace/forms/carpentry.
+4. El API usa SQL Server como fuente upstream para procesos de inventario.
+5. El API usa Google Sheets para operaciones de inventario y sincronizacion.
+6. GitHub Actions construye/despliega API y frontend por workflows separados.
 
 ## Web app -> API
 
-- API base URL is configured via `VITE_API_SERVER` (see `applications/web-app/.env.development`, `applications/web-app/.env.production`).
-- The API mounts endpoints under `/api/v1` (see `services/api-service/src/main.py`).
+## Configuracion
 
-TBD:
-- Web app route structure and which endpoints it calls are not documented here (not inspected in this task).
+- `VITE_API_SERVER` define base URL (`applications/web-app/src/config/api.ts`).
+- El frontend concatena rutas como `${API_SERVER}/workspace`, `${API_SERVER}/workspace/forms/*`, `${API_SERVER}/workspace/data-viewer/*`.
 
-## API -> Bitwarden (secrets)
+Implicacion observable:
+- `VITE_API_SERVER` debe apuntar al prefijo esperado por las llamadas del frontend (por ejemplo, incluir `/api/v1` si el backend expone ese prefijo).
 
-Observed behavior (see `services/api-service/src/core/config.py`):
+## Flujos usados por frontend
 
-- `Settings` defines Bitwarden secret IDs (UUID strings) for each required secret.
-- At import time, `settings = Settings()` triggers `load_secrets_from_bw()`.
-- `load_secrets_from_bw()` uses `BW_ACCESS_TOKEN` from the process environment and fetches secrets using `bitwarden_sdk`.
-- Secrets populated into settings include:
-  - `ALGORITHM`
-  - `SECRET_KEY`
-  - `POSTGRES_URL_DATABASE`
-  - `SQLSERVER_URL_DATABASE`
-  - `SHEETS_INVENTARIO_ALLSTAR`
-  - `GOOGLE_CREDENTIALS_JSON`
+- Auth/sesion:
+  - Login: `POST /login`
+  - Validacion de sesion/dashboard: `GET /workspace`
+- Forms:
+  - `GET /workspace/forms/categories`
+  - `GET /workspace/forms/tables`
+  - `GET /workspace/forms/tables/{table_name}`
+  - `GET /workspace/forms/lookups/{table_name}/{column_name}`
+  - `POST /workspace/forms/submit`
+- Data Viewer:
+  - `GET /workspace/data-viewer/tables`
+  - `POST /workspace/data-viewer/query`
+  - `POST /workspace/data-viewer/export`
+  - `PATCH /workspace/data-viewer/rows`
+- Carpentry:
+  - `GET /workspace/carpentry/ping`
+  - `POST /workspace/carpentry/invoke`
+  - `GET /workspace/carpentry/actions`
 
-Operational implication:
-- The API process cannot start without `BW_ACCESS_TOKEN` (it raises on missing token).
+## API -> Bitwarden
+
+- Carga en runtime desde `src/core/config.py` via `BitwardenClient`.
+- Token requerido: `BW_ACCESS_TOKEN`.
+- Si falta token, startup falla.
+
+Secretos cargados:
+- `ALGORITHM`
+- `SECRET_KEY`
+- `POSTGRES_URL_DATABASE`
+- `SQLSERVER_URL_DATABASE`
+- `SHEETS_INVENTARIO_ALLSTAR`
+- `GOOGLE_CREDENTIALS_JSON`
 
 ## API -> PostgreSQL
 
-Observed usage:
+Conexion:
+- SQLAlchemy async engine con `POSTGRES_URL_DATABASE` (`src/db/database.py`).
 
-- Database URL is `settings.POSTGRES_URL_DATABASE` (see `services/api-service/src/db/database.py`).
-- Auth domain tables:
-  - `auth.users` (read by username; create user; update last_login_at) (see `services/api-service/src/services/users.py`).
-  - `auth.user_roles` (maps users to roles) (see `services/api-service/src/services/apps.py`, `services/api-service/src/services/roles.py`).
-  - `auth.roles` (role metadata) (see `services/api-service/src/services/roles.py`).
-- Workspace apps:
-  - `workspace.apps` and `workspace.role_apps` determine which apps are returned for a role (see `services/api-service/src/services/apps.py`).
-- Workspace forms metadata:
-  - `workspace.ui_categorias_tablas` supplies categories (see `services/api-service/src/services/forms.py`).
-  - `workspace.ui_config_tablas` supplies visible tables (see `services/api-service/src/services/forms.py`).
-- Dynamic form submission:
-  - Inserts into `access.{table_name}` are constructed dynamically after validating table and column identifiers (see `services/api-service/src/services/forms.py`).
+Uso observable:
+- `auth.users`, `auth.roles`, `auth.user_roles` para auth/permisos.
+- `workspace.apps`, `workspace.role_apps` para apps por rol en `/workspace`.
+- `workspace.ui_categorias_tablas` y `workspace.ui_config_tablas` para metadata de forms/data-viewer.
+- Inserciones de forms en esquema `data` (no `access`) via SQL dinamico validado.
+- Carpentry ejecuta SQL en esquema configurable `CARPENTRY_DB_SCHEMA` (default `carpentry`).
 
 ## API -> SQL Server
 
-Observed usage (see `services/api-service/src/services/sheets.py`):
+- Conexion `pyodbc.connect(settings.SQLSERVER_URL_DATABASE)`.
+- Usado por `SheetsService` para enriquecer/validar operaciones de inventario y sincronizacion.
 
-- Connection uses `pyodbc.connect(settings.SQLSERVER_URL_DATABASE)`.
-- A synchronization routine queries an `Item` table joined to multiple dimension tables and produces rows for Google Sheets updates.
-
-TBD:
-- The upstream SQL Server schema is inferred from query text only; ownership and lifecycle are not documented here.
+`TBD`:
+- Ownership/contrato formal del esquema SQL Server (solo visible por queries embebidas).
 
 ## API -> Google Sheets
 
-Observed usage (see `services/api-service/src/services/sheets.py`):
+- Cliente con service account desde `GOOGLE_CREDENTIALS_JSON`.
+- Spreadsheet target: `SHEETS_INVENTARIO_ALLSTAR`.
+- Hojas usadas por codigo:
+  - `INVENTARIO`
+  - `Complementos`
+  - `DESPACHADO`
+  - `Logs`
+  - `DEVOLUCIONES`
 
-- Credentials come from `settings.GOOGLE_CREDENTIALS_JSON` (JSON string) and are used via service account auth.
-- Spreadsheet id comes from `settings.SHEETS_INVENTARIO_ALLSTAR`.
-- The code uses these sheet names:
-  - Inventory: `Inv. All Star`
-  - Options: `Complementos`
-  - Base/Access: `PRUEBA ACCESS`
+Patrones de integracion:
+- Inventario transaccional (lookup, altas, movimientos, despacho, devoluciones).
+- Trigger de sincronizacion de produccion (`/sheets/trigger/production`).
 
-There are two primary interaction patterns:
+## Scheduler interno
 
-1. Inventory item operations (via `/api/v1/sheets/inventory/...`):
-   - Lookup an item row and return a normalized response.
-   - Add a new item to the inventory sheet (if present in the base/access sheet).
-   - Update location (warehouse and row; optional referral).
-   - Update dispatch info.
-2. Production trigger and periodic sync (via `/api/v1/sheets/trigger/production` and scheduler):
-   - Scheduler runs every 10 minutes and posts to the trigger endpoint (see `services/api-service/src/core/scheduler.py`).
-   - The trigger runs `compare_coditems()` which reads from SQL Server and upserts rows into `PRUEBA ACCESS` (see `services/api-service/src/services/sheets.py`).
+- Job APScheduler cada `240` minutos (`src/core/scheduler.py`).
+- Triggerea `POST http://localhost:8000/api/v1/sheets/trigger/production`.
+- Comentarios en codigo aun indican "cada 10 minutos" (`TBD` de consistencia documental interna).
 
-## CI/CD -> Deployment (GitHub Actions)
+## CI/CD -> despliegue
 
-Observed workflow (see `services/api-service/.github/workflows/main.yml`):
+## API
 
-- Trigger: push to `master`.
-- Build job:
-  - Builds and pushes a Docker image to Docker Hub: `starbotdocker/allstar-fastapi-repository`.
-  - Pushes tags: `latest`, `prod`, and `${{ github.sha }}`.
-- Deploy job:
-  - Brings up Tailscale via OAuth.
-  - SSHes to a VM on the Tailscale network and runs `/opt/allstar-api/deploy.sh`.
-  - Passes `BW_ACCESS_TOKEN`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN` as environment variables to the remote script.
+Workflow observable:
+- `.github/workflows/deploy-api.yml`
 
-TBD:
-- The exact behavior of `/opt/allstar-api/deploy.sh` is outside this repo.
+Flujo:
+1. Build/push de imagen Docker (`starbotdocker/allstar-fastapi-repository`).
+2. Conexion a Tailscale.
+3. SSH a VM y ejecucion de `/opt/allstar-api/deploy.sh`.
+
+Trigger:
+- Push a `main` con cambios en `services/api-service/**` o en el workflow.
+
+## Frontend
+
+Workflow observable:
+- `.github/workflows/azure-static-web-apps-purple-water-03112dc0f.yml`
+
+Flujo:
+- Build y deploy a Azure Static Web Apps.
+
+Observacion:
+- El filtro `paths` dentro del workflow referencia `.github/workflows/deploy-frontend.yml`, archivo que no existe con ese nombre en el repo actual.
+
+## Riesgos de acople observables
+
+- Si `VITE_API_SERVER` no coincide con prefijo real, fallan auth/dashboard/modulos.
+- Si falla Bitwarden, la API no inicia.
+- La sincronizacion programada depende de que la API local responda en `localhost:8000`.

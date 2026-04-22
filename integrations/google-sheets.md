@@ -1,86 +1,105 @@
-# Google Sheets Integration (Observed)
+# Integracion Google Sheets (Observed)
 
-This document describes how `services/api-service` integrates with Google Sheets.
+Este documento describe la integracion observable de `services/api-service` con Google Sheets.
 
-Scope note: this is documentation of what is visible in the repo today. If something is not in the inspected files, it is marked as TBD.
+Nota de alcance: se documenta solo lo visible en el repo hoy. Lo no verificable se marca como `TBD`.
 
-## Where it lives
+## Donde vive
 
-- HTTP routes:
-  - Trigger: `services/api-service/src/api/v1/routes/sheets/sheets.py`
-  - Inventory endpoints: `services/api-service/src/api/v1/routes/sheets/inventory/inventory.py`
-- Sheets client + business logic: `services/api-service/src/services/sheets.py`
-- Config inputs (loaded from Bitwarden): `services/api-service/src/core/config.py`
+- Rutas HTTP:
+  - Trigger de sincronizacion: `services/api-service/src/api/v1/routes/sheets/sheets.py`
+  - Inventario y devoluciones: `services/api-service/src/api/v1/routes/sheets/inventory/inventory.py`
+- Servicio de integracion: `services/api-service/src/services/sheets.py`
+- Scheduler que dispara el trigger: `services/api-service/src/core/scheduler.py`
+- Configuracion/secretos: `services/api-service/src/core/config.py`
 
-## Configuration inputs (observed)
+## Contrato de configuracion
 
-The integration depends on these runtime settings:
+Valores requeridos en runtime (cargados via Bitwarden):
 
-- `settings.SHEETS_INVENTARIO_ALLSTAR`: spreadsheet id (`spreadsheetId`).
-- `settings.GOOGLE_CREDENTIALS_JSON`: service account credentials JSON as a string.
+- `settings.SHEETS_INVENTARIO_ALLSTAR` (spreadsheet id)
+- `settings.GOOGLE_CREDENTIALS_JSON` (JSON de service account serializado como string)
 
-Both values are populated from Bitwarden when the API starts (see `services/api-service/src/core/config.py`).
+## Autenticacion y cliente Google (observado)
 
-## Authentication model (observed)
+- Credenciales: `service_account.Credentials.from_service_account_info(...)`
+- Scope: `https://www.googleapis.com/auth/spreadsheets`
+- Cliente API: `build("sheets", "v4", credentials=creds)`
 
-- The service uses service account credentials created from `settings.GOOGLE_CREDENTIALS_JSON` via `service_account.Credentials.from_service_account_info(...)` (see `services/api-service/src/services/sheets.py`).
-- OAuth scope used: `https://www.googleapis.com/auth/spreadsheets` (see `services/api-service/src/services/sheets.py`).
-- The Sheets API client is created via `googleapiclient.discovery.build("sheets", "v4", credentials=creds)`.
+Si no hay credenciales o hay error al construir cliente, `get_google_service()` retorna `None`.
 
-## Spreadsheet layout assumptions (observed)
+## Hojas y rangos usados (observado)
 
-The code references these sheet names (see `services/api-service/src/services/sheets.py`):
+Nombres de hojas declarados en `SheetsService.__init__`:
 
-- Inventory: `Inv. All Star`
-- Options: `Complementos`
-- Base/access: `PRUEBA ACCESS`
+- `INVENTARIO`
+- `Complementos`
+- `DESPACHADO`
+- `Logs`
+- `DEVOLUCIONES`
 
-Observed column/range usage:
+Rangos observados:
 
-- Inventory lookup reads column A for item id and then reads a single row range `A{row}:I{row}`.
-- Inventory location updates write `H{row}:I{row}` (warehouse + row) and optionally writes referral to `M{row}`.
-- Inventory dispatch updates write `M{row}:O{row}`.
-- Options lists are read from `Complementos!A2:A` and `Complementos!C2:C`.
-- Base/access synchronization reads and writes column A and row ranges `A{row}:P{row}`.
+- Inventario:
+  - Busqueda por item: `INVENTARIO!A:A`
+  - Lectura de fila: `INVENTARIO!A{row}:I{row}`
+  - Actualizacion de ubicacion/fila: `INVENTARIO!F{row}:G{row}`
+  - Actualizacion de observaciones/referral: `INVENTARIO!I{row}`
+  - Insercion de item nuevo: append en `INVENTARIO!A:I`
+- Complementos:
+  - Bodegas: `Complementos!A2:A`
+  - Filas: `Complementos!C2:C`
+  - Transportadora: `Complementos!I2:I`
+- Despachado:
+  - Insercion de despachos: append en `DESPACHADO!A:K`
+- Logs:
+  - Insercion de eventos: append en `Logs!A:H`
+- Devoluciones:
+  - Consulta item: `DEVOLUCIONES!A:D`
+  - Listado pendientes de asignacion: `DEVOLUCIONES!A:N`
+  - Lectura y actualizacion de estado/item: `A{row}` y `N{row}`
 
-TBD:
+## Contrato API observable
 
-- The exact meaning of each column in the sheets is not documented in this repo; only ranges used by code are observable.
+Prefijos:
 
-## API surface (observed)
+- `/api/v1/sheets`
+- `/api/v1/sheets/inventory`
 
-### Inventory operations
-
-Routes are mounted under `/api/v1/sheets/inventory` (see `services/api-service/src/main.py`).
-
-- `GET /api/v1/sheets/inventory/get/{item}`
-  - Looks up an item in `Inv. All Star`.
-  - If `opt_request=true` (default), also returns option lists from `Complementos`.
-  - Returns `404` if the item is not found (see `services/api-service/src/api/v1/routes/sheets/inventory/inventory.py`).
-
-- `POST /api/v1/sheets/inventory/new/{item}`
-  - Adds a new item row into `Inv. All Star` if the item exists in the base/access sheet (`PRUEBA ACCESS`).
-  - Returns `404` if the item does not exist in the base/access sheet.
-  - Returns a conflict-like status from the service when the item already exists in inventory; the route currently maps that branch to an HTTP error (see `services/api-service/src/api/v1/routes/sheets/inventory/inventory.py`, `services/api-service/src/services/sheets.py`).
-
-- `PATCH /api/v1/sheets/inventory/location/{row}`
-  - Updates warehouse + row, and optionally referral, for a given sheet row index.
-
-- `PATCH /api/v1/sheets/inventory/dispatch/{row}`
-  - Updates dispatch fields (dispatch date, referral, invoice) for a given sheet row index.
-
-### Production trigger / sync
-
-Routes are mounted under `/api/v1/sheets` (see `services/api-service/src/main.py`).
+Endpoints implementados:
 
 - `POST /api/v1/sheets/trigger/production`
-  - Runs `compare_coditems()` which reads items from SQL Server and upserts them into `PRUEBA ACCESS` (see `services/api-service/src/api/v1/routes/sheets/sheets.py`, `services/api-service/src/services/sheets.py`).
+- `GET /api/v1/sheets/inventory/get/{item}`
+- `POST /api/v1/sheets/inventory/new/{item}`
+- `PATCH /api/v1/sheets/inventory/location/{row}`
+- `PATCH /api/v1/sheets/inventory/dispatch/{row}`
+- `GET /api/v1/sheets/inventory/return_product/get_unknows`
+- `GET /api/v1/sheets/inventory/return_product/get/{item}`
+- `POST /api/v1/sheets/inventory/return_product/{item}?new_item=...`
 
-## Background scheduler (observed)
+## Dependencia con SQL Server (observado)
 
-- An APScheduler job runs every 10 minutes and calls `POST http://localhost:8000/api/v1/sheets/trigger/production` (see `services/api-service/src/core/scheduler.py`).
+Parte de la logica Sheets consulta SQL Server via `pyodbc`:
 
-## Failure modes (observed)
+- `new_item_sync(item)` consulta metadata del item para alta en `INVENTARIO`.
+- `compare_coditems_sync()` consulta items recientes y sincroniza hoja de base.
 
-- If Google credentials are missing, the Sheets service logs an error and returns `None`, and downstream operations may return a `404`-like status (see `services/api-service/src/services/sheets.py`).
-- HTTP errors from Google Sheets are caught and logged during item lookup (see `services/api-service/src/services/sheets.py`).
+## Scheduler (observado)
+
+- Job APScheduler en `scheduler.py`:
+  - frecuencia real: `interval`, `minutes=240` (cada 4 horas)
+  - accion: `POST http://localhost:8000/api/v1/sheets/trigger/production`
+
+Nota: comentarios/logs del codigo aun mencionan "cada 10 minutos", pero la configuracion efectiva es 240 minutos.
+
+## Riesgos/observaciones de implementacion
+
+- `compare_coditems_sync()` usa `self.SHEET_NAME_ACCES`, pero ese atributo no se define en `SheetsService.__init__`. Esto puede provocar error en runtime y retorno `500` del trigger.
+- Si `get_google_service()` retorna `None`, varias operaciones devuelven codigo de error mapeado por la ruta (`404` o `500` segun endpoint).
+- `ship_product_sync()` elimina filas en `INVENTARIO`; la indexacion depende del estado actual de la hoja.
+
+## TBD
+
+- Definicion funcional de columnas por hoja (el repo no incluye un data dictionary formal).
+- Politicas de permisos/comparticion del spreadsheet para cuentas de servicio.
+- Estrategia de reconciliacion/rollback cuando hay fallos parciales entre SQL Server y Sheets.

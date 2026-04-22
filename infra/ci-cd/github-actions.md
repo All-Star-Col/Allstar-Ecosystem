@@ -1,63 +1,50 @@
 # GitHub Actions (Observed)
 
-This document describes the observed CI/CD workflow for the API service as defined in this repository.
+This document describes the workflows currently present in `.github/workflows/`.
 
-Scope note: this is documentation of what is visible in the repo today. If something is not in the inspected files, it is marked as TBD.
+Scope note: only observable facts from this repository are documented. Unknowns are marked as `TBD`.
 
-## Where it lives
+## Workflow inventory
 
-- Workflow file: `services/api-service/.github/workflows/main.yml`
+- `.github/workflows/deploy-api.yml`
+  - Name: `Deploy API Service`
+  - Purpose: build/push API Docker image and trigger remote deploy on VM via Tailscale + SSH.
+- `.github/workflows/azure-static-web-apps-purple-water-03112dc0f.yml`
+  - Name: `Deploy Frontend (Azure Static Web Apps)`
+  - Purpose: build/deploy web app to Azure Static Web Apps and close PR previews.
 
-## Trigger and concurrency
+## API workflow (`deploy-api.yml`)
 
-- Trigger: `push` to `master`.
-- Concurrency: `group: prod-deploy` with `cancel-in-progress: true`.
+### Trigger and concurrency
 
-## Build and push image (Docker Hub)
+- Triggers:
+  - `push` on branch `main`, only when files under `services/api-service/**` or `.github/workflows/deploy-api.yml` change.
+  - `workflow_dispatch`.
+- Concurrency:
+  - `group: deploy-api`
+  - `cancel-in-progress: true`
 
-Job: `build_push`
+### Jobs
 
-- Runner: `ubuntu-latest`.
-- Uses `docker/setup-buildx-action@v3`.
-- Logs into Docker Hub via `docker/login-action@v3`.
-- Builds and pushes using `docker/build-push-action@v6` with:
-  - `context: .`
-  - `file: ./Dockerfile`
-  - `push: true`
-  - GitHub Actions cache (`cache-from`/`cache-to`).
-- Image name is set by workflow env: `starbotdocker/allstar-fastapi-repository`.
-- Tags pushed:
-  - `starbotdocker/allstar-fastapi-repository:latest`
-  - `starbotdocker/allstar-fastapi-repository:prod`
-  - `starbotdocker/allstar-fastapi-repository:${{ github.sha }}`
+- `build_and_push`
+  - Runner: `ubuntu-latest`
+  - Builds from:
+    - `context: ./services/api-service`
+    - `file: ./services/api-service/Dockerfile`
+  - Pushes image tags:
+    - `starbotdocker/allstar-fastapi-repository:latest`
+    - `starbotdocker/allstar-fastapi-repository:prod`
+    - `starbotdocker/allstar-fastapi-repository:${{ github.sha }}`
+- `deploy_to_vm` (depends on `build_and_push`)
+  - Connects to Tailscale with `tailscale/github-action@v4` using OAuth client credentials.
+  - Validates network reachability (`tailscale status`, `tailscale ping`, `nc` to TCP 22).
+  - Creates temporary SSH key file from `VM_SSH_PRIVATE_KEY`.
+  - Runs remote script:
+    - Target: `${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}`
+    - Command: `/opt/allstar-api/deploy.sh`
+    - Inline env passed: `BW_ACCESS_TOKEN`, `ENVIRONMENT=prod`, `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
 
-TBD:
-
-- The Dockerfile used by this workflow (`./Dockerfile` relative to `services/api-service/`) is not described in this doc.
-
-## Deploy to VM (Tailscale + SSH)
-
-Job: `deploy_vm` (depends on `build_push`)
-
-- Runner: `ubuntu-latest`.
-- Brings up Tailscale using `tailscale/github-action@v4` with OAuth client credentials.
-- Performs basic connectivity checks (tailscale status/ping) and a TCP 22 probe via netcat.
-- Prepares an SSH private key from the `VM_SSH_PRIVATE_KEY` secret and validates it via `ssh-keygen`.
-- Adds the VM host key to `~/.ssh/known_hosts` via `ssh-keyscan`.
-- SSHes to `${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}` and runs:
-  - `/opt/allstar-api/deploy.sh`
-  - with inline environment variables:
-    - `BW_ACCESS_TOKEN`
-    - `DOCKERHUB_USERNAME`
-    - `DOCKERHUB_TOKEN`
-
-TBD:
-
-- The exact behavior of `/opt/allstar-api/deploy.sh` is outside this repository.
-
-## Secrets used (observed)
-
-The workflow references these GitHub Actions secrets:
+### Secrets referenced
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
@@ -67,3 +54,55 @@ The workflow references these GitHub Actions secrets:
 - `VM_SSH_USER`
 - `VM_SSH_PRIVATE_KEY`
 - `BW_ACCESS_TOKEN`
+
+### TBD
+
+- Exact behavior of `/opt/allstar-api/deploy.sh` (script is outside this repository).
+
+## Frontend workflow (`azure-static-web-apps-purple-water-03112dc0f.yml`)
+
+### Triggers
+
+- `push` on branch `main` with path filters:
+  - `applications/web-app/**`
+  - `.github/workflows/deploy-frontend.yml`
+- `pull_request` on branch `main` with types:
+  - `opened`
+  - `synchronize`
+  - `reopened`
+  - `closed`
+- `workflow_dispatch`
+
+### Jobs
+
+- `build_and_deploy`
+  - Runs on `push`, `workflow_dispatch`, and PR events except `closed`.
+  - Permissions:
+    - `id-token: write`
+    - `contents: read`
+  - Uses:
+    - `actions/checkout@v4` (`submodules: true`, `lfs: false`)
+    - `actions/github-script@v6` to request OIDC token
+    - `Azure/static-web-apps-deploy@v1` with:
+      - `action: upload`
+      - `app_location: ./applications/web-app`
+      - `output_location: dist`
+      - `azure_static_web_apps_api_token` from secret
+  - Exposes `VITE_API_SERVER` to build via job env.
+- `close_pull_request`
+  - Runs on `pull_request` + `closed`
+  - Calls `Azure/static-web-apps-deploy@v1` with `action: close`.
+
+### Secrets referenced
+
+- `AZURE_STATIC_WEB_APPS_API_TOKEN_PURPLE_WATER_03112DC0F`
+- `VITE_API_SERVER`
+
+### Observed note
+
+- The workflow file is named `azure-static-web-apps-purple-water-03112dc0f.yml`, but one push path filter references `.github/workflows/deploy-frontend.yml`.
+
+### TBD
+
+- Azure environment/resource mapping details (resource group, app name, subscription) are not documented in this repository.
+- Branch/preview retention policy in Azure Static Web Apps is not documented in this repository.

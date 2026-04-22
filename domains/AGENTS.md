@@ -1,23 +1,33 @@
 # Domains
 
 ## OVERVIEW
-Bounded-context documentation lives here; each domain folder uses the same doc set and should stay focused on one business area.
+`domains/` contiene documentacion por bounded context del ecosistema Allstar.
+
+Cada carpeta de dominio debe mantener exactamente este set de 5 archivos:
+
+- `domain.md`
+- `data-model.md`
+- `api-contract.md`
+- `frontend-behavior.md`
+- `PRD.md`
 
 ## WHERE TO LOOK
-| Task | Location | Notes |
+| Dominio | Carpeta | Fuentes de evidencia recomendadas |
 |---|---|---|
-| Auth/access domain | `authentication-access/` | Most populated domain docs today |
-| Inventory domain | `inventory/` | Shared template present; some files still empty |
-| Workspace domain | `operational-workspace/` | Shared template present |
-| Production domain | `production/` | Shared template present |
+| Authentication & Access | `authentication-access/` | `services/api-service/src/api/v1/routes/login`, `register`, `workspace`, `users`; `applications/web-app/src/system/login`, `src/core/auth`, `src/system/profile` |
+| Operational Workspace | `operational-workspace/` | `services/api-service/src/api/v1/routes/workspace/*`, `services/api-service/src/services/forms.py`, `data_viewer.py`, `carpentry/*`; `applications/web-app/src/system/dashboard`, `src/apps/forms`, `src/apps/data-viewer`, `src/apps/carpentry` |
+| Inventory | `inventory/` | `services/api-service/src/api/v1/routes/sheets/inventory`, `services/api-service/src/services/sheets.py` |
+| Production | `production/` | `services/api-service/src/api/v1/routes/sheets/sheets.py`, `src/core/scheduler.py`, `services/carpentry/produccion.py`; `applications/web-app/src/apps/products`, `src/apps/carpentry/pages/ProduccionPage.jsx` |
 
 ## CONVENTIONS
-- Keep one bounded context per child directory.
-- Prefer the established five-file set: `domain.md`, `data-model.md`, `api-contract.md`, `frontend-behavior.md`, `PRD.md`.
-- When the doc is derived from inspected code, use the repo's observable-facts style and mark gaps as `TBD`.
-- Link to `applications/web-app/`, `services/api-service/`, or `integrations/*.md` when implementation details already live there.
+- Documenta solo comportamiento observable en archivos inspeccionados.
+- Cuando no haya evidencia suficiente, usa `TBD` en lugar de suposiciones.
+- Conserva el contexto local del dominio y enlaza a rutas reales del repo cuando sea util.
+- Evita duplicar especificaciones completas entre dominios; referencia documentos hermanos cuando aplique.
+- Manten el texto orientado a estado actual del repositorio, no a arquitectura futura.
 
 ## ANTI-PATTERNS
-- Do not duplicate the same concept across multiple domain folders.
-- Do not invent API contracts or data models for empty template files.
-- Do not place service operations, deployment steps, or secret-handling procedures here; those belong in `services/`, `infra/`, or `integrations/`.
+- No inventar tablas, endpoints, payloads o workflows no inspeccionados.
+- No mezclar detalles de despliegue/infra en docs de dominio.
+- No romper el patron de 5 archivos por dominio.
+- No mover contenido entre dominios solo por organizacion estetica.

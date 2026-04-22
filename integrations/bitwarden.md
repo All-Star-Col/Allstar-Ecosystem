@@ -1,50 +1,59 @@
-# Bitwarden Integration (Observed)
+# Integracion Bitwarden (Observed)
 
-This document describes how `services/api-service` loads runtime secrets from Bitwarden.
+Este documento describe la integracion observable entre `services/api-service` y Bitwarden para carga de secretos en runtime.
 
-Scope note: this is documentation of what is visible in the repo today. If something is not in the inspected files, it is marked as TBD.
+Nota de alcance: se documenta solo lo visible en el repo hoy. Lo no verificable se marca como `TBD`.
 
-## Where it lives
+## Donde vive
 
-- Configuration and secret loading: `services/api-service/src/core/config.py`
-- Settings usage (JWT, DB URLs, Sheets): referenced throughout `services/api-service/src/...`
+- Configuracion y carga de secretos: `services/api-service/src/core/config.py`
+- Uso de settings cargados: `services/api-service/src/db/database.py`, `services/api-service/src/core/auth.py`, `services/api-service/src/services/sheets.py`
 
-## Runtime contract
+## Contrato de runtime
 
-- Required environment variable: `BW_ACCESS_TOKEN`.
-- If `BW_ACCESS_TOKEN` is missing, the API raises during settings initialization (see `services/api-service/src/core/config.py`).
+- Variable obligatoria en entorno: `BW_ACCESS_TOKEN`.
+- Si `BW_ACCESS_TOKEN` no existe, `Settings.load_secrets_from_bw()` lanza error y la API no inicia.
+- `settings = Settings()` se ejecuta en import de `config.py`, asi que la carga ocurre durante bootstrap de la app.
 
-## How secrets are loaded
+## Flujo de carga de secretos (observado)
 
-Observed behavior in `services/api-service/src/core/config.py`:
-
-1. `Settings` defines Bitwarden secret IDs (UUID strings) such as `ID_SECRET_KEY`.
-2. On instantiation, `Settings.__init__()` calls `self.load_secrets_from_bw()`.
+1. `Settings` define IDs de secretos Bitwarden (`ID_*`) como UUID.
+2. `Settings.__init__()` llama `load_secrets_from_bw()`.
 3. `load_secrets_from_bw()`:
-   - Creates a `BitwardenClient` configured with:
+   - Normaliza `ENVIRONMENT` a `dev` o `prod` (default: `prod`).
+   - Crea `BitwardenClient` con:
      - `identity_url="https://identity.bitwarden.com"`
      - `api_url="https://api.bitwarden.com"`
-   - Reads `BW_ACCESS_TOKEN` from the process environment.
-   - Logs in via `client.auth().login_access_token(access_token)`.
-   - Fetches each secret via `client.secrets().get(secret_id)` and assigns `secret.data.value` into settings.
+   - Autentica con `client.auth().login_access_token(BW_ACCESS_TOKEN)`.
+   - Resuelve el ID de Postgres segun entorno:
+     - `dev` -> `ID_POSTGRES_URL_DATABASE_DEV`
+     - `prod` -> `ID_POSTGRES_URL_DATABASE_PROD`
+   - Descarga secretos con `client.secrets().get(secret_id)` y setea valores en `Settings`.
 
-## Secrets pulled from Bitwarden
+## Secretos consumidos desde Bitwarden
 
-The following settings values are populated from Bitwarden (see `services/api-service/src/core/config.py` and `services/api-service/README.md`):
+Se cargan estos valores:
 
-- `ALGORITHM` (JWT algorithm)
-- `SECRET_KEY` (JWT secret)
-- `POSTGRES_URL_DATABASE` (PostgreSQL connection string)
-- `SQLSERVER_URL_DATABASE` (SQL Server connection string)
-- `SHEETS_INVENTARIO_ALLSTAR` (Google Sheets spreadsheet id)
-- `GOOGLE_CREDENTIALS_JSON` (service account JSON as a string)
+- `ALGORITHM`
+- `POSTGRES_URL_DATABASE`
+- `SECRET_KEY`
+- `SQLSERVER_URL_DATABASE`
+- `SHEETS_INVENTARIO_ALLSTAR`
+- `GOOGLE_CREDENTIALS_JSON`
 
-## Notes / caveats (observed)
+## Configuracion local observada
 
-- Secret IDs are hard-coded as defaults in `Settings` (UUID strings). The actual secret values are fetched at runtime.
-- `Settings.Config.env_file` is set to `keys.env` (see `services/api-service/src/core/config.py`). The presence and contents of that file are outside the scope of this doc (not inspected here).
+- Se ejecuta `load_dotenv("keys.dev.env", override=False)`.
+- `Settings.Config.env_file` tambien apunta a `keys.dev.env`.
+- Si `ENVIRONMENT=dev` y `ID_POSTGRES_URL_DATABASE_DEV` es placeholder/invalido, se lanza error explicito.
+
+## Riesgos y notas observadas
+
+- Los IDs `ID_*` vienen hardcodeados en `config.py`; el valor real queda fuera del repo (Bitwarden).
+- Errores en autenticacion Bitwarden o secretos faltantes detienen el proceso al inicio.
 
 ## TBD
 
-- Bitwarden organization/vault layout and how secret IDs are managed/rotated.
-- Local developer workflow for obtaining `BW_ACCESS_TOKEN`.
+- Estructura del vault/organizacion en Bitwarden.
+- Proceso operativo de rotacion de IDs y secretos.
+- Politica de provision de `BW_ACCESS_TOKEN` para desarrollo y CI/CD.

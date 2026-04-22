@@ -1,122 +1,95 @@
 # Authentication & Access API Contract (Observed)
 
-Scope: endpoints related to authentication (token issuance) and access-controlled workspace resolution, as implemented in `services/api-service`.
+Base observable: `/api/v1`.
 
-Base path: `/api/v1` (see `services/api-service/src/main.py`).
+## `POST /api/v1/login`
+Autentica con OAuth2 Password Form.
 
-## Authentication
+Request:
+- `Content-Type: application/x-www-form-urlencoded`
+- Campos:
+  - `username`
+  - `password`
 
-### `POST /api/v1/login`
+Response 200:
+- `{ "access_token": "<jwt>", "token_type": "bearer" }`
 
-Purpose: exchange username/password for a JWT bearer token.
+Errores observados:
+- `401` credenciales invalidas.
 
-Observed implementation:
+Evidencia:
+- `services/api-service/src/api/v1/routes/login/login.py`
 
-- Handler: `services/api-service/src/api/v1/routes/login/login.py`
-- Request: OAuth2 Password Request Form (`application/x-www-form-urlencoded`) via `OAuth2PasswordRequestForm`.
-- Response model: `Token` (see `services/api-service/src/schemas/models.py`).
+## `POST /api/v1/register`
+Crea usuario y devuelve token.
 
-Request fields (form):
+Request JSON (`UserCreate`):
+- `email` (opcional)
+- `username`
+- `full_name`
+- `password`
 
-- `username` (string)
-- `password` (string)
+Response 200:
+- `{ "access_token": "<jwt>", "token_type": "bearer" }`
 
-Successful response (200):
+Errores observados:
+- `409` username existente.
 
-```json
-{
-  "access_token": "<jwt>",
-  "token_type": "bearer"
-}
-```
+Evidencia:
+- `services/api-service/src/api/v1/routes/register/register.py`
+- `services/api-service/src/services/users.py`
 
-Failure cases (observed):
+## `GET /api/v1/workspace`
+Requiere bearer token valido.
 
-- `401 Unauthorized` when credentials are incorrect.
+Response 200 (shape observado):
+- `apps: App[]`
+- `username: string`
+- `full_name: string | null`
+- `role_code: string | null`
+- `is_admin: boolean`
+- `message: string`
 
-### `POST /api/v1/register`
+Errores observados (dependencias auth):
+- `401` token faltante/invalido/expirado.
+- `400` usuario inactivo.
 
-Purpose: create a user record and issue a JWT bearer token.
+Evidencia:
+- `services/api-service/src/api/v1/routes/workspace/workspace.py`
+- `services/api-service/src/api/deps.py`
 
-Observed implementation:
+## Endpoints administrativos de usuarios
+Prefijo: `/api/v1/workspace/users`
 
-- Handler: `services/api-service/src/api/v1/routes/register/register.py`
-- Request model: `UserCreate` (see `services/api-service/src/schemas/models.py`).
-- Response model: `Token`.
+### `GET /`
+Query params: `limit`, `offset`.
 
-Request body (JSON):
+Comportamiento observado:
+- Si usuario es admin: retorna `{ list_users, limit, offset, total }`.
+- Si no es admin: retorna `null` (sin `403` explicito en handler).
 
-```json
-{
-  "email": "<optional>",
-  "username": "<string>",
-  "full_name": "<string>",
-  "password": "<string>"
-}
-```
+### `GET /{user_id}`
+- Admin: `{ user: UserAdminResponse | null }`
+- No admin: `null`
 
-Successful response (200):
+### `POST /`
+- Body: `UserCreate`
+- Admin: crea usuario.
+- No admin: no-op (handler no retorna payload).
 
-```json
-{
-  "access_token": "<jwt>",
-  "token_type": "bearer"
-}
-```
+### `PATCH /{user_id}`
+- Body: `UserUpdate`
+- Admin: actualiza campos permitidos.
 
-Failure cases (observed):
+### `DELETE /{user_id}?hard={bool}`
+- `hard=true`: delete fisico.
+- `hard=false`: soft delete (`is_active=false`).
 
-- `409 Conflict` when the username already exists (raised by `services/api-service/src/services/users.py`).
+Evidencia:
+- `services/api-service/src/api/v1/routes/workspace/users/users.py`
+- `services/api-service/src/services/users.py`
 
-## Authorization
-
-Protected endpoints use a bearer token.
-
-- Header: `Authorization: Bearer <access_token>`
-- Token decoding: `services/api-service/src/api/deps.py` uses `settings.SECRET_KEY` and `settings.ALGORITHM` (loaded from Bitwarden; see `services/api-service/src/core/config.py`).
-- Claim expectations: `sub` contains the username (see `services/api-service/src/core/auth.py`).
-
-Failure cases (observed):
-
-- `401 Unauthorized` when the token is missing/invalid/expired.
-- `400 Bad Request` when the user is inactive/disabled.
-
-## Workspace
-
-### `GET /api/v1/workspace`
-
-Purpose: return current user identity and the list of apps the user can access.
-
-Observed implementation:
-
-- Handler: `services/api-service/src/api/v1/routes/workspace/workspace.py`
-- Auth dependency: `get_current_user` (see `services/api-service/src/api/deps.py`).
-- Apps dependency: `get_current_active_apps` (see `services/api-service/src/api/deps.py`).
-- App shape: `App` model (see `services/api-service/src/schemas/models.py`).
-
-Successful response (200) shape (observed keys):
-
-```json
-{
-  "apps": [
-    {
-      "id": "<string>",
-      "name": "<string>",
-      "description": "<optional>",
-      "path": "<string>",
-      "external_url": "<optional>",
-      "icon_key": "<string>",
-      "icon_bg_color": "<string>",
-      "badge_color": "<string>"
-    }
-  ],
-  "username": "<string>",
-  "full_name": "<optional>",
-  "message": "<string>"
-}
-```
-
-Notes:
-
-- App access is computed via Postgres joins across `auth.user_roles`, `workspace.role_apps`, and `workspace.apps` (see `services/api-service/src/services/apps.py`).
-- `services/api-service/src/main.py` includes an additional `orders` router under `/api/v1/workspace`; its endpoints are TBD (router not inspected in this task).
+## TBD
+- Contrato OpenAPI formal para codigos de error de `/workspace/users`.
+- Endpoint de refresh/renew de token.
+- Endpoint de logout server-side.

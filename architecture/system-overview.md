@@ -1,64 +1,95 @@
 # System Overview
 
-This repo documents an internal ecosystem composed of a web client and an API service.
+Scope note: este documento describe solo comportamiento observable en el repo a fecha 2026-04-22. Si algo no se pudo verificar en archivos del repositorio, se marca como `TBD`.
 
-## Components
+## Componentes principales
 
-### applications/web-app (React)
+## 1) Frontend: `applications/web-app`
 
-- React + TypeScript + Vite (see `applications/web-app/package.json`).
-- Configures its API base URL via `VITE_API_SERVER` (see `applications/web-app/.env.development` and `applications/web-app/.env.production`).
+- Stack: React + TypeScript + Vite.
+- Router principal en `src/core/AppRoutes.tsx`.
+- Rutas base del shell:
+  - `/login`
+  - `/dashboard`
+  - `/dashboard/profile`
+- Modulos registrados en `src/core/modules.ts`:
+  - `forms` -> `/app/forms`
+  - `products` -> `/app/products`
+  - `data-viewer` -> `/app/data-viewer`
+  - `carpentry` -> `/app/carpentry`
+- La URL base de API viene de `VITE_API_SERVER` (`src/config/api.ts`).
 
-### services/api-service (FastAPI)
+## 2) Backend: `services/api-service`
 
-- FastAPI app title: "AllStar Platform API" (see `services/api-service/src/main.py`).
-- Routes are mounted under `/api/v1` (see `services/api-service/src/main.py`).
-- CORS is configured with:
-  - Explicit allowed origins for localhost dev ports (see `services/api-service/src/core/config.py`).
-  - An origin regex that allows `http://100.x.x.x(:port)` style origins (see `services/api-service/src/main.py`).
+- Stack: FastAPI + SQLAlchemy Async + `asyncpg` + `pyodbc`.
+- App creada en `src/main.py` con prefijo base `/api/v1`.
+- Routers incluidos hoy:
+  - Auth: `POST /login`, `POST /register`
+  - Public: `GET /public`
+  - Workspace: `GET /workspace`
+  - Workspace Forms: `/workspace/forms/*`
+  - Workspace Data Viewer: `/workspace/data-viewer/*`
+  - Workspace Users: `/workspace/users/*`
+  - Workspace Orders: `POST /workspace/orders/orders` (stub)
+  - Workspace Carpentry: `/workspace/carpentry/actions`, `/ping`, `/invoke`
+  - Sheets trigger: `POST /sheets/trigger/production`
+  - Sheets inventory: `/sheets/inventory/*`
 
-## Data stores and external dependencies (observed)
+## 3) Integraciones y stores
 
-### PostgreSQL (async)
+## Bitwarden
 
-- SQLAlchemy async engine created from `settings.POSTGRES_URL_DATABASE` (see `services/api-service/src/db/database.py`).
-- Auth queries and writes target the `auth` schema (see `services/api-service/src/services/users.py`, `services/api-service/src/services/apps.py`, `services/api-service/src/services/roles.py`).
-- Workspace configuration tables are queried under the `workspace` schema (see `services/api-service/src/services/forms.py`).
-- Dynamic inserts target the `access` schema (see `services/api-service/src/services/forms.py`).
+- `settings = Settings()` carga secretos en startup desde Bitwarden (`src/core/config.py`).
+- Requiere `BW_ACCESS_TOKEN` en entorno para iniciar la API.
+- Secretos cargados: `ALGORITHM`, `SECRET_KEY`, `POSTGRES_URL_DATABASE`, `SQLSERVER_URL_DATABASE`, `SHEETS_INVENTARIO_ALLSTAR`, `GOOGLE_CREDENTIALS_JSON`.
 
-### SQL Server (pyodbc)
+## PostgreSQL (async)
 
-- Connection is created using `settings.SQLSERVER_URL_DATABASE` (see `services/api-service/src/services/sheets.py`).
-- Used as an upstream source of item/order related rows for Sheets synchronization (see `services/api-service/src/services/sheets.py`).
+- Engine desde `settings.POSTGRES_URL_DATABASE` (`src/db/database.py`).
+- Uso observable por esquemas:
+  - `auth`: usuarios, roles, relacion usuario-rol.
+  - `workspace`: apps por rol y configuracion de tablas UI.
+  - `data`: metadata/forms y `INSERT` dinamico de formularios.
+  - `carpentry`: acciones SQL del modulo carpinteria (via `search_path`).
 
-### Google Sheets API
+## SQL Server (`pyodbc`)
 
-- Sheets client is built from a service account JSON loaded as a string (`settings.GOOGLE_CREDENTIALS_JSON`) (see `services/api-service/src/services/sheets.py`).
-- The spreadsheet id is taken from `settings.SHEETS_INVENTARIO_ALLSTAR` (see `services/api-service/src/services/sheets.py`, `services/api-service/src/core/config.py`).
+- Conexion con `settings.SQLSERVER_URL_DATABASE`.
+- Usado por `SheetsService` para leer items/upstream de inventario.
 
-### Bitwarden
+## Google Sheets API
 
-- Runtime secrets are loaded using the Bitwarden SDK and an access token provided via `BW_ACCESS_TOKEN` (see `services/api-service/src/core/config.py`).
+- Cliente construido con `GOOGLE_CREDENTIALS_JSON`.
+- Spreadsheet desde `SHEETS_INVENTARIO_ALLSTAR`.
+- Hojas observables usadas por codigo: `INVENTARIO`, `Complementos`, `DESPACHADO`, `Logs`, `DEVOLUCIONES`.
 
-## HTTP API surface (observed)
+## 4) Autenticacion y autorizacion
 
-The following routers are included (see `services/api-service/src/main.py`):
+- Login usa OAuth2 Password Flow y devuelve JWT (`src/api/v1/routes/login/login.py`).
+- Token se valida en `src/api/deps.py`.
+- Dependencias comunes:
+  - `get_current_user`
+  - `get_current_active_apps`
+  - `require_admin`
+- `require_admin` retorna `None` si no es admin (no siempre responde 403 directamente); comportamiento endpoint-a-endpoint.
 
-- Auth: `/api/v1/login`, `/api/v1/register`
-- Workspace: `/api/v1/workspace`
-- Workspace Forms: `/api/v1/workspace/forms/categories`, `/api/v1/workspace/forms/tables`, `/api/v1/workspace/forms/submit`
-- Public: `/api/v1/public`
-- Sheets: `/api/v1/sheets/trigger/production`
-- Sheets Inventory: `/api/v1/sheets/inventory/get/{item}`, `/api/v1/sheets/inventory/new/{item}`, `/api/v1/sheets/inventory/location/{row}`, `/api/v1/sheets/inventory/dispatch/{row}`
+## 5) Scheduler interno
 
-Note: An additional `orders` router is included under `/api/v1/workspace` (see `services/api-service/src/main.py`), but the endpoints are TBD (not inspected in this task).
+- APScheduler configurado en `src/core/scheduler.py`.
+- Job programado con `interval` de `minutes=240`.
+- El job hace `POST http://localhost:8000/api/v1/sheets/trigger/production`.
+- Nota: comentarios/logs todavia dicen "cada 10 minutos"; el valor efectivo en codigo es 240 minutos.
 
-## Authentication model (observed)
+## 6) Flujo funcional resumido
 
-- OAuth2 password flow is used to obtain a JWT access token (see `services/api-service/src/api/v1/routes/login/login.py`, `services/api-service/src/core/auth.py`).
-- JWT validation is performed in `services/api-service/src/api/deps.py`.
-- Tokens include a `sub` claim containing the username (see `services/api-service/src/core/auth.py`, `services/api-service/src/api/deps.py`).
+1. Usuario inicia sesion en frontend.
+2. Frontend guarda token y valida sesion consultando `/workspace`.
+3. Dashboard renderiza apps segun respuesta de `/workspace`.
+4. Cada modulo consume endpoints de su dominio (`forms`, `products`, `data-viewer`, `carpentry`, `sheets`).
+5. API combina PostgreSQL, SQL Server y Google Sheets segun endpoint.
+6. Scheduler dispara sincronizacion periodica de inventario.
 
-## Background scheduler (observed)
+## 7) Estado y gaps
 
-- On startup, an APScheduler job runs every 10 minutes and calls `POST http://localhost:8000/api/v1/sheets/trigger/production` (see `services/api-service/src/core/scheduler.py`, `services/api-service/src/main.py`).
+- Existe `applications/mobile-app/`, pero su implementacion ejecutable actual es `TBD` (fuera del alcance de este documento).
+- Dependencias exactas por modulo frontend hacia cada endpoint estan parcialmente visibles; matriz completa request/response: `TBD`.

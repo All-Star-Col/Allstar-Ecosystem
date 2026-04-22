@@ -1,48 +1,45 @@
-# WEB-APP-MODULES.md
+# WEB-APP MODULES
 
-## Objetivo
-Guía para agregar una nueva aplicacion/modulo en `applications/web-app` de forma consistente con la arquitectura actual.
+Objetivo: guia practica para crear/registrar modulos en `applications/web-app` segun el estado observable del repo (2026-04-22).
 
-Fecha de referencia (estado observado): 2026-04-08.
+## 1) Registro de modulos hoy
 
----
+Flujo real:
+1. Se define un modulo en `src/apps/<modulo>/module.config.ts`.
+2. Se registra en `src/core/modules.ts` (`export const modules`).
+3. `src/core/AppRoutes.tsx` crea rutas con `path={`${module.path}/*`}`.
+4. Cada modulo exporta un `App.tsx` con sus rutas internas.
 
-## 1. Como funciona hoy el registro de modulos
+## Modulos registrados actualmente
 
-1. Los modulos frontend se definen en `src/apps/<modulo>/module.config.ts`.
-2. Todos se registran en `src/core/modules.ts` (array `modules`).
-3. `src/core/AppRoutes.tsx` recorre `modules` y crea rutas con:
-   `path={`${module.path}/*`}` y `element={<module.component />}`.
-4. Cada modulo expone un `App.tsx` como entrypoint (puede tener sub-rutas internas o una sola vista).
+- `forms` -> `/app/forms`
+- `Products` -> `/app/products`
+- `data-viewer` -> `/app/data-viewer`
+- `carpentry` -> `/app/carpentry`
 
-Conclusión:
-- Sí, agregar un modulo es relativamente simple.
-- Pero no es solo crear carpeta: hay que registrar `module.config` en `modules.ts` y validar ruta.
+Referencia:
+- `applications/web-app/src/core/modules.ts`
 
----
-
-## 2. Estructura recomendada de un modulo nuevo
+## 2) Estructura minima de un modulo nuevo
 
 Ruta base:
-`applications/web-app/src/apps/<nuevo-modulo>/`
+- `applications/web-app/src/apps/<nuevo-modulo>/`
 
-Archivos minimos obligatorios:
+Minimo requerido:
 - `App.tsx`
 - `module.config.ts`
 
-Carpetas/archivos opcionales (segun complejidad):
+Opcional (segun complejidad):
 - `pages/`
 - `components/`
 - `api.ts`
 - `types.ts`
 - `store.ts`
-- `*.spec.ts` (tests)
+- `*.spec.ts(x)`
 
----
+## 3) Plantilla minima
 
-## 3. Plantilla minima
-
-## 3.1 `App.tsx`
+## `App.tsx`
 
 ```tsx
 import { Route, Routes } from "react-router-dom";
@@ -60,7 +57,7 @@ export default function NewModuleApp() {
 }
 ```
 
-## 3.2 `module.config.ts`
+## `module.config.ts`
 
 ```tsx
 import { lazy } from "react";
@@ -75,14 +72,10 @@ export const NewModule: AppModule = {
 };
 ```
 
----
+## 4) Registro en `modules.ts`
 
-## 4. Registro en `modules.ts`
-
-Editar:
-`applications/web-app/src/core/modules.ts`
-
-1. Importar el config nuevo.
+Editar `applications/web-app/src/core/modules.ts`:
+1. Importar el modulo.
 2. Agregarlo al array `modules`.
 
 Ejemplo:
@@ -94,79 +87,42 @@ export const modules: AppModule[] = [
   FormsModule,
   ProductsModule,
   DataViewerModule,
+  CarpentryModule,
   NewModule,
 ];
 ```
 
----
+## 5) Relacion con Dashboard
 
-## 5. Composicion interna recomendada
+Punto clave:
+- El dashboard no se alimenta desde `modules.ts`.
+- `Dashboard.tsx` consulta `GET ${API_SERVER}/workspace` y renderiza `workspaceData.apps`.
 
-Si es modulo pequeño:
-- `App.tsx` + `module.config.ts` + 1 o 2 componentes.
+Implicacion:
+1. Registrar modulo en `modules.ts` habilita la ruta frontend.
+2. Para que aparezca en Dashboard, backend debe devolver ese app en `/workspace`.
+3. El `app.path` de backend debe coincidir con `module.path` del frontend.
 
-Si es modulo mediano/grande:
-- `pages/` para vistas principales.
-- `components/` para piezas de UI.
-- `api.ts` para llamadas HTTP.
-- `types.ts` para contratos tipados.
-- `store.ts` si requiere estado compartido.
-- `*.spec.ts` para pruebas.
+## 6) Configuracion API
 
-Patron observado en modulos actuales:
-- `forms` y `products` usan `Routes` internas.
-- `data-viewer` usa una vista principal sin sub-rutas.
+- La web usa `API_SERVER = import.meta.env.VITE_API_SERVER`.
+- Las llamadas agregan rutas como `/workspace`, `/workspace/forms/*`, `/workspace/data-viewer/*`.
 
----
+`TBD` operativo:
+- El valor exacto de `VITE_API_SERVER` depende del entorno; debe ser consistente con el prefijo real de la API desplegada.
 
-## 6. Paso clave que suele confundirse: Dashboard
-
-El Dashboard NO se alimenta de `modules.ts`.
-
-`Dashboard.tsx` consume `GET /workspace` (backend) y pinta `workspaceData.apps`.
-Cada tile navega usando `app.path`.
-
-Esto implica:
-1. Registrar en `modules.ts` habilita la ruta frontend.
-2. Para que aparezca en Dashboard, el backend debe devolver ese app en `/workspace`.
-3. El `path` que devuelva backend debe coincidir con tu `module.path`.
-
-Si no aparece en Dashboard pero la ruta existe, revisa configuración de apps/roles en backend.
-
----
-
-## 7. Checklist rapido para crear un modulo
+## 7) Checklist rapido
 
 - [ ] Crear `src/apps/<nuevo-modulo>/App.tsx`.
 - [ ] Crear `src/apps/<nuevo-modulo>/module.config.ts`.
-- [ ] Agregar import y registro en `src/core/modules.ts`.
-- [ ] Usar `path` unico y con prefijo `/app/...`.
-- [ ] Verificar que no colisione con rutas existentes.
-- [ ] Si debe salir en Dashboard, confirmar app/path en respuesta de `/workspace`.
-- [ ] Ejecutar `npm run dev` y probar ruta directa.
+- [ ] Registrar modulo en `src/core/modules.ts`.
+- [ ] Confirmar `path` unico y bajo `/app/...`.
+- [ ] Probar navegacion directa a la ruta.
+- [ ] Si debe verse en dashboard, confirmar app/path en respuesta de `/workspace`.
 
----
+## 8) Errores comunes
 
-## 8. Errores comunes
-
-- Definir `path` sin `/app/` y romper navegación.
-- Registrar módulo en carpeta pero olvidar `modules.ts`.
-- Poner un `module.path` distinto al `path` que entrega backend en dashboard.
-- Repetir `name` o `path` de otro módulo.
-
----
-
-## 9. Estado observable actual de modulos
-
-Modulos registrados hoy:
-- `forms` -> `/app/forms`
-- `products` -> `/app/products`
-- `data-viewer` -> `/app/data-viewer`
-
-Archivos de referencia:
-- `applications/web-app/src/core/modules.ts`
-- `applications/web-app/src/core/AppRoutes.tsx`
-- `applications/web-app/src/apps/forms/module.config.ts`
-- `applications/web-app/src/apps/products/module.config.ts`
-- `applications/web-app/src/apps/data-viewer/module.config.ts`
-
+- Crear carpeta del modulo pero olvidar registro en `modules.ts`.
+- `module.path` distinto al path enviado por backend en `/workspace`.
+- Reutilizar `path` o `name` de otro modulo.
+- Configurar mal `VITE_API_SERVER` y romper consumo de API.

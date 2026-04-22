@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-03-20
-**Commit:** f3a46c8
+**Generated:** 2026-04-22
+**Commit:** 35cd694
 **Branch:** main
 
 ## OVERVIEW
@@ -17,7 +17,7 @@ Documentation-driven monorepo for the Allstar ecosystem. The repo mixes living s
 ├── services/        # backend service contexts
 ├── infra/           # CI/CD, deployment, networking
 ├── integrations/    # external systems and contracts
-└── engineering/     # engineering guidance placeholders; mostly empty today
+└── engineering/     # engineering standards and guidance docs
 ```
 
 ## WHERE TO LOOK
@@ -30,7 +30,7 @@ Documentation-driven monorepo for the Allstar ecosystem. The repo mixes living s
 | Mobile app status | `applications/mobile-app/` | Docs scaffold; source/tests are `.gitkeep` only |
 | Backend work | `services/api-service/` | Read local `AGENTS.md` and `README.md` |
 | Domain docs | `domains/` | Shared bounded-context template; read local `AGENTS.md` |
-| CI/CD | `.github/workflows/main.yml` and `infra/ci-cd/github-actions.md` | Workflow currently deploys API service only |
+| CI/CD | `.github/workflows/deploy-api.yml`, `.github/workflows/azure-static-web-apps-purple-water-03112dc0f.yml`, and `infra/ci-cd/github-actions.md` | API and frontend workflows exist in root `.github/workflows/` |
 | External systems | `integrations/*.md` | Bitwarden, Google Sheets, Postgres, SQL Server, n8n |
 
 ## CONVENTIONS
@@ -45,7 +45,7 @@ Documentation-driven monorepo for the Allstar ecosystem. The repo mixes living s
 ## ANTI-PATTERNS (THIS PROJECT)
 - Do not move content between top-level folders just to "tidy" the tree; the folder boundary is part of the meaning.
 - Do not document behavior that is not grounded in inspected files; use `TBD` instead of guessing.
-- Do not treat empty placeholder docs in `engineering/` or `applications/mobile-app/` as authoritative.
+- Do not treat scaffold docs in `applications/mobile-app/` as authoritative implementation.
 - Do not log, paste, or restate secrets/tokens from service config, Bitwarden, or CI docs.
 - Do not create extra scoped `AGENTS.md` files unless the child directory has rules the parent cannot express concisely.
 
@@ -65,6 +65,6 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## NOTES
-- The root GitHub Actions workflow only triggers on `services/api-service/**` changes.
+- Root GitHub Actions includes both API (`deploy-api.yml`) and frontend (`azure-static-web-apps-purple-water-03112dc0f.yml`) workflows.
 - `applications/mobile-app/` is currently a documentation scaffold, not an implemented app.
 - `services/api-service/src/README.md` is only a placeholder; rely on the service root README and source tree instead.
