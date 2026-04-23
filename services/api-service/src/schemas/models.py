@@ -99,6 +99,43 @@ class App(BaseModel):
     badge_color: str
 
 
+class UserRoleResponse(BaseModel):
+    user_id: UUID
+    role: Role | None = None
+
+
+class AssignUserRoleRequest(BaseModel):
+    role_id: UUID
+
+
+class RoleAppPermission(BaseModel):
+    app_id: str
+    app_name: str | None = None
+    app_description: str | None = None
+    app_path: str | None = None
+    can_view: bool = True
+
+
+class RoleTablePermission(BaseModel):
+    table_id: int
+    table_name: str | None = None
+    table_label: str | None = None
+    visible: bool = True
+    can_edit: bool = False
+    can_create: bool = False
+
+
+class RolePermissionsResponse(BaseModel):
+    role_id: UUID
+    apps: List[RoleAppPermission] = Field(default_factory=list)
+    tables: List[RoleTablePermission] = Field(default_factory=list)
+
+
+class RolePermissionsUpdateRequest(BaseModel):
+    apps: List[RoleAppPermission] = Field(default_factory=list)
+    tables: List[RoleTablePermission] = Field(default_factory=list)
+
+
 # _____________________________________________________
 #   /api/v1/sheets/inventory | sheets
 # _____________________________________________________

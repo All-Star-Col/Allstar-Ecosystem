@@ -27,6 +27,13 @@ import {
 } from "@/shared/ui/card";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/shared/ui/select";
 import { Switch } from "@/shared/ui/switch";
 import {
     Table,
@@ -38,10 +45,19 @@ import {
 } from "@/shared/ui/table";
 import {
     type AdminUser,
+    type RoleAppPermission,
+    type RoleTablePermission,
     type UpdateAdminUserPayload,
+    type WorkspaceRole,
+    assignAdminUserRole,
     createAdminUser,
     fetchAdminUsers,
+    fetchAdminUserRole,
+    fetchRolePermissions,
+    fetchWorkspaceRoles,
     fetchWorkspaceSession,
+    saveRoleAppsPermissions,
+    saveRoleTablesPermissions,
     updateAdminUser,
 } from "./profile.api";
 
@@ -56,6 +72,7 @@ type EditFormState = {
     username: string;
     full_name: string;
     email: string;
+    role_id: string;
     is_active: boolean;
     password: string;
 };
@@ -74,16 +91,6 @@ const EMPTY_CREATE_FORM: CreateFormState = {
     password: "",
 };
 
-const mapUserToEditForm = (user: AdminUser | null): EditFormState => {
-    return {
-        username: user?.username ?? "",
-        full_name: user?.full_name ?? "",
-        email: user?.email ?? "",
-        is_active: user?.is_active ?? true,
-        password: "",
-    };
-};
-
 const toErrorMessage = (error: unknown, fallback: string): string => {
     if (error instanceof Error && error.message.trim()) {
         return error.message;
@@ -92,19 +99,77 @@ const toErrorMessage = (error: unknown, fallback: string): string => {
     return fallback;
 };
 
+const resolveUserRoleId = (
+    user: AdminUser | null,
+    roles: WorkspaceRole[],
+): string => {
+    if (!user) {
+        return "";
+    }
+
+    if (typeof user.role_id === "string" && user.role_id.trim()) {
+        return user.role_id;
+    }
+
+    if (
+        user.role &&
+        typeof user.role.id === "string" &&
+        user.role.id.trim().length > 0
+    ) {
+        return user.role.id;
+    }
+
+    const roleCode =
+        (typeof user.role_code === "string" && user.role_code.trim()) ||
+        (typeof user.role?.code === "string" && user.role.code.trim()) ||
+        "";
+
+    if (!roleCode) {
+        return "";
+    }
+
+    const roleMatch = roles.find((role) => role.code === roleCode);
+    return roleMatch?.id ?? "";
+};
+
+const mapUserToEditForm = (
+    user: AdminUser | null,
+    roleId: string,
+): EditFormState => {
+    return {
+        username: user?.username ?? "",
+        full_name: user?.full_name ?? "",
+        email: user?.email ?? "",
+        role_id: roleId,
+        is_active: user?.is_active ?? true,
+        password: "",
+    };
+};
+
 export default function Profile() {
     const navigate = useNavigate();
 
     const [users, setUsers] = React.useState<AdminUser[]>([]);
+    const [roles, setRoles] = React.useState<WorkspaceRole[]>([]);
+
     const [selectedUserId, setSelectedUserId] = React.useState<string | null>(null);
+    const [selectedPermissionsRoleId, setSelectedPermissionsRoleId] =
+        React.useState<string | null>(null);
     const [searchQuery, setSearchQuery] = React.useState("");
 
     const [editForm, setEditForm] = React.useState<EditFormState>(
-        mapUserToEditForm(null),
+        mapUserToEditForm(null, ""),
     );
     const [createForm, setCreateForm] = React.useState<CreateFormState>(
         EMPTY_CREATE_FORM,
     );
+
+    const [roleAppPermissions, setRoleAppPermissions] = React.useState<
+        RoleAppPermission[]
+    >([]);
+    const [roleTablePermissions, setRoleTablePermissions] = React.useState<
+        RoleTablePermission[]
+    >([]);
 
     const [statusMessage, setStatusMessage] = React.useState<StatusMessage | null>(
         null,
@@ -112,8 +177,16 @@ export default function Profile() {
 
     const [isBootstrapping, setIsBootstrapping] = React.useState(true);
     const [isRefreshingUsers, setIsRefreshingUsers] = React.useState(false);
+    const [isLoadingRoles, setIsLoadingRoles] = React.useState(false);
     const [isSavingChanges, setIsSavingChanges] = React.useState(false);
     const [isCreatingUser, setIsCreatingUser] = React.useState(false);
+
+    const [isLoadingRolePermissions, setIsLoadingRolePermissions] =
+        React.useState(false);
+    const [isSavingRoleApps, setIsSavingRoleApps] = React.useState(false);
+    const [isSavingRoleTables, setIsSavingRoleTables] = React.useState(false);
+
+    const permissionsRequestRef = React.useRef(0);
 
     const selectedUser = React.useMemo(() => {
         if (!selectedUserId) {
@@ -123,9 +196,46 @@ export default function Profile() {
         return users.find((user) => user.id === selectedUserId) ?? null;
     }, [users, selectedUserId]);
 
+    const selectedPermissionsRole = React.useMemo(() => {
+        if (!selectedPermissionsRoleId) {
+            return null;
+        }
+
+        return roles.find((role) => role.id === selectedPermissionsRoleId) ?? null;
+    }, [roles, selectedPermissionsRoleId]);
+
     React.useEffect(() => {
-        setEditForm(mapUserToEditForm(selectedUser));
-    }, [selectedUser]);
+        const inferredRoleId = resolveUserRoleId(selectedUser, roles);
+        setEditForm(mapUserToEditForm(selectedUser, inferredRoleId));
+
+        if (!selectedUser || inferredRoleId) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const hydrateUserRole = async () => {
+            try {
+                const userRole = await fetchAdminUserRole(selectedUser.id);
+                if (cancelled || !userRole) {
+                    return;
+                }
+
+                setEditForm((prev) => ({
+                    ...prev,
+                    role_id: userRole.id,
+                }));
+            } catch {
+                // Ignore to avoid noisy UI when role endpoint is unavailable.
+            }
+        };
+
+        void hydrateUserRole();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [roles, selectedUser]);
 
     const filteredUsers = React.useMemo(() => {
         const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -176,6 +286,67 @@ export default function Profile() {
         [],
     );
 
+    const refreshRoles = React.useCallback(async (): Promise<WorkspaceRole[] | null> => {
+        setIsLoadingRoles(true);
+        try {
+            const nextRoles = await fetchWorkspaceRoles();
+            setRoles(nextRoles);
+            setSelectedPermissionsRoleId((currentRoleId) => {
+                if (currentRoleId && nextRoles.some((role) => role.id === currentRoleId)) {
+                    return currentRoleId;
+                }
+
+                return nextRoles[0]?.id ?? null;
+            });
+
+            return nextRoles;
+        } catch (error) {
+            setStatusMessage({
+                tone: "error",
+                text: toErrorMessage(error, "No se pudieron cargar los roles."),
+            });
+            return null;
+        } finally {
+            setIsLoadingRoles(false);
+        }
+    }, []);
+
+    const loadRolePermissions = React.useCallback(async (roleId: string) => {
+        const requestId = permissionsRequestRef.current + 1;
+        permissionsRequestRef.current = requestId;
+
+        setIsLoadingRolePermissions(true);
+
+        try {
+            const permissions = await fetchRolePermissions(roleId);
+
+            if (permissionsRequestRef.current !== requestId) {
+                return;
+            }
+
+            setRoleAppPermissions(permissions.apps);
+            setRoleTablePermissions(permissions.tables);
+        } catch (error) {
+            if (permissionsRequestRef.current !== requestId) {
+                return;
+            }
+
+            setRoleAppPermissions([]);
+            setRoleTablePermissions([]);
+            setStatusMessage({
+                tone: "error",
+                text: toErrorMessage(
+                    error,
+                    "No se pudieron cargar los permisos del rol seleccionado.",
+                ),
+            });
+        } finally {
+            if (permissionsRequestRef.current === requestId) {
+                setIsLoadingRolePermissions(false);
+            }
+        }
+    }, []);
+
     React.useEffect(() => {
         let cancelled = false;
 
@@ -191,7 +362,7 @@ export default function Profile() {
                     return;
                 }
 
-                await refreshUsers();
+                await Promise.all([refreshUsers(), refreshRoles()]);
             } catch (error) {
                 if (!cancelled) {
                     setStatusMessage({
@@ -214,7 +385,18 @@ export default function Profile() {
         return () => {
             cancelled = true;
         };
-    }, [navigate, refreshUsers]);
+    }, [navigate, refreshRoles, refreshUsers]);
+
+    React.useEffect(() => {
+        if (!selectedPermissionsRoleId) {
+            setRoleAppPermissions([]);
+            setRoleTablePermissions([]);
+            setIsLoadingRolePermissions(false);
+            return;
+        }
+
+        void loadRolePermissions(selectedPermissionsRoleId);
+    }, [selectedPermissionsRoleId, loadRolePermissions]);
 
     const handleSaveChanges = React.useCallback(async () => {
         if (!selectedUser) {
@@ -227,6 +409,7 @@ export default function Profile() {
         const nextFullName = editForm.full_name.trim();
         const nextEmail = editForm.email.trim();
         const nextPassword = editForm.password.trim();
+        const nextRoleId = editForm.role_id.trim();
 
         if (nextUsername && nextUsername !== selectedUser.username) {
             payload.username = nextUsername;
@@ -255,7 +438,29 @@ export default function Profile() {
             payload.password = nextPassword;
         }
 
-        if (Object.keys(payload).length === 0) {
+        const currentRoleId = resolveUserRoleId(selectedUser, roles);
+        const roleChanged = nextRoleId !== currentRoleId;
+
+        if (roleChanged && !nextRoleId) {
+            setStatusMessage({
+                tone: "error",
+                text: "Debes seleccionar un rol válido para el usuario.",
+            });
+            return;
+        }
+
+        if (
+            roleChanged &&
+            !roles.some((role) => role.id === nextRoleId)
+        ) {
+            setStatusMessage({
+                tone: "error",
+                text: "El rol seleccionado no es válido.",
+            });
+            return;
+        }
+
+        if (Object.keys(payload).length === 0 && !roleChanged) {
             setStatusMessage({
                 tone: "info",
                 text: "No hay cambios pendientes para guardar.",
@@ -266,13 +471,30 @@ export default function Profile() {
         setIsSavingChanges(true);
 
         try {
-            await updateAdminUser(selectedUser.id, payload);
+            if (Object.keys(payload).length > 0) {
+                await updateAdminUser(selectedUser.id, payload);
+            }
+
+            if (roleChanged) {
+                await assignAdminUserRole(selectedUser.id, nextRoleId);
+            }
+
+            const successText =
+                roleChanged && Object.keys(payload).length > 0
+                    ? "Usuario y rol actualizados correctamente."
+                    : roleChanged
+                      ? "Rol actualizado correctamente."
+                      : "Usuario actualizado correctamente.";
+
             setStatusMessage({
                 tone: "success",
-                text: "Usuario actualizado correctamente.",
+                text: successText,
             });
 
-            await refreshUsers(selectedUser.id);
+            await Promise.all([
+                refreshUsers(selectedUser.id),
+                refreshRoles(),
+            ]);
         } catch (error) {
             setStatusMessage({
                 tone: "error",
@@ -281,7 +503,7 @@ export default function Profile() {
         } finally {
             setIsSavingChanges(false);
         }
-    }, [editForm, refreshUsers, selectedUser]);
+    }, [editForm, refreshRoles, refreshUsers, roles, selectedUser]);
 
     const handleCreateUser = React.useCallback(
         async (event: React.FormEvent<HTMLFormElement>) => {
@@ -339,6 +561,61 @@ export default function Profile() {
         },
         [createForm, refreshUsers],
     );
+
+    const handleSaveRoleApps = React.useCallback(async () => {
+        if (!selectedPermissionsRoleId) {
+            return;
+        }
+
+        setIsSavingRoleApps(true);
+        try {
+            await saveRoleAppsPermissions(selectedPermissionsRoleId, roleAppPermissions);
+            setStatusMessage({
+                tone: "success",
+                text: "Permisos de aplicaciones guardados correctamente.",
+            });
+            await loadRolePermissions(selectedPermissionsRoleId);
+        } catch (error) {
+            setStatusMessage({
+                tone: "error",
+                text: toErrorMessage(
+                    error,
+                    "No fue posible guardar los permisos de aplicaciones.",
+                ),
+            });
+        } finally {
+            setIsSavingRoleApps(false);
+        }
+    }, [loadRolePermissions, roleAppPermissions, selectedPermissionsRoleId]);
+
+    const handleSaveRoleTables = React.useCallback(async () => {
+        if (!selectedPermissionsRoleId) {
+            return;
+        }
+
+        setIsSavingRoleTables(true);
+        try {
+            await saveRoleTablesPermissions(
+                selectedPermissionsRoleId,
+                roleTablePermissions,
+            );
+            setStatusMessage({
+                tone: "success",
+                text: "Permisos de tablas guardados correctamente.",
+            });
+            await loadRolePermissions(selectedPermissionsRoleId);
+        } catch (error) {
+            setStatusMessage({
+                tone: "error",
+                text: toErrorMessage(
+                    error,
+                    "No fue posible guardar los permisos de tablas.",
+                ),
+            });
+        } finally {
+            setIsSavingRoleTables(false);
+        }
+    }, [loadRolePermissions, roleTablePermissions, selectedPermissionsRoleId]);
 
     const isStatusError = statusMessage?.tone === "error";
 
@@ -527,8 +804,8 @@ export default function Profile() {
                                 Perfil del usuario
                             </CardTitle>
                             <CardDescription>
-                                Ajusta datos, activa o desactiva cuentas y define una nueva
-                                contraseña temporal.
+                                Ajusta datos, activa o desactiva cuentas, define una nueva
+                                contraseña temporal y selecciona su rol.
                             </CardDescription>
                         </CardHeader>
 
@@ -580,6 +857,45 @@ export default function Profile() {
                                                 }))
                                             }
                                         />
+                                    </div>
+
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="edit-role">Rol</Label>
+                                        <Select
+                                            value={editForm.role_id}
+                                            onValueChange={(roleId) =>
+                                                setEditForm((prev) => ({
+                                                    ...prev,
+                                                    role_id: roleId,
+                                                }))
+                                            }
+                                            disabled={
+                                                isLoadingRoles ||
+                                                isSavingChanges ||
+                                                roles.length === 0
+                                            }
+                                        >
+                                            <SelectTrigger id="edit-role">
+                                                <SelectValue
+                                                    placeholder={
+                                                        isLoadingRoles
+                                                            ? "Cargando roles..."
+                                                            : "Selecciona un rol"
+                                                    }
+                                                />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {roles.map((role) => (
+                                                    <SelectItem key={role.id} value={role.id}>
+                                                        {role.name} ({role.code})
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <p className="text-2xs text-muted-foreground">
+                                            El rol seleccionado reemplaza cualquier rol previo
+                                            del usuario.
+                                        </p>
                                     </div>
 
                                     <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 flex items-center justify-between gap-3">
@@ -644,7 +960,12 @@ export default function Profile() {
                                             size="md"
                                             disabled={isSavingChanges}
                                             onClick={() =>
-                                                setEditForm(mapUserToEditForm(selectedUser))
+                                                setEditForm(
+                                                    mapUserToEditForm(
+                                                        selectedUser,
+                                                        resolveUserRoleId(selectedUser, roles),
+                                                    ),
+                                                )
                                             }
                                             className="cursor-pointer"
                                         >
@@ -656,6 +977,378 @@ export default function Profile() {
                         </CardContent>
                     </Card>
                 </div>
+
+                <Card className="mt-4 border-border/60">
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-lg font-semibold text-foreground">
+                            Permisos
+                        </CardTitle>
+                        <CardDescription>
+                            Selecciona un rol para administrar permisos por aplicaciones y
+                            por tablas.
+                        </CardDescription>
+                    </CardHeader>
+
+                    <CardContent className="grid gap-4 xl:grid-cols-[280px_1fr]">
+                        <div className="rounded-lg border border-border/60 bg-card">
+                            <div className="border-b border-border/60 px-3 py-2 text-sm font-medium text-foreground">
+                                Roles
+                            </div>
+
+                            <div className="max-h-[380px] overflow-y-auto p-2">
+                                {isLoadingRoles ? (
+                                    <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                                        Cargando roles...
+                                    </div>
+                                ) : roles.length === 0 ? (
+                                    <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                                        No hay roles disponibles para editar.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-1">
+                                        {roles.map((role) => {
+                                            const isSelectedRole =
+                                                role.id === selectedPermissionsRoleId;
+
+                                            return (
+                                                <Button
+                                                    key={role.id}
+                                                    type="button"
+                                                    variant={
+                                                        isSelectedRole ? "primary" : "ghost"
+                                                    }
+                                                    size="sm"
+                                                    className="w-full justify-start cursor-pointer"
+                                                    onClick={() =>
+                                                        setSelectedPermissionsRoleId(role.id)
+                                                    }
+                                                >
+                                                    {role.name} ({role.code})
+                                                </Button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {!selectedPermissionsRole ? (
+                            <div className="rounded-lg border border-dashed border-border/60 px-4 py-6 text-sm text-muted-foreground">
+                                Selecciona un rol en la columna izquierda para editar sus
+                                permisos.
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="rounded-lg border border-border/60 bg-card">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+                                        <div>
+                                            <p className="text-sm font-medium text-foreground">
+                                                Aplicaciones
+                                            </p>
+                                            <p className="text-2xs text-muted-foreground">
+                                                Define acceso de {selectedPermissionsRole.name} a
+                                                cada app.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="primary"
+                                            loading={isSavingRoleApps}
+                                            disabled={
+                                                isLoadingRolePermissions ||
+                                                roleAppPermissions.length === 0 ||
+                                                isSavingRoleTables
+                                            }
+                                            onClick={() => {
+                                                void handleSaveRoleApps();
+                                            }}
+                                            className="cursor-pointer"
+                                        >
+                                            Guardar aplicaciones
+                                        </Button>
+                                    </div>
+
+                                    {isLoadingRolePermissions ? (
+                                        <div className="px-3 py-4 text-sm text-muted-foreground">
+                                            Cargando permisos de aplicaciones...
+                                        </div>
+                                    ) : (
+                                        <div className="max-h-[260px] overflow-y-auto">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>Aplicación</TableHead>
+                                                        <TableHead>Ruta</TableHead>
+                                                        <TableHead className="text-right">
+                                                            Acceso
+                                                        </TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {roleAppPermissions.length === 0 ? (
+                                                        <TableRow>
+                                                            <TableCell
+                                                                colSpan={3}
+                                                                className="text-center text-sm text-muted-foreground"
+                                                            >
+                                                                No hay aplicaciones configuradas
+                                                                para este rol.
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ) : (
+                                                        roleAppPermissions.map((permission) => (
+                                                            <TableRow key={permission.app_id}>
+                                                                <TableCell className="align-middle">
+                                                                    <div className="font-medium text-foreground">
+                                                                        {permission.app_name}
+                                                                    </div>
+                                                                    {permission.app_description ? (
+                                                                        <div className="text-2xs text-muted-foreground">
+                                                                            {
+                                                                                permission.app_description
+                                                                            }
+                                                                        </div>
+                                                                    ) : null}
+                                                                </TableCell>
+                                                                <TableCell className="text-sm text-muted-foreground">
+                                                                    {permission.app_path ?? "-"}
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="inline-flex items-center gap-2">
+                                                                        <span className="text-2xs text-muted-foreground">
+                                                                            Ver
+                                                                        </span>
+                                                                        <Switch
+                                                                            checked={
+                                                                                permission.can_view
+                                                                            }
+                                                                            disabled={
+                                                                                isSavingRoleApps ||
+                                                                                isSavingRoleTables
+                                                                            }
+                                                                            onCheckedChange={(
+                                                                                checked,
+                                                                            ) => {
+                                                                                setRoleAppPermissions(
+                                                                                    (prev) =>
+                                                                                        prev.map(
+                                                                                            (
+                                                                                                item,
+                                                                                            ) =>
+                                                                                                item.app_id ===
+                                                                                                permission.app_id
+                                                                                                    ? {
+                                                                                                          ...item,
+                                                                                                          can_view:
+                                                                                                              checked,
+                                                                                                      }
+                                                                                                    : item,
+                                                                                        ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-border/60 bg-card">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+                                        <div>
+                                            <p className="text-sm font-medium text-foreground">
+                                                Tablas
+                                            </p>
+                                            <p className="text-2xs text-muted-foreground">
+                                                Controla visibilidad, edición y creación por tabla.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="primary"
+                                            loading={isSavingRoleTables}
+                                            disabled={
+                                                isLoadingRolePermissions ||
+                                                roleTablePermissions.length === 0 ||
+                                                isSavingRoleApps
+                                            }
+                                            onClick={() => {
+                                                void handleSaveRoleTables();
+                                            }}
+                                            className="cursor-pointer"
+                                        >
+                                            Guardar tablas
+                                        </Button>
+                                    </div>
+
+                                    {isLoadingRolePermissions ? (
+                                        <div className="px-3 py-4 text-sm text-muted-foreground">
+                                            Cargando permisos de tablas...
+                                        </div>
+                                    ) : (
+                                        <div className="max-h-[260px] overflow-y-auto">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>Tabla</TableHead>
+                                                        <TableHead className="text-right">
+                                                            Ver
+                                                        </TableHead>
+                                                        <TableHead className="text-right">
+                                                            Editar
+                                                        </TableHead>
+                                                        <TableHead className="text-right">
+                                                            Crear
+                                                        </TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {roleTablePermissions.length === 0 ? (
+                                                        <TableRow>
+                                                            <TableCell
+                                                                colSpan={4}
+                                                                className="text-center text-sm text-muted-foreground"
+                                                            >
+                                                                No hay tablas configuradas para
+                                                                este rol.
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ) : (
+                                                        roleTablePermissions.map((permission) => (
+                                                            <TableRow key={permission.table_id}>
+                                                                <TableCell className="align-middle">
+                                                                    <div className="font-medium text-foreground">
+                                                                        {
+                                                                            permission.table_label ??
+                                                                            permission.table_name
+                                                                        }
+                                                                    </div>
+                                                                    {permission.table_label ? (
+                                                                        <div className="text-2xs text-muted-foreground">
+                                                                            {
+                                                                                permission.table_name
+                                                                            }
+                                                                        </div>
+                                                                    ) : null}
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="inline-flex items-center justify-end">
+                                                                        <Switch
+                                                                            checked={
+                                                                                permission.can_view
+                                                                            }
+                                                                            disabled={
+                                                                                isSavingRoleTables ||
+                                                                                isSavingRoleApps
+                                                                            }
+                                                                            onCheckedChange={(
+                                                                                checked,
+                                                                            ) => {
+                                                                                setRoleTablePermissions(
+                                                                                    (prev) =>
+                                                                                        prev.map(
+                                                                                            (
+                                                                                                item,
+                                                                                            ) =>
+                                                                                                item.table_id ===
+                                                                                                permission.table_id
+                                                                                                    ? {
+                                                                                                          ...item,
+                                                                                                          can_view:
+                                                                                                              checked,
+                                                                                                      }
+                                                                                                    : item,
+                                                                                        ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="inline-flex items-center justify-end">
+                                                                        <Switch
+                                                                            checked={
+                                                                                permission.can_edit
+                                                                            }
+                                                                            disabled={
+                                                                                isSavingRoleTables ||
+                                                                                isSavingRoleApps
+                                                                            }
+                                                                            onCheckedChange={(
+                                                                                checked,
+                                                                            ) => {
+                                                                                setRoleTablePermissions(
+                                                                                    (prev) =>
+                                                                                        prev.map(
+                                                                                            (
+                                                                                                item,
+                                                                                            ) =>
+                                                                                                item.table_id ===
+                                                                                                permission.table_id
+                                                                                                    ? {
+                                                                                                          ...item,
+                                                                                                          can_edit:
+                                                                                                              checked,
+                                                                                                      }
+                                                                                                    : item,
+                                                                                        ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="inline-flex items-center justify-end">
+                                                                        <Switch
+                                                                            checked={
+                                                                                permission.can_create
+                                                                            }
+                                                                            disabled={
+                                                                                isSavingRoleTables ||
+                                                                                isSavingRoleApps
+                                                                            }
+                                                                            onCheckedChange={(
+                                                                                checked,
+                                                                            ) => {
+                                                                                setRoleTablePermissions(
+                                                                                    (prev) =>
+                                                                                        prev.map(
+                                                                                            (
+                                                                                                item,
+                                                                                            ) =>
+                                                                                                item.table_id ===
+                                                                                                permission.table_id
+                                                                                                    ? {
+                                                                                                          ...item,
+                                                                                                          can_create:
+                                                                                                              checked,
+                                                                                                      }
+                                                                                                    : item,
+                                                                                        ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
 
                 <Card className="mt-4 border-border/60">
                     <CardHeader className="pb-3">
