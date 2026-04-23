@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 export const getIconComponent = (iconKey: string): LucideIcon => {
     const iconMap: Record<string, keyof typeof LucideIcons> = {
         users: "Users",
+        database: "Database",
         dollar_sign: "DollarSign",
         file_text: "FileText",
         briefcase: "Briefcase",
