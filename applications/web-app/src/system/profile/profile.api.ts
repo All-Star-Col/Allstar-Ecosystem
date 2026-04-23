@@ -270,7 +270,7 @@ const normalizeRolesPayload = (payload: unknown): WorkspaceRole[] => {
                 is_active: readBoolean(item.is_active, true),
             } satisfies WorkspaceRole;
         })
-        .filter((item): item is WorkspaceRole => item !== null);
+        .filter((item) => item !== null) as WorkspaceRole[];
 };
 
 const normalizeRoleAppsPayload = (payload: unknown): RoleAppPermission[] => {
@@ -323,7 +323,7 @@ const normalizeRoleAppsPayload = (payload: unknown): RoleAppPermission[] => {
                 ),
             } satisfies RoleAppPermission;
         })
-        .filter((item): item is RoleAppPermission => item !== null);
+        .filter((item) => item !== null) as RoleAppPermission[];
 };
 
 const normalizeRoleTablesPayload = (payload: unknown): RoleTablePermission[] => {
@@ -392,7 +392,7 @@ const normalizeRoleTablesPayload = (payload: unknown): RoleTablePermission[] => 
                 ),
             } satisfies RoleTablePermission;
         })
-        .filter((item): item is RoleTablePermission => item !== null);
+        .filter((item) => item !== null) as RoleTablePermission[];
 };
 
 export async function fetchWorkspaceSession(): Promise<WorkspaceSessionResponse> {
