@@ -355,6 +355,36 @@ export async function fetchForeignKeyLookup(
 }
 
 /*
+ * Fetch distinct existing values for a plain text column (used by HybridTextField)
+ */
+export async function fetchColumnValues(params: {
+    tableName: string;
+    columnName: string;
+    query?: string;
+    limit?: number;
+}): Promise<{ value: string; label: string }[]> {
+    const token = getToken();
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const searchParams = new URLSearchParams();
+    if (params.query) searchParams.set("q", params.query);
+    if (params.limit) searchParams.set("limit", String(params.limit));
+
+    const tablePath = encodeURIComponent(params.tableName);
+    const columnPath = encodeURIComponent(params.columnName);
+    const queryString = searchParams.toString();
+    const url = `${API_SERVER}/workspace/forms/column-values/${tablePath}/${columnPath}${queryString ? `?${queryString}` : ""}`;
+
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+        throw new Error(`Failed to fetch column values: ${response.statusText}`);
+    }
+
+    const payload: unknown = await response.json();
+    return normalizeForeignKeyLookupPayload(payload);
+}
+
+/*
  * Submit form data to the API
  */
 export async function submitFormData(

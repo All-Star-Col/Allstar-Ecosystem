@@ -80,7 +80,7 @@ interface AsyncForeignKeyComboboxProps {
     hasError: boolean;
 }
 
-function AsyncForeignKeyCombobox({
+export function AsyncForeignKeyCombobox({
     value,
     options,
     onChange,
