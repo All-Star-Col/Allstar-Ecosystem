@@ -22,6 +22,29 @@ TEXTUAL_TYPES = {
     "char",
     "name",
 }
+CHECK_IN_PATTERN = re.compile(
+    r'^\(?\s*(?P<column>"?[A-Za-z_][A-Za-z0-9_]*"?)\s*\)?'
+    r'(?:\s*::\s*[A-Za-z_][A-Za-z0-9_\.\s"\[\]]*)?'
+    r'\s+IN\s*\((?P<values>.+)\)\s*$',
+    re.IGNORECASE,
+)
+CHECK_ANY_ARRAY_PATTERN = re.compile(
+    r'^\(?\s*(?P<column>"?[A-Za-z_][A-Za-z0-9_]*"?)\s*\)?'
+    r'(?:\s*::\s*[A-Za-z_][A-Za-z0-9_\.\s"\[\]]*)?'
+    r'\s*=\s*ANY\s*\(\s*\(*\s*ARRAY\[(?P<values>[^\]]*)\]'
+    r'(?:\s*::\s*[A-Za-z_][A-Za-z0-9_\.\s"\[\]]*)?\s*\)*\s*\)\s*$',
+    re.IGNORECASE,
+)
+CHECK_LITERAL_ITEM_PATTERN = re.compile(
+    r"\s*'(?P<value>(?:''|[^'])*)'"
+    r"\s*(?:::\s*[A-Za-z_][A-Za-z0-9_\.\s\"\[\]]*)?\s*(?P<comma>,?)",
+    re.IGNORECASE,
+)
+DEFAULT_LITERAL_WITH_OPTIONAL_CAST_PATTERN = re.compile(
+    r"^'(?P<value>(?:''|[^'])*)'"
+    r"(?:\s*::\s*[A-Za-z_][A-Za-z0-9_\.\s\"\[\]]*)?$",
+    re.IGNORECASE,
+)
 FK_LABEL_PRIORITY = (
     "nombre",
     "name",
@@ -52,6 +75,140 @@ class IdentifierValidationError(Exception):
 
 def _normalize_identifier(identifier: str) -> str:
     return identifier.strip().strip('"')
+
+
+def _is_fully_wrapped_in_parentheses(expression: str) -> bool:
+    if len(expression) < 2 or expression[0] != "(" or expression[-1] != ")":
+        return False
+
+    depth = 0
+    in_string = False
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+
+        if char == "'":
+            if in_string and index + 1 < len(expression) and expression[index + 1] == "'":
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth < 0:
+                    return False
+                if depth == 0 and index != len(expression) - 1:
+                    return False
+
+        index += 1
+
+    return depth == 0 and not in_string
+
+
+def _strip_outer_parentheses(expression: str) -> str:
+    normalized = expression.strip()
+    while _is_fully_wrapped_in_parentheses(normalized):
+        normalized = normalized[1:-1].strip()
+    return normalized
+
+
+def _unwrap_check_definition(definition: str) -> str | None:
+    normalized = definition.strip()
+    if not normalized:
+        return None
+
+    if normalized[:5].upper() == "CHECK":
+        normalized = normalized[5:].strip()
+
+    normalized = _strip_outer_parentheses(normalized)
+    return normalized or None
+
+
+def _parse_check_literal_list(raw_values: str) -> list[str] | None:
+    cursor = 0
+    values: list[str] = []
+    length = len(raw_values)
+
+    while cursor < length:
+        match = CHECK_LITERAL_ITEM_PATTERN.match(raw_values, cursor)
+        if not match:
+            return None
+
+        values.append(match.group("value").replace("''", "'"))
+        cursor = match.end()
+
+        if cursor >= length:
+            if match.group("comma"):
+                return None
+            break
+
+        if not match.group("comma"):
+            return None
+
+    return values or None
+
+
+def _extract_check_enum_values(definition: str) -> tuple[str, list[str]] | None:
+    unwrapped_definition = _unwrap_check_definition(definition)
+    if not unwrapped_definition:
+        return None
+
+    for pattern in (CHECK_IN_PATTERN, CHECK_ANY_ARRAY_PATTERN):
+        match = pattern.fullmatch(unwrapped_definition)
+        if not match:
+            continue
+
+        column = _normalize_identifier(match.group("column")).lower()
+        parsed_values = _parse_check_literal_list(match.group("values"))
+        if parsed_values:
+            return column, parsed_values
+
+    return None
+
+
+def _merge_enum_values(
+    primary_values: list[str] | None,
+    secondary_values: list[str] | None,
+) -> list[str] | None:
+    if not primary_values and not secondary_values:
+        return None
+
+    merged_values: list[str] = []
+    seen: set[str] = set()
+
+    for source_values in (primary_values or [], secondary_values or []):
+        for value in source_values:
+            if value in seen:
+                continue
+            seen.add(value)
+            merged_values.append(value)
+
+    return merged_values or None
+
+
+def _normalize_column_default_value(
+    column_default: Any,
+    *,
+    data_type: str | None,
+    has_enum_udt: bool,
+) -> str | None:
+    if column_default is None:
+        return None
+
+    default_value = str(column_default)
+    normalized_data_type = (data_type or "").lower()
+    should_parse_literal = normalized_data_type in TEXTUAL_TYPES or has_enum_udt
+    if not should_parse_literal:
+        return default_value
+
+    candidate = _strip_outer_parentheses(default_value.strip())
+    match = DEFAULT_LITERAL_WITH_OPTIONAL_CAST_PATTERN.fullmatch(candidate)
+    if not match:
+        return default_value
+
+    return match.group("value").replace("''", "'")
 
 
 def _validate_sql_identifier(identifier: str, *, field_name: str) -> str:
@@ -274,6 +431,52 @@ async def _get_enum_values_by_udt(
     return dict(enums_map)
 
 
+async def _get_check_enum_values_by_table(
+    db: AsyncSession,
+    *,
+    schema_name: str,
+    source_tables: set[str],
+) -> dict[tuple[str, str], list[str]]:
+    if not source_tables:
+        return {}
+
+    query_checks = text(
+        """
+        SELECT
+            rel.relname AS table_name,
+            pg_get_constraintdef(con.oid) AS definition
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = con.connamespace
+        WHERE con.contype = 'c'
+          AND nsp.nspname = :schema_name
+        """
+    )
+    result_checks = await db.execute(query_checks, {"schema_name": schema_name})
+
+    enum_values_by_column: dict[tuple[str, str], list[str]] = {}
+    for row in result_checks.mappings().all():
+        table_name = _normalize_identifier(row.get("table_name", "")).lower()
+        if table_name not in source_tables:
+            continue
+
+        definition = row.get("definition")
+        if not definition:
+            continue
+
+        parsed_enum = _extract_check_enum_values(str(definition))
+        if not parsed_enum:
+            continue
+
+        column_name, enum_values = parsed_enum
+        key = (table_name, column_name)
+        enum_values_by_column[key] = (
+            _merge_enum_values(enum_values_by_column.get(key), enum_values) or []
+        )
+
+    return enum_values_by_column
+
+
 async def _build_fk_reference_cache(
     db: AsyncSession,
     *,
@@ -467,6 +670,11 @@ async def _build_tables_payload(
         source_tables=visible_tables,
     )
     enum_values_by_udt = await _get_enum_values_by_udt(db, schema_name=FORMS_SCHEMA)
+    check_enum_values_by_table = await _get_check_enum_values_by_table(
+        db,
+        schema_name=FORMS_SCHEMA,
+        source_tables=visible_tables,
+    )
     fk_reference_cache = await _build_fk_reference_cache(db, foreign_keys=foreign_keys)
 
     payload: list[dict[str, Any]] = []
@@ -487,11 +695,18 @@ async def _build_tables_payload(
                 column["column_name"], field_name=f"{table_name}.column_name"
             ).lower()
             udt_name = column.get("udt_name")
-            enum_values = None
+            udt_enum_values = None
             if udt_name:
-                enum_values = enum_values_by_udt.get(
+                udt_enum_values = enum_values_by_udt.get(
                     _normalize_identifier(udt_name).lower()
                 )
+
+            column_type = (column.get("data_type") or "").lower()
+            check_enum_values = None
+            if column_type in TEXTUAL_TYPES:
+                check_enum_values = check_enum_values_by_table.get((table_name, column_name))
+
+            enum_values = _merge_enum_values(udt_enum_values, check_enum_values)
 
             column_payload: dict[str, Any] = {
                 "name": column["column_name"],
@@ -499,10 +714,10 @@ async def _build_tables_payload(
                 "nullable": column.get("is_nullable") == "YES",
                 "required": column.get("is_nullable") != "YES",
                 "max_length": column.get("character_maximum_length"),
-                "default_value": (
-                    str(column["column_default"])
-                    if column.get("column_default") is not None
-                    else None
+                "default_value": _normalize_column_default_value(
+                    column.get("column_default"),
+                    data_type=column.get("data_type"),
+                    has_enum_udt=bool(udt_enum_values),
                 ),
                 "enum_values": enum_values,
                 "foreign_key": False,

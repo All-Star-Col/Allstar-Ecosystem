@@ -10,22 +10,24 @@ import type { SubmitFormAPI } from "../api";
 import { DynamicFormField } from "../components/DynamicFormField";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { buildSubmitData } from "./formBuilderSubmit";
+import { buildInitialFormData } from "./formDefaults";
+import { deriveProductFields } from "./productDerivation";
 import {
     filterForeignKeyOptions,
     FOREIGN_KEY_INLINE_OPTIONS_LIMIT,
     FOREIGN_KEY_REMOTE_DEFAULT_LIMIT,
 } from "../foreignKey";
 import type { ColumnSchema, TableSchema } from "../schema";
+import {
+    filterVisibleFormColumns,
+    isProductDerivationContext,
+    isProductDerivedColumnName,
+} from "../rules";
 
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import NotFound from "@/shared/components/NotFound";
 import { Skeleton } from "@/shared/ui/skeleton";
-
-function isSystemManagedColumn(columnName: string): boolean {
-    const normalizedName = columnName.toLowerCase();
-    return normalizedName === "id" || normalizedName === "timestamp";
-}
 
 export default function FormBuilder() {
     const navigate = useNavigate();
@@ -33,6 +35,9 @@ export default function FormBuilder() {
 
     const [isLoading, setIsLoading] = useState(true);
     const [formData, setFormData] = useState<Record<string, any>>({});
+    const [selectedForeignKeyLabels, setSelectedForeignKeyLabels] = useState<
+        Record<string, string>
+    >({});
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showConfirmModal, setShowConfirmModal] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,10 +50,12 @@ export default function FormBuilder() {
 
     const visibleColumns = useMemo(() => {
         if (!table) return [];
-        return table.columns.filter(
-            (column) => !isSystemManagedColumn(column.name),
-        );
+        return filterVisibleFormColumns(table.columns);
     }, [table]);
+    const isProductDerivationEnabled = useMemo(
+        () => isProductDerivationContext(table?.name, visibleColumns),
+        [table?.name, visibleColumns],
+    );
 
     useEffect(() => {
         let cancelled = false;
@@ -70,15 +77,12 @@ export default function FormBuilder() {
                 const nextTable = resolvedTable ?? tableSummary;
                 setTableDetails(nextTable);
 
-                const initialData: Record<string, any> = {};
-                nextTable.columns
-                    .filter((column) => !isSystemManagedColumn(column.name))
-                    .forEach((column) => {
-                        if (column.defaultValue !== undefined) {
-                            initialData[column.name] = column.defaultValue;
-                        }
-                    });
-                setFormData(initialData);
+                setFormData(
+                    buildInitialFormData(
+                        filterVisibleFormColumns(nextTable.columns),
+                    ),
+                );
+                setSelectedForeignKeyLabels({});
                 setErrors({});
             } catch (error) {
                 if (cancelled) return;
@@ -101,6 +105,39 @@ export default function FormBuilder() {
             cancelled = true;
         };
     }, [tableId, tableSummary, loadTableById]);
+
+    useEffect(() => {
+        if (!table || !isProductDerivationEnabled) {
+            return;
+        }
+
+        const derived = deriveProductFields(
+            table.name,
+            visibleColumns,
+            formData,
+            selectedForeignKeyLabels,
+        );
+        setFormData((previous) => {
+            if (
+                previous.sku === derived.sku &&
+                previous.nombre === derived.nombre
+            ) {
+                return previous;
+            }
+
+            return {
+                ...previous,
+                sku: derived.sku,
+                nombre: derived.nombre,
+            };
+        });
+    }, [
+        table,
+        isProductDerivationEnabled,
+        visibleColumns,
+        formData,
+        selectedForeignKeyLabels,
+    ]);
 
     const handleForeignKeyLookup = useCallback(
         async (
@@ -140,6 +177,14 @@ export default function FormBuilder() {
 
     const handleFieldChange = (fieldName: string, value: any) => {
         setFormData((prev) => ({ ...prev, [fieldName]: value }));
+        if (value === undefined || value === null || value === "") {
+            setSelectedForeignKeyLabels((prev) => {
+                if (!(fieldName in prev)) return prev;
+                const next = { ...prev };
+                delete next[fieldName];
+                return next;
+            });
+        }
 
         if (errors[fieldName]) {
             setErrors((prev) => {
@@ -149,6 +194,19 @@ export default function FormBuilder() {
             });
         }
     };
+
+    const handleForeignKeyLabelChange = useCallback(
+        (columnName: string, label: string) => {
+            setSelectedForeignKeyLabels((prev) => {
+                if (prev[columnName] === label) return prev;
+                return {
+                    ...prev,
+                    [columnName]: label,
+                };
+            });
+        },
+        [],
+    );
 
     const validateForm = (): boolean => {
         if (!table) return false;
@@ -193,7 +251,9 @@ export default function FormBuilder() {
         try {
             const payload: SubmitFormAPI = {
                 table_name: table.name,
-                data: buildSubmitData(visibleColumns, formData),
+                data: buildSubmitData(visibleColumns, formData, table.name, {
+                    normalizeProductSku: isProductDerivationEnabled,
+                }),
             };
 
             const result = await submitFormData(payload);
@@ -225,14 +285,8 @@ export default function FormBuilder() {
     const handleClearForm = () => {
         if (!table) return;
 
-        const clearedData: Record<string, any> = {};
-        visibleColumns.forEach((column) => {
-            if (column.defaultValue !== undefined) {
-                clearedData[column.name] = column.defaultValue;
-            }
-        });
-
-        setFormData(clearedData);
+        setFormData(buildInitialFormData(visibleColumns));
+        setSelectedForeignKeyLabels({});
         setErrors({});
         toast.info("Formulario limpiado");
     };
@@ -305,11 +359,21 @@ export default function FormBuilder() {
                                             <DynamicFormField
                                                 column={column}
                                                 value={formData[column.name]}
+                                                tableName={table?.name}
+                                                forceReadOnly={
+                                                    isProductDerivationEnabled &&
+                                                    isProductDerivedColumnName(
+                                                        column.name,
+                                                    )
+                                                }
                                                 onChange={(value) =>
                                                     handleFieldChange(
                                                         column.name,
                                                         value,
                                                     )
+                                                }
+                                                onForeignKeyLabelChange={
+                                                    handleForeignKeyLabelChange
                                                 }
                                                 onForeignKeyLookup={
                                                     handleForeignKeyLookup

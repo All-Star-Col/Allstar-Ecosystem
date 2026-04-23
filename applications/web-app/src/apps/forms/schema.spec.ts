@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapAPIColumn, mapAPITableSummary } from "./schema";
+import { mapAPIColumn, mapAPITableSummary, mapDatabaseTypeToDataType } from "./schema";
 
 describe("mapAPIColumn", () => {
     it("maps API foreign key metadata to foreign_key schema", () => {
@@ -69,5 +69,12 @@ describe("mapAPITableSummary", () => {
 
         expect(mapped.columns).toEqual([]);
         expect(mapped.columnCount).toBe(2);
+        expect(mapped.visibleColumnCount).toBe(1);
+    });
+});
+
+describe("mapDatabaseTypeToDataType", () => {
+    it("maps jsonb database type to jsonb UI type", () => {
+        expect(mapDatabaseTypeToDataType("jsonb")).toBe("jsonb");
     });
 });

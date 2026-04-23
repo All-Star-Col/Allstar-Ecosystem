@@ -54,6 +54,10 @@ class TestFormsTablesMetadata(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value={}),
             ),
             patch(
+                "src.services.forms._get_check_enum_values_by_table",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
                 "src.services.forms._build_fk_reference_cache",
                 new=AsyncMock(
                     return_value={
@@ -114,6 +118,10 @@ class TestFormsTablesMetadata(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value={"estado_orden": ["PENDIENTE", "HECHO"]}),
             ),
             patch(
+                "src.services.forms._get_check_enum_values_by_table",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
                 "src.services.forms._build_fk_reference_cache",
                 new=AsyncMock(return_value={}),
             ),
@@ -138,6 +146,251 @@ class TestFormsTablesMetadata(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("ordenes", result["name_sql"])
         self.assertEqual(["PENDIENTE", "HECHO"], result["columns"][0]["enum_values"])
         self.assertFalse(result["columns"][0]["foreign_key"])
+
+    async def test_get_check_enum_values_by_table_parses_any_and_in(self) -> None:
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            return_value=_FakeResult(
+                [
+                    {
+                        "table_name": "ordenes",
+                        "definition": (
+                            "CHECK ((estado = ANY "
+                            "(ARRAY['pending'::character varying, 'done'::character varying])))"
+                        ),
+                    },
+                    {
+                        "table_name": "ordenes",
+                        "definition": (
+                            "CHECK ((prioridad IN "
+                            "('alta'::character varying, 'media'::character varying)))"
+                        ),
+                    },
+                ]
+            )
+        )
+
+        result = await forms._get_check_enum_values_by_table(
+            db,
+            schema_name="data",
+            source_tables={"ordenes"},
+        )
+
+        self.assertEqual(
+            {
+                ("ordenes", "estado"): ["pending", "done"],
+                ("ordenes", "prioridad"): ["alta", "media"],
+            },
+            result,
+        )
+
+    async def test_get_table_uses_check_enum_values_for_text_columns(self) -> None:
+        with (
+            patch(
+                "src.services.forms._get_visible_table_configs",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "id": 4,
+                            "nombre_tabla_sql": "ordenes",
+                            "nombre_tabla_ui": "Ordenes",
+                            "categoria_id": 30,
+                        }
+                    ]
+                ),
+            ),
+            patch(
+                "src.services.forms._get_foreign_key_metadata",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_enum_values_by_udt",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_check_enum_values_by_table",
+                new=AsyncMock(
+                    return_value={("ordenes", "estado"): ["pending", "done"]}
+                ),
+            ),
+            patch(
+                "src.services.forms._build_fk_reference_cache",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_table_columns",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "column_name": "estado",
+                            "data_type": "character varying",
+                            "is_nullable": "NO",
+                            "character_maximum_length": 32,
+                            "column_default": None,
+                            "udt_name": "varchar",
+                        }
+                    ]
+                ),
+            ),
+        ):
+            result = await forms.get_table(db=object(), table_name="ordenes")
+
+        self.assertEqual(["pending", "done"], result["columns"][0]["enum_values"])
+
+    async def test_get_table_normalizes_textual_default_literal_with_cast(self) -> None:
+        with (
+            patch(
+                "src.services.forms._get_visible_table_configs",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "id": 5,
+                            "nombre_tabla_sql": "ordenes",
+                            "nombre_tabla_ui": "Ordenes",
+                            "categoria_id": 30,
+                        }
+                    ]
+                ),
+            ),
+            patch(
+                "src.services.forms._get_foreign_key_metadata",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_enum_values_by_udt",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_check_enum_values_by_table",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._build_fk_reference_cache",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_table_columns",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "column_name": "estado",
+                            "data_type": "character varying",
+                            "is_nullable": "NO",
+                            "character_maximum_length": 32,
+                            "column_default": "'pending'::character varying",
+                            "udt_name": "varchar",
+                        }
+                    ]
+                ),
+            ),
+        ):
+            result = await forms.get_table(db=object(), table_name="ordenes")
+
+        self.assertEqual("pending", result["columns"][0]["default_value"])
+
+    async def test_get_table_keeps_non_parseable_textual_default(self) -> None:
+        raw_default = "lower('pending'::text)"
+        with (
+            patch(
+                "src.services.forms._get_visible_table_configs",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "id": 6,
+                            "nombre_tabla_sql": "ordenes",
+                            "nombre_tabla_ui": "Ordenes",
+                            "categoria_id": 30,
+                        }
+                    ]
+                ),
+            ),
+            patch(
+                "src.services.forms._get_foreign_key_metadata",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_enum_values_by_udt",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_check_enum_values_by_table",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._build_fk_reference_cache",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_table_columns",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "column_name": "estado",
+                            "data_type": "character varying",
+                            "is_nullable": "NO",
+                            "character_maximum_length": 32,
+                            "column_default": raw_default,
+                            "udt_name": "varchar",
+                        }
+                    ]
+                ),
+            ),
+        ):
+            result = await forms.get_table(db=object(), table_name="ordenes")
+
+        self.assertEqual(raw_default, result["columns"][0]["default_value"])
+
+    async def test_get_table_prioritizes_udt_enum_values_over_check_values(self) -> None:
+        with (
+            patch(
+                "src.services.forms._get_visible_table_configs",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "id": 7,
+                            "nombre_tabla_sql": "ordenes",
+                            "nombre_tabla_ui": "Ordenes",
+                            "categoria_id": 30,
+                        }
+                    ]
+                ),
+            ),
+            patch(
+                "src.services.forms._get_foreign_key_metadata",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_enum_values_by_udt",
+                new=AsyncMock(return_value={"estado_orden": ["PENDIENTE", "HECHO"]}),
+            ),
+            patch(
+                "src.services.forms._get_check_enum_values_by_table",
+                new=AsyncMock(return_value={("ordenes", "estado"): ["cancelado"]}),
+            ),
+            patch(
+                "src.services.forms._build_fk_reference_cache",
+                new=AsyncMock(return_value={}),
+            ),
+            patch(
+                "src.services.forms._get_table_columns",
+                new=AsyncMock(
+                    return_value=[
+                        {
+                            "column_name": "estado",
+                            "data_type": "USER-DEFINED",
+                            "is_nullable": "NO",
+                            "character_maximum_length": None,
+                            "column_default": "'PENDIENTE'::estado_orden",
+                            "udt_name": "estado_orden",
+                        }
+                    ]
+                ),
+            ),
+        ):
+            result = await forms.get_table(db=object(), table_name="ordenes")
+
+        self.assertEqual(["PENDIENTE", "HECHO"], result["columns"][0]["enum_values"])
+        self.assertEqual("PENDIENTE", result["columns"][0]["default_value"])
 
     async def test_get_foreign_key_lookup_returns_limited_items(self) -> None:
         db = object()

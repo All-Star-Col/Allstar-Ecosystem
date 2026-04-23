@@ -1,4 +1,5 @@
 import type { TableSchema } from "../schema";
+import { resolveVisibleFieldCount } from "../rules";
 import { Badge } from "@/shared/ui/badge";
 import { Card, CardHeader, CardTitle } from "@/shared/ui/card";
 
@@ -8,7 +9,7 @@ interface TableCardProps {
 }
 
 export function TableCard({ table, onClick }: TableCardProps) {
-    const fieldCount = table.columnCount ?? table.columns.length;
+    const fieldCount = resolveVisibleFieldCount(table);
 
     return (
         <Card

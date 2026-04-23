@@ -5,6 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { DynamicFormField } from "./DynamicFormField";
 import type { ColumnSchema } from "../schema";
 
+vi.mock("../api", () => ({
+    fetchForeignKeyLookup: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/shared/ui/select", () => ({
     Select: ({
         value,
@@ -52,6 +56,25 @@ vi.mock("@/shared/ui/button", () => ({
         children: React.ReactNode;
         [key: string]: unknown;
     }) => React.createElement("button", props, children),
+}));
+
+vi.mock("@/shared/ui/switch", () => ({
+    Switch: ({
+        checked,
+        onCheckedChange,
+        id,
+    }: {
+        checked?: boolean;
+        onCheckedChange?: (next: boolean) => void;
+        id?: string;
+    }) =>
+        React.createElement("input", {
+            id,
+            type: "checkbox",
+            checked,
+            onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                onCheckedChange?.(event.target.checked),
+        }),
 }));
 
 vi.mock("@/shared/ui/popover", () => ({
@@ -118,9 +141,153 @@ vi.mock("@/shared/ui/command", () => ({
         ),
 }));
 
+describe("DynamicFormField booleans", () => {
+    it("uses Activo/Inactivo labels for estado boolean", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "estado",
+            type: "boolean",
+        };
+
+        const { rerender } = render(
+            React.createElement(DynamicFormField, {
+                column,
+                value: true,
+                onChange,
+            }),
+        );
+
+        expect(screen.getByText("Activo")).toBeInTheDocument();
+
+        rerender(
+            React.createElement(DynamicFormField, {
+                column,
+                value: false,
+                onChange,
+            }),
+        );
+
+        expect(screen.getByText("Inactivo")).toBeInTheDocument();
+    });
+
+    it("keeps Sí/No labels for non-estado booleans", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "aprobado",
+            type: "boolean",
+        };
+
+        const { rerender } = render(
+            React.createElement(DynamicFormField, {
+                column,
+                value: true,
+                onChange,
+            }),
+        );
+
+        expect(screen.getByText("Sí")).toBeInTheDocument();
+
+        rerender(
+            React.createElement(DynamicFormField, {
+                column,
+                value: false,
+                onChange,
+            }),
+        );
+
+        expect(screen.getByText("No")).toBeInTheDocument();
+    });
+});
+
+describe("DynamicFormField jsonb", () => {
+    it("renders properties widget for jsonb propiedades column", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "propiedades",
+            type: "jsonb",
+        };
+
+        render(
+            React.createElement(DynamicFormField, {
+                column,
+                value: {},
+                onChange,
+            }),
+        );
+
+        expect(screen.getByText("Agregar propiedad")).toBeInTheDocument();
+    });
+});
+
+describe("DynamicFormField hybrid text activation", () => {
+    it("uses hybrid toggle input for nombre in material table", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "nombre",
+            type: "varchar",
+            placeholder: "Nombre",
+        };
+
+        render(
+            React.createElement(DynamicFormField, {
+                tableName: "material",
+                column,
+                value: "",
+                onChange,
+            }),
+        );
+
+        expect(screen.getByText("Selección")).toBeInTheDocument();
+        expect(screen.getByText("Texto libre")).toBeInTheDocument();
+    });
+});
+
+describe("DynamicFormField producto derived fields", () => {
+    it("renders sku as readonly in producto tables", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "sku",
+            type: "varchar",
+        };
+
+        render(
+            React.createElement(DynamicFormField, {
+                tableName: "productos",
+                column,
+                value: "1-001-002-0003-00004",
+                onChange,
+            }),
+        );
+
+        const input = screen.getByDisplayValue("1-001-002-0003-00004");
+        expect(input).toHaveAttribute("readonly");
+    });
+
+    it("renders nombre as readonly in schema-qualified producto tables", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "nombre",
+            type: "varchar",
+        };
+
+        render(
+            React.createElement(DynamicFormField, {
+                tableName: "data.producto",
+                column,
+                value: "Base Modelo Referencia Tela",
+                onChange,
+            }),
+        );
+
+        const input = screen.getByDisplayValue("Base Modelo Referencia Tela");
+        expect(input).toHaveAttribute("readonly");
+    });
+});
+
 describe("DynamicFormField foreign key", () => {
     it("renders foreign keys as select and returns option value on selection", () => {
         const onChange = vi.fn();
+        const onForeignKeyLabelChange = vi.fn();
         const foreignKeyColumn: ColumnSchema = {
             name: "id_base",
             displayName: "Base",
@@ -138,6 +305,7 @@ describe("DynamicFormField foreign key", () => {
                 column: foreignKeyColumn,
                 value: "",
                 onChange,
+                onForeignKeyLabelChange,
             }),
         );
 
@@ -153,6 +321,10 @@ describe("DynamicFormField foreign key", () => {
             fireEvent.change(selectTrigger, { target: { value: "1" } });
         });
         expect(onChange).toHaveBeenCalledWith("1");
+        expect(onForeignKeyLabelChange).toHaveBeenCalledWith(
+            "id_base",
+            "Base Norte",
+        );
     });
 
     it("renders async combobox states for large/remote lookups", async () => {

@@ -1,5 +1,6 @@
 // Import API types
 import type { CategoriesFormsAPI, TableFormsAPI, ColumnTableAPI } from "./api";
+import { isHiddenFormColumn } from "./rules";
 
 export type DataType =
     | "string"
@@ -13,6 +14,7 @@ export type DataType =
     | "date"
     | "datetime"
     | "timestamp"
+    | "jsonb"
     | "enum"
     | "foreign_key";
 
@@ -40,6 +42,7 @@ export interface TableSchema {
     description?: string;
     category: string;
     columnCount?: number;
+    visibleColumnCount?: number;
     columns: ColumnSchema[];
 }
 
@@ -79,6 +82,7 @@ export function mapDatabaseTypeToDataType(dbType: string): DataType {
     if (type === "date") return "date";
     if (type.includes("timestamp")) return "timestamp";
     if (type.includes("datetime")) return "datetime";
+    if (type.includes("jsonb")) return "jsonb";
 
     // Default to string for unknown types
     return "string";
@@ -159,13 +163,22 @@ export function mapAPIColumn(apiColumn: ColumnTableAPI): ColumnSchema {
  * Map API Table to lightweight UI TableSchema (without heavy columns payload)
  */
 export function mapAPITableSummary(apiTable: TableFormsAPI): TableSchema {
+    const columnCount = apiTable.columns?.length ?? 0;
+    const visibleColumnCount =
+        columnCount > 0
+            ? (apiTable.columns ?? []).filter(
+                  (column) => !isHiddenFormColumn(column.name),
+              ).length
+            : undefined;
+
     return {
         id: apiTable.id.toString(),
         name: apiTable.name_sql,
         displayName: apiTable.name_form,
         description: undefined,
         category: apiTable.category_id.toString(),
-        columnCount: apiTable.columns?.length ?? 0,
+        columnCount,
+        visibleColumnCount,
         columns: [],
     };
 }
@@ -182,6 +195,9 @@ export function mapAPITable(apiTable: TableFormsAPI): TableSchema {
         description: undefined, // API doesn't provide description
         category: apiTable.category_id.toString(),
         columnCount: columns.length,
+        visibleColumnCount: columns.filter(
+            (column) => !isHiddenFormColumn(column.name),
+        ).length,
         columns,
     };
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { AlertCircle, ArrowLeft, Loader2, Search } from "lucide-react";
@@ -23,19 +23,66 @@ export default function TableSelection() {
         {},
     );
 
-    const { categories, tables, loading, error } = useTables();
+    const { categories, tables, loading, error, getTableById, loadTableById } =
+        useTables();
+
+    const countHydrationAttemptedRef = useRef<Set<string>>(new Set());
+
+    const tablesWithResolvedCounts = useMemo(
+        () =>
+            tables.map((table) => {
+                const hydrated = getTableById(table.id);
+                return hydrated ?? table;
+            }),
+        [tables, getTableById],
+    );
+
+    useEffect(() => {
+        const tablesNeedingCountHydration = tablesWithResolvedCounts.filter(
+            (table) =>
+                table.visibleColumnCount === undefined &&
+                !countHydrationAttemptedRef.current.has(table.id),
+        );
+
+        if (tablesNeedingCountHydration.length === 0) {
+            return;
+        }
+
+        let cancelled = false;
+
+        async function hydrateMissingVisibleCounts() {
+            for (const table of tablesNeedingCountHydration) {
+                if (cancelled) {
+                    return;
+                }
+
+                countHydrationAttemptedRef.current.add(table.id);
+                try {
+                    await loadTableById(table.id);
+                } catch {
+                    // Keep graceful degradation to summary count when detail load fails.
+                }
+            }
+        }
+
+        void hydrateMissingVisibleCounts();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [tablesWithResolvedCounts, loadTableById]);
 
     const filteredTables = useMemo(() => {
-        if (!searchQuery.trim()) return tables;
+        if (!searchQuery.trim()) return tablesWithResolvedCounts;
 
         const query = searchQuery.toLowerCase();
-        return tables.filter(
+        return tablesWithResolvedCounts.filter(
             (table) =>
                 table.displayName.toLowerCase().includes(query) ||
                 table.name.toLowerCase().includes(query) ||
                 table.description?.toLowerCase().includes(query),
         );
-    }, [searchQuery, tables]);
+    }, [searchQuery, tablesWithResolvedCounts]);
 
     const categoryBuckets = useMemo(() => {
         return categories

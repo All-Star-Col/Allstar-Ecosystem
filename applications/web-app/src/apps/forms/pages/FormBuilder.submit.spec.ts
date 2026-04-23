@@ -39,4 +39,43 @@ describe("FormBuilder submit payload", () => {
 
         expect(normalizeSubmitValue(regularColumn, 12)).toBe(12);
     });
+
+    it("normalizes product SKU on submit to digits only", () => {
+        const visibleColumns: ColumnSchema[] = [
+            {
+                name: "sku",
+                type: "varchar",
+            },
+        ];
+
+        const payloadData = buildSubmitData(
+            visibleColumns,
+            { sku: "1-001-002-0003-00004" },
+            "productos",
+        );
+
+        expect(payloadData).toEqual([
+            {
+                column: "sku",
+                value: "1001002000300004",
+            },
+        ]);
+    });
+
+    it("normalizes product SKU when table name includes schema", () => {
+        const visibleColumns: ColumnSchema[] = [
+            {
+                name: "sku",
+                type: "varchar",
+            },
+        ];
+
+        const payloadData = buildSubmitData(
+            visibleColumns,
+            { sku: "1-001-002-0003-00004" },
+            "data.productos",
+        );
+
+        expect(payloadData[0]?.value).toBe("1001002000300004");
+    });
 });

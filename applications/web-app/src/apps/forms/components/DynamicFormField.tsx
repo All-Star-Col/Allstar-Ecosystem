@@ -21,11 +21,22 @@ import {
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/shared/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { cn } from "@/shared/ui/utils";
+import { JsonbPropertiesField } from "./JsonbPropertiesField";
+import { HybridTextField } from "./HybridTextField";
+import {
+    isBooleanEstadoColumn,
+    isProductDerivedColumn,
+    shouldUseHybridTextField,
+    shouldUseJsonbPropertiesField,
+} from "../rules";
 
 interface DynamicFormFieldProps {
     column: ColumnSchema;
     value: any;
     onChange: (value: any) => void;
+    tableName?: string;
+    forceReadOnly?: boolean;
+    onForeignKeyLabelChange?: (columnName: string, label: string) => void;
     onForeignKeyLookup?: (
         column: ColumnSchema,
         query: string,
@@ -48,6 +59,7 @@ const getHumanFriendlyTypeName = (type: DataType): string => {
         date: "Fecha",
         datetime: "Fecha y hora",
         timestamp: "Fecha y hora",
+        jsonb: "Propiedades",
         enum: "Selección",
         foreign_key: "Relación",
     };
@@ -59,6 +71,7 @@ interface AsyncForeignKeyComboboxProps {
     value: string;
     options: { value: string; label: string }[];
     onChange: (value: string) => void;
+    onOptionSelect?: (option: { value: string; label: string }) => void;
     onLookup?: (
         query: string,
         limit: number,
@@ -71,6 +84,7 @@ function AsyncForeignKeyCombobox({
     value,
     options,
     onChange,
+    onOptionSelect,
     onLookup,
     limit,
     hasError,
@@ -196,6 +210,7 @@ function AsyncForeignKeyCombobox({
                                         value={`${option.label} ${option.value}`}
                                         onSelect={() => {
                                             onChange(option.value);
+                                            onOptionSelect?.(option);
                                             setOpen(false);
                                         }}
                                     >
@@ -225,13 +240,54 @@ export function DynamicFormField({
     column,
     value,
     onChange,
+    tableName,
+    forceReadOnly,
+    onForeignKeyLabelChange,
     onForeignKeyLookup,
     error,
 }: DynamicFormFieldProps) {
     const isRequired = column.required && !column.nullable;
     const displayName = column.displayName || column.name;
+    const isDerivedReadOnlyField =
+        forceReadOnly ?? isProductDerivedColumn(tableName, column.name);
 
     const renderField = () => {
+        if (isDerivedReadOnlyField) {
+            return (
+                <Input
+                    id={column.name}
+                    type="text"
+                    value={value || ""}
+                    readOnly
+                    aria-readonly="true"
+                    className={cn(
+                        "bg-muted/40",
+                        error ? "border-destructive" : "",
+                    )}
+                />
+            );
+        }
+
+        if (shouldUseHybridTextField(tableName, column.name)) {
+            return (
+                <HybridTextField
+                    column={column}
+                    value={value}
+                    onChange={onChange}
+                    tableName={tableName ?? ""}
+                />
+            );
+        }
+
+        if (shouldUseJsonbPropertiesField(column)) {
+            return (
+                <JsonbPropertiesField
+                    value={value}
+                    onChange={(nextValue) => onChange(nextValue)}
+                />
+            );
+        }
+
         switch (column.type) {
             case "boolean":
                 return (
@@ -242,7 +298,13 @@ export function DynamicFormField({
                             onCheckedChange={onChange}
                         />
                         <Label htmlFor={column.name} className="cursor-pointer">
-                            {value ? "Sí" : "No"}
+                            {isBooleanEstadoColumn(column.name)
+                                ? value
+                                    ? "Activo"
+                                    : "Inactivo"
+                                : value
+                                  ? "Sí"
+                                  : "No"}
                         </Label>
                     </div>
                 );
@@ -349,6 +411,12 @@ export function DynamicFormField({
                             }
                             options={column.foreignKeyOptions ?? []}
                             onChange={(nextValue) => onChange(nextValue)}
+                            onOptionSelect={(option) =>
+                                onForeignKeyLabelChange?.(
+                                    column.name,
+                                    option.label,
+                                )
+                            }
                             onLookup={
                                 onForeignKeyLookup
                                     ? (query, limit) =>
@@ -372,7 +440,17 @@ export function DynamicFormField({
                                 ? ""
                                 : String(value)
                         }
-                        onValueChange={onChange}
+                        onValueChange={(nextValue) => {
+                            onChange(nextValue);
+                            const selectedOption =
+                                column.foreignKeyOptions?.find(
+                                    (option) => option.value === nextValue,
+                                );
+                            onForeignKeyLabelChange?.(
+                                column.name,
+                                selectedOption?.label ?? nextValue,
+                            );
+                        }}
                     >
                         <SelectTrigger
                             className={error ? "border-destructive" : ""}
@@ -423,7 +501,8 @@ export function DynamicFormField({
             {renderField()}
             {column.maxLength &&
                 column.type !== "enum" &&
-                column.type !== "foreign_key" && (
+                column.type !== "foreign_key" &&
+                column.type !== "jsonb" && (
                     <p className="text-xs text-muted-foreground">
                         Máx. {column.maxLength} caracteres
                     </p>
