@@ -50,7 +50,7 @@ async def get_data_viewer_tables(
     started_at = time.perf_counter()
 
     try:
-        tables = await data_viewer_service.get_tables()
+        tables = await data_viewer_service.get_tables(user_id=str(current_user.id))
         response.headers["X-Request-ID"] = request_id
         log_operation(
             request_id=request_id,
@@ -134,7 +134,10 @@ async def query_data_viewer(
         )
 
     try:
-        query_response = await data_viewer_service.query(query_request)
+        query_response = await data_viewer_service.query(
+            query_request,
+            user_id=str(current_user.id),
+        )
         response.headers["X-Request-ID"] = request_id
         log_operation(
             request_id=request_id,
@@ -217,7 +220,10 @@ async def export_data_viewer(
         )
 
     try:
-        export_result = await data_viewer_service.export_csv(query_request)
+        export_result = await data_viewer_service.export_csv(
+            query_request,
+            user_id=str(current_user.id),
+        )
         streaming_response = StreamingResponse(
             export_result.stream,
             media_type="text/csv; charset=utf-8",
@@ -322,7 +328,10 @@ async def patch_data_viewer_row(
         )
 
     try:
-        patch_response = await data_viewer_service.patch_row(patch_request)
+        patch_response = await data_viewer_service.patch_row(
+            patch_request,
+            user_id=str(current_user.id),
+        )
         response.headers["X-Request-ID"] = request_id
 
         log_operation(

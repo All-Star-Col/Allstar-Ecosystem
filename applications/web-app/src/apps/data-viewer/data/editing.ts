@@ -25,6 +25,10 @@ export function getTableEditDisabledReason(
         return "No hay tabla activa.";
     }
 
+    if (table.can_update === false) {
+        return "Sin permiso de edicion para esta tabla.";
+    }
+
     return null;
 }
 

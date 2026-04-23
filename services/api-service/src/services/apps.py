@@ -22,6 +22,9 @@ async def get_user_apps_from_db(db: AsyncSession, user_id: str) -> list[App]:
         FROM workspace.apps a
         JOIN workspace.role_apps ra ON ra.app_id = a.id
         WHERE ra.role_id = :role_id
+          AND COALESCE(ra.can_view, false) = true
+          AND COALESCE(a.is_active, true) = true
+        ORDER BY COALESCE(a.sort_order, 0), a.name, a.id
     """)
 
     r_apps = await db.execute(query_apps, {"role_id": str(role_id)})

@@ -35,11 +35,7 @@ CHECK_ANY_ARRAY_PATTERN = re.compile(
     r'(?:\s*::\s*[A-Za-z_][A-Za-z0-9_\.\s"\[\]]*)?\s*\)*\s*\)\s*$',
     re.IGNORECASE,
 )
-CHECK_LITERAL_ITEM_PATTERN = re.compile(
-    r"\s*'(?P<value>(?:''|[^'])*)'"
-    r"\s*(?:::\s*[A-Za-z_][A-Za-z0-9_\.\s\"\[\]]*)?\s*(?P<comma>,?)",
-    re.IGNORECASE,
-)
+_QUOTED_LITERAL_PATTERN = re.compile(r"'((?:''|[^'])*)'", re.IGNORECASE)
 DEFAULT_LITERAL_WITH_OPTIONAL_CAST_PATTERN = re.compile(
     r"^'(?P<value>(?:''|[^'])*)'"
     r"(?:\s*::\s*[A-Za-z_][A-Za-z0-9_\.\s\"\[\]]*)?$",
@@ -127,26 +123,10 @@ def _unwrap_check_definition(definition: str) -> str | None:
 
 
 def _parse_check_literal_list(raw_values: str) -> list[str] | None:
-    cursor = 0
-    values: list[str] = []
-    length = len(raw_values)
-
-    while cursor < length:
-        match = CHECK_LITERAL_ITEM_PATTERN.match(raw_values, cursor)
-        if not match:
-            return None
-
-        values.append(match.group("value").replace("''", "'"))
-        cursor = match.end()
-
-        if cursor >= length:
-            if match.group("comma"):
-                return None
-            break
-
-        if not match.group("comma"):
-            return None
-
+    values = [
+        match.replace("''", "'")
+        for match in _QUOTED_LITERAL_PATTERN.findall(raw_values)
+    ]
     return values or None
 
 
@@ -250,6 +230,46 @@ def _quote_identifier(identifier: str, *, field_name: str) -> str:
     return f'"{validated}"'
 
 
+async def _get_user_role_id(db: AsyncSession, *, user_id: str) -> str | None:
+    query = text(
+        """
+        SELECT role_id
+        FROM auth.user_roles
+        WHERE user_id = :user_id
+        ORDER BY granted_at DESC NULLS LAST
+        LIMIT 1
+        """
+    )
+    result = await db.execute(query, {"user_id": user_id})
+    role_id = result.scalar_one_or_none()
+    return str(role_id) if role_id is not None else None
+
+
+async def _resolve_role_tables_create_column(db: AsyncSession) -> str | None:
+    query = text(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'workspace'
+          AND table_name = 'role_tables'
+        """
+    )
+    result = await db.execute(query)
+    column_names = [row["column_name"] for row in result.mappings().all()]
+    column_names_lower = {name.lower() for name in column_names}
+
+    if not column_names_lower or "role_id" not in column_names_lower or "table_id" not in column_names_lower:
+        return None
+
+    for name in column_names:
+        if name.lower() == "can_create":
+            return name
+    for name in column_names:
+        if name.lower() == "create":
+            return name
+    return None
+
+
 def _normalize_search_term(search_q: str | None) -> str | None:
     if search_q is None:
         return None
@@ -300,6 +320,8 @@ async def _get_visible_table_configs(
     db: AsyncSession,
     *,
     table_name: str | None = None,
+    user_id: str | None = None,
+    require_create_permission: bool = False,
 ) -> list[dict[str, Any]]:
     query = text(
         """
@@ -311,6 +333,35 @@ async def _get_visible_table_configs(
     )
     result = await db.execute(query)
     rows = [dict(row) for row in result.mappings().all()]
+
+    if require_create_permission and user_id:
+        try:
+            create_column = await _resolve_role_tables_create_column(db)
+            role_id = await _get_user_role_id(db, user_id=user_id)
+
+            if create_column and role_id:
+                quoted_create_column = create_column.replace('"', '""')
+                permissions_query = text(
+                    f"""
+                    SELECT CAST(table_id AS TEXT) AS table_id,
+                           COALESCE("{quoted_create_column}", true) AS can_create
+                    FROM workspace.role_tables
+                    WHERE role_id = :role_id
+                    """
+                )
+                permissions_result = await db.execute(permissions_query, {"role_id": role_id})
+                create_permissions = {
+                    str(row["table_id"]).strip(): bool(row["can_create"])
+                    for row in permissions_result.mappings().all()
+                    if row.get("table_id") is not None
+                }
+                rows = [
+                    row
+                    for row in rows
+                    if create_permissions.get(str(row["id"]).strip(), True)
+                ]
+        except Exception:
+            pass
 
     if table_name is None:
         return rows
@@ -777,12 +828,16 @@ async def get_categories(db: AsyncSession) -> list[dict[str, Any]]:
         raise DBCommunicationError(f"Error obteniendo categorias: {error}")
 
 
-async def get_tables(db: AsyncSession) -> list[dict[str, Any]]:
+async def get_tables(db: AsyncSession, *, user_id: str | None = None) -> list[dict[str, Any]]:
     """
     Obtiene metadata liviana de tablas visibles y columnas (sin opciones FK masivas).
     """
     try:
-        tables_config = await _get_visible_table_configs(db)
+        tables_config = await _get_visible_table_configs(
+            db,
+            user_id=user_id,
+            require_create_permission=True,
+        )
         return await _build_tables_payload(db, tables_config=tables_config)
     except IdentifierValidationError:
         raise
@@ -790,12 +845,20 @@ async def get_tables(db: AsyncSession) -> list[dict[str, Any]]:
         raise DBCommunicationError(f"Error obteniendo tablas: {error}")
 
 
-async def get_table(db: AsyncSession, table_name: str) -> dict[str, Any]:
+async def get_table(
+    db: AsyncSession,
+    table_name: str,
+    *,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     table_identifier = _extract_table_name(table_name, field_name="table_name")
 
     try:
         tables_config = await _get_visible_table_configs(
-            db, table_name=table_identifier
+            db,
+            table_name=table_identifier,
+            user_id=user_id,
+            require_create_permission=True,
         )
         if not tables_config:
             raise IdentifierValidationError(f"Invalid table identifier: {table_name}")
@@ -811,6 +874,7 @@ async def get_table(db: AsyncSession, table_name: str) -> dict[str, Any]:
 async def get_foreign_key_lookup(
     db: AsyncSession,
     *,
+    user_id: str | None = None,
     table_name: str,
     column_name: str,
     q: str | None = None,
@@ -824,7 +888,7 @@ async def get_foreign_key_lookup(
     _validate_lookup_pagination(limit=limit, offset=offset)
 
     try:
-        allowed_tables = await get_allowed_tables(db)
+        allowed_tables = await get_allowed_tables(db, user_id=user_id)
         if table_identifier not in allowed_tables:
             raise IdentifierValidationError(f"Invalid table identifier: {table_name}")
 
@@ -884,14 +948,84 @@ async def get_foreign_key_lookup(
         raise DBCommunicationError(f"Error resolviendo lookup FK: {error}")
 
 
-async def new_tabledata(db: AsyncSession, submit_form: SubmitForm) -> str:
+async def get_column_values(
+    db: AsyncSession,
+    table_name: str,
+    column_name: str,
+    *,
+    user_id: str | None = None,
+    q: str | None = None,
+    limit: int = DEFAULT_LOOKUP_LIMIT,
+    offset: int = 0,
+) -> dict[str, Any]:
+    table_identifier = _extract_table_name(table_name, field_name="table_name")
+    column_identifier = _validate_sql_identifier(
+        column_name, field_name="column_name"
+    ).lower()
+    _validate_lookup_pagination(limit=limit, offset=offset)
+
+    try:
+        allowed_tables = await get_allowed_tables(db, user_id=user_id)
+        if table_identifier not in allowed_tables:
+            raise IdentifierValidationError(f"Invalid table identifier: {table_name}")
+
+        allowed_columns = await get_allowed_columns(db, table_identifier)
+        if column_identifier not in allowed_columns:
+            raise IdentifierValidationError(f"Invalid column identifier: {column_name}")
+
+        quoted_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+        quoted_table = _quote_identifier(table_identifier, field_name="table")
+        quoted_column = _quote_identifier(column_identifier, field_name="column")
+
+        params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
+        where_clauses = [f"{quoted_column} IS NOT NULL", f"TRIM({quoted_column}::text) != ''"]
+
+        normalized_q = _normalize_search_term(q)
+        if normalized_q:
+            where_clauses.append(f"{quoted_column}::text ILIKE :q")
+            params["q"] = f"%{normalized_q}%"
+
+        where_sql = " AND ".join(where_clauses)
+        query = text(
+            f"""
+            SELECT DISTINCT {quoted_column}::text AS value
+            FROM {quoted_schema}.{quoted_table}
+            WHERE {where_sql}
+            ORDER BY {quoted_column}::text ASC NULLS LAST
+            LIMIT :limit OFFSET :offset
+            """
+        )
+
+        result = await db.execute(query, params)
+        rows = result.mappings().all()
+
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+
+        items: list[dict[str, str]] = [
+            {"value": str(row["value"]), "label": str(row["value"])}
+            for row in rows
+        ]
+        return {"items": items, "total": None, "has_more": has_more}
+    except IdentifierValidationError:
+        raise
+    except Exception as error:
+        raise DBCommunicationError(f"Error buscando valores de columna: {error}")
+
+
+async def new_tabledata(
+    db: AsyncSession,
+    submit_form: SubmitForm,
+    *,
+    user_id: str | None = None,
+) -> str:
     """
     Inserta datos dinamicamente en la tabla especificada.
     """
     correlation_id = f"tb_{int(datetime.now(timezone.utc).timestamp())}"
     table_name = _extract_table_name(submit_form.table_name, field_name="table_name")
 
-    await validate_submit_identifiers(db, submit_form)
+    await validate_submit_identifiers(db, submit_form, user_id=user_id)
 
     row_data: dict[str, Any] = {}
     for item in submit_form.data:
@@ -922,22 +1056,21 @@ async def new_tabledata(db: AsyncSession, submit_form: SubmitForm) -> str:
     return correlation_id
 
 
-async def get_allowed_tables(db: AsyncSession) -> set[str]:
+async def get_allowed_tables(
+    db: AsyncSession,
+    *,
+    user_id: str | None = None,
+) -> set[str]:
     try:
-        query = text(
-            """
-            SELECT nombre_tabla_sql
-            FROM workspace.ui_config_tablas
-            WHERE es_visible = true
-            """
+        table_configs = await _get_visible_table_configs(
+            db,
+            user_id=user_id,
+            require_create_permission=True,
         )
-        result = await db.execute(query)
         return {
-            _extract_table_name(
-                row["nombre_tabla_sql"], field_name="allowed_table"
-            )
-            for row in result.mappings()
-            if row["nombre_tabla_sql"]
+            _extract_table_name(row["nombre_tabla_sql"], field_name="allowed_table")
+            for row in table_configs
+            if row.get("nombre_tabla_sql")
         }
     except IdentifierValidationError:
         raise
@@ -973,10 +1106,13 @@ async def get_allowed_columns(db: AsyncSession, table_name: str) -> set[str]:
 
 
 async def validate_submit_identifiers(
-    db: AsyncSession, submit_form: SubmitForm
+    db: AsyncSession,
+    submit_form: SubmitForm,
+    *,
+    user_id: str | None = None,
 ) -> None:
     table_name = _extract_table_name(submit_form.table_name, field_name="table_name")
-    allowed_tables = await get_allowed_tables(db)
+    allowed_tables = await get_allowed_tables(db, user_id=user_id)
 
     if table_name not in allowed_tables:
         raise IdentifierValidationError(
@@ -1012,8 +1148,8 @@ class FormsService:
         data = await get_categories(self.db)
         return [CategoriesForms(**item) for item in data]
 
-    async def get_tables(self) -> list[TableForms]:
-        data = await get_tables(self.db)
+    async def get_tables(self, *, user_id: str | None = None) -> list[TableForms]:
+        data = await get_tables(self.db, user_id=user_id)
         return [
             TableForms(
                 id=item["id"],
@@ -1025,8 +1161,13 @@ class FormsService:
             for item in data
         ]
 
-    async def get_table(self, table_name: str) -> TableForms:
-        data = await get_table(self.db, table_name)
+    async def get_table(
+        self,
+        table_name: str,
+        *,
+        user_id: str | None = None,
+    ) -> TableForms:
+        data = await get_table(self.db, table_name, user_id=user_id)
         return TableForms(
             id=data["id"],
             name_sql=data["name_sql"],
@@ -1038,6 +1179,7 @@ class FormsService:
     async def get_foreign_key_lookup(
         self,
         *,
+        user_id: str | None = None,
         table_name: str,
         column_name: str,
         q: str | None = None,
@@ -1046,6 +1188,7 @@ class FormsService:
     ) -> dict[str, Any]:
         return await get_foreign_key_lookup(
             self.db,
+            user_id=user_id,
             table_name=table_name,
             column_name=column_name,
             q=q,
@@ -1053,5 +1196,30 @@ class FormsService:
             offset=offset,
         )
 
-    async def submit_form(self, submit_data: SubmitForm) -> str:
-        return await new_tabledata(self.db, submit_data)
+    async def get_column_values(
+        self,
+        table_name: str,
+        column_name: str,
+        *,
+        user_id: str | None = None,
+        q: str | None = None,
+        limit: int = DEFAULT_LOOKUP_LIMIT,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return await get_column_values(
+            self.db,
+            table_name,
+            column_name,
+            user_id=user_id,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def submit_form(
+        self,
+        submit_data: SubmitForm,
+        *,
+        user_id: str | None = None,
+    ) -> str:
+        return await new_tabledata(self.db, submit_data, user_id=user_id)

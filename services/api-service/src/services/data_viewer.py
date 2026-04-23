@@ -282,12 +282,64 @@ def _to_optional_bool(value: Any) -> bool | None:
     return bool(value)
 
 
+async def _get_user_role_id(db: AsyncSession, *, user_id: str | None) -> str | None:
+    if not user_id:
+        return None
+
+    query = text(
+        """
+        SELECT role_id
+        FROM auth.user_roles
+        WHERE user_id = :user_id
+        ORDER BY granted_at DESC NULLS LAST
+        LIMIT 1
+        """
+    )
+    result = await db.execute(query, {"user_id": user_id})
+    role_id = result.scalar_one_or_none()
+    return str(role_id) if role_id is not None else None
+
+
+async def _resolve_role_tables_columns(
+    db: AsyncSession,
+) -> dict[str, str] | None:
+    query = text(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'workspace'
+          AND table_name = 'role_tables'
+        """
+    )
+    result = await db.execute(query)
+    column_names = {row["column_name"] for row in result.mappings().all()}
+
+    if not column_names:
+        return None
+
+    if "role_id" not in column_names or "table_id" not in column_names:
+        return None
+
+    visible_column = "visible" if "visible" in column_names else None
+    edit_column = "can_edit" if "can_edit" in column_names else None
+    if edit_column is None and "edit" in column_names:
+        edit_column = "edit"
+
+    if not visible_column or not edit_column:
+        return None
+
+    return {
+        "visible": visible_column,
+        "edit": edit_column,
+    }
+
+
 class DataViewerService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def get_tables(self) -> list[DataViewerTable]:
-        table_configs = await self._get_allowlist_map()
+    async def get_tables(self, *, user_id: str | None = None) -> list[DataViewerTable]:
+        table_configs = await self._get_allowlist_map(user_id=user_id)
         tables: list[DataViewerTable] = []
 
         for table_id in sorted(table_configs):
@@ -325,12 +377,15 @@ class DataViewerService:
         return tables
 
     async def query(
-        self, request_data: DataViewerQueryRequest
+        self,
+        request_data: DataViewerQueryRequest,
+        *,
+        user_id: str | None = None,
     ) -> DataViewerQueryResponse:
         if request_data.limit > 200:
             raise LimitExceededError()
 
-        plan = await self._build_query_plan(request_data)
+        plan = await self._build_query_plan(request_data, user_id=user_id)
         started_at = time.perf_counter()
 
         query_params = dict(plan.where_params)
@@ -384,8 +439,10 @@ class DataViewerService:
     async def patch_row(
         self,
         request_data: DataViewerRowUpdateRequest,
+        *,
+        user_id: str | None = None,
     ) -> DataViewerRowUpdateResponse:
-        allowlist = await self._get_allowlist_map()
+        allowlist = await self._get_allowlist_map(user_id=user_id)
         table_config = allowlist.get(request_data.table_id)
         if not table_config:
             raise TableNotConfiguredError(request_data.table_id)
@@ -452,8 +509,13 @@ class DataViewerService:
             updated_columns=update_columns,
         )
 
-    async def export_csv(self, request_data: DataViewerQueryRequest) -> CsvExportResult:
-        plan = await self._build_query_plan(request_data)
+    async def export_csv(
+        self,
+        request_data: DataViewerQueryRequest,
+        *,
+        user_id: str | None = None,
+    ) -> CsvExportResult:
+        plan = await self._build_query_plan(request_data, user_id=user_id)
 
         total_rows = await self._run_count_query(
             plan.base_from_where_sql,
@@ -483,7 +545,11 @@ class DataViewerService:
             row_count=total_rows,
         )
 
-    async def _get_allowlist_map(self) -> dict[str, TableConfig]:
+    async def _get_allowlist_map(
+        self,
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, TableConfig]:
         available_columns_query = text(
             """
             SELECT column_name
@@ -511,6 +577,7 @@ class DataViewerService:
 
         select_columns = [
             f"{table_id_expression} AS table_id",
+            "CAST(id AS TEXT) AS ui_config_id",
             "nombre_tabla_sql",
             "nombre_tabla_ui",
         ]
@@ -542,10 +609,51 @@ class DataViewerService:
                 f"Error loading DataViewer allowlist from workspace.ui_config_tablas: {error}"
             )
 
+        role_permissions_by_table: dict[str, tuple[bool, bool]] = {}
+        if user_id:
+            try:
+                role_id = await _get_user_role_id(self.db, user_id=user_id)
+                role_tables_columns = await _resolve_role_tables_columns(self.db)
+                if role_id and role_tables_columns:
+                    visible_column = role_tables_columns["visible"].replace('"', '""')
+                    edit_column = role_tables_columns["edit"].replace('"', '""')
+
+                    role_permissions_query = text(
+                        f"""
+                        SELECT
+                            CAST(table_id AS TEXT) AS table_id,
+                            COALESCE("{visible_column}", true) AS is_visible,
+                            COALESCE("{edit_column}", true) AS can_edit
+                        FROM workspace.role_tables
+                        WHERE role_id = :role_id
+                        """
+                    )
+                    role_permissions_result = await self.db.execute(
+                        role_permissions_query,
+                        {"role_id": role_id},
+                    )
+                    role_permissions_by_table = {
+                        str(row["table_id"]).strip(): (
+                            bool(row["is_visible"]),
+                            bool(row["can_edit"]),
+                        )
+                        for row in role_permissions_result.mappings().all()
+                        if row.get("table_id") is not None
+                    }
+            except Exception as error:
+                raise DBCommunicationError(
+                    f"Error loading DataViewer role permissions from workspace.role_tables: {error}"
+                )
+
         allowlist: dict[str, TableConfig] = {}
         for row in rows:
             table_id = str(row["table_id"]).strip()
             if not table_id:
+                continue
+
+            ui_config_id = str(row.get("ui_config_id") or "").strip()
+            role_permissions = role_permissions_by_table.get(ui_config_id)
+            if role_permissions is not None and not role_permissions[0]:
                 continue
 
             full_table_name = (row.get("nombre_tabla_sql") or "").strip()
@@ -581,7 +689,11 @@ class DataViewerService:
                 display_name=(row.get("nombre_tabla_ui") or None),
                 stable_order_column=stable_order_column,
                 default_order_column=default_order_column,
-                can_update=_to_optional_bool(row.get("can_update")),
+                can_update=(
+                    False
+                    if role_permissions is not None and not role_permissions[1]
+                    else _to_optional_bool(row.get("can_update"))
+                ),
                 can_insert=_to_optional_bool(row.get("can_insert")),
                 can_delete=_to_optional_bool(row.get("can_delete")),
             )
@@ -754,9 +866,12 @@ class DataViewerService:
         )
 
     async def _build_query_plan(
-        self, request_data: DataViewerQueryRequest
+        self,
+        request_data: DataViewerQueryRequest,
+        *,
+        user_id: str | None = None,
     ) -> QueryPlan:
-        allowlist = await self._get_allowlist_map()
+        allowlist = await self._get_allowlist_map(user_id=user_id)
         table_config = allowlist.get(request_data.table_id)
         if not table_config:
             raise TableNotConfiguredError(request_data.table_id)
