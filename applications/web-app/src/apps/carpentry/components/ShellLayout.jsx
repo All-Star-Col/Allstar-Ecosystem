@@ -19,7 +19,7 @@ function resolveInitialTheme()
         return savedTheme;
     }
 
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return 'light';
 }
 
 const IconDashboard = () => (

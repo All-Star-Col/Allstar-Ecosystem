@@ -16,21 +16,21 @@ function prioridadStyle(val) {
     return {
       color: 'var(--cobalt)',
       borderColor: 'color-mix(in srgb, var(--cobalt) 40%, var(--border) 60%)',
-      background: 'color-mix(in srgb, var(--cobalt) 16%, var(--surface-elevated) 84%)',
+      backgroundColor: 'color-mix(in srgb, var(--cobalt) 16%, var(--surface-elevated) 84%)',
     };
   }
   if (v === 2) {
     return {
       color: 'var(--status-warn)',
       borderColor: 'color-mix(in srgb, var(--status-warn) 42%, var(--border) 58%)',
-      background: 'color-mix(in srgb, var(--status-warn) 15%, var(--surface-elevated) 85%)',
+      backgroundColor: 'color-mix(in srgb, var(--status-warn) 15%, var(--surface-elevated) 85%)',
     };
   }
   if (v === 1) {
     return {
       color: 'var(--status-danger)',
       borderColor: 'color-mix(in srgb, var(--status-danger) 42%, var(--border) 58%)',
-      background: 'color-mix(in srgb, var(--status-danger) 15%, var(--surface-elevated) 85%)',
+      backgroundColor: 'color-mix(in srgb, var(--status-danger) 15%, var(--surface-elevated) 85%)',
     };
   }
   return {};
@@ -411,87 +411,87 @@ export default function LotesPage() {
                 placeholder={`Buscar ${dbLabel('proyecto_id')}...`}
               />
             </div>
-          <div className="field">
-            <label>{dbLabel('nombre')}</label>
-            <input
-              placeholder={dbLabel('nombre')}
-              value={loteForm.nombre}
-              onChange={(e) => setLoteForm((p) => ({ ...p, nombre: e.target.value }))}
-              required
-            />
-          </div>
-          <div className="field">
-            <label>{dbLabel('material_ref')}</label>
-            <input
-              placeholder={dbLabel('material_ref')}
-              value={loteForm.material_ref}
-              onChange={(e) => setLoteForm((p) => ({ ...p, material_ref: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label>{dbLabel('estado')}</label>
-            <select value={loteForm.estado} onChange={(e) => handleEstadoChange(e.target.value)}>
-              {loteEstados.map((estado) => (
-                <option key={estado} value={estado}>
-                  {estado}
-                </option>
-              ))}
-            </select>
-          </div>
-          {shouldShowProceso && (
             <div className="field">
-              <label>{dbLabel('proceso_actual_id')}</label>
-              <SearchableSelect
-                options={procesoLineaOptions}
-                value={loteForm.proceso_actual_id}
-                onChange={(v) => setLoteForm((p) => ({ ...p, proceso_actual_id: v }))}
-                disabled={procesoAutoSet}
-                placeholder={`Buscar ${dbLabel('proceso_actual_id')}...`}
+              <label>{dbLabel('nombre')}</label>
+              <input
+                placeholder={dbLabel('nombre')}
+                value={loteForm.nombre}
+                onChange={(e) => setLoteForm((p) => ({ ...p, nombre: e.target.value }))}
+                required
               />
             </div>
-          )}
-          <div className="field">
-            <label>{dbLabel('fecha_inicio_prog')}</label>
-            <input
-              type="date"
-              value={loteForm.fecha_inicio_prog}
-              onChange={(e) => setLoteForm((p) => ({ ...p, fecha_inicio_prog: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label>{dbLabel('fecha_entrega_prog')}</label>
-            <input
-              type="date"
-              value={loteForm.fecha_entrega_prog}
-              onChange={(e) => setLoteForm((p) => ({ ...p, fecha_entrega_prog: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label>{dbLabel('prioridad')}</label>
-            <select
-              value={loteForm.prioridad}
-              style={prioridadStyle(loteForm.prioridad)}
-              onChange={(e) => setLoteForm((p) => ({ ...p, prioridad: Number(e.target.value) }))}
-            >
-              <option value={1}>Alta</option>
-              <option value={2}>Media</option>
-              <option value={3}>Baja</option>
-            </select>
-          </div>
-          <div className="field field-full">
-            <label>{dbLabel('descripcion')}</label>
-            <textarea
-              placeholder={dbLabel('descripcion')}
-              value={loteForm.descripcion}
-              onChange={(e) => setLoteForm((p) => ({ ...p, descripcion: e.target.value }))}
-            />
-          </div>
-          <div className="row actions-row">
-            <button type="submit" className="save-btn">{loteForm.id ? 'Actualizar lote' : 'Crear lote'}</button>
-            <button type="button" className="ghost" onClick={() => setLoteForm(initialLote)}>
-              Limpiar
-            </button>
-          </div>
+            <div className="field">
+              <label>{dbLabel('material_ref')}</label>
+              <input
+                placeholder={dbLabel('material_ref')}
+                value={loteForm.material_ref}
+                onChange={(e) => setLoteForm((p) => ({ ...p, material_ref: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>{dbLabel('estado')}</label>
+              <select value={loteForm.estado} onChange={(e) => handleEstadoChange(e.target.value)}>
+                {loteEstados.map((estado) => (
+                  <option key={estado} value={estado}>
+                    {estado}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {shouldShowProceso && (
+              <div className="field">
+                <label>{dbLabel('proceso_actual_id')}</label>
+                <SearchableSelect
+                  options={procesoLineaOptions}
+                  value={loteForm.proceso_actual_id}
+                  onChange={(v) => setLoteForm((p) => ({ ...p, proceso_actual_id: v }))}
+                  disabled={procesoAutoSet}
+                  placeholder={`Buscar ${dbLabel('proceso_actual_id')}...`}
+                />
+              </div>
+            )}
+            <div className="field">
+              <label>{dbLabel('fecha_inicio_prog')}</label>
+              <input
+                type="date"
+                value={loteForm.fecha_inicio_prog}
+                onChange={(e) => setLoteForm((p) => ({ ...p, fecha_inicio_prog: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>{dbLabel('fecha_entrega_prog')}</label>
+              <input
+                type="date"
+                value={loteForm.fecha_entrega_prog}
+                onChange={(e) => setLoteForm((p) => ({ ...p, fecha_entrega_prog: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>{dbLabel('prioridad')}</label>
+              <select
+                value={loteForm.prioridad}
+                style={prioridadStyle(loteForm.prioridad)}
+                onChange={(e) => setLoteForm((p) => ({ ...p, prioridad: Number(e.target.value) }))}
+              >
+                <option value={1}>Alta</option>
+                <option value={2}>Media</option>
+                <option value={3}>Baja</option>
+              </select>
+            </div>
+            <div className="field field-full">
+              <label>{dbLabel('descripcion')}</label>
+              <textarea
+                placeholder={dbLabel('descripcion')}
+                value={loteForm.descripcion}
+                onChange={(e) => setLoteForm((p) => ({ ...p, descripcion: e.target.value }))}
+              />
+            </div>
+            <div className="row actions-row">
+              <button type="submit" className="save-btn">{loteForm.id ? 'Actualizar lote' : 'Crear lote'}</button>
+              <button type="button" className="ghost" onClick={() => setLoteForm(initialLote)}>
+                Limpiar
+              </button>
+            </div>
           </form>
         )}
       </section>
@@ -571,15 +571,12 @@ export default function LotesPage() {
                         <button
                           type="button"
                           className="small"
-                          onClick={() =>
-                          {
-                            if (detalle?.lote?.id === l.id)
-                            {
+                          onClick={() => {
+                            if (detalle?.lote?.id === l.id) {
                               setDetalle(null);
                               setSeleccionadoId(null);
                             }
-                            else
-                            {
+                            else {
                               setSeleccionadoId(l.id);
                             }
                           }}
@@ -652,16 +649,18 @@ export default function LotesPage() {
                   <div className="form-grid mt">
                     <div className="field">
                       <label>{dbLabel('estado')}</label>
-                      <select
+                      <SearchableSelect
+                        options={[
+                          { value: 'pendiente', label: 'pendiente' },
+                          { value: 'en_proceso', label: 'en_proceso' },
+                          { value: 'completado', label: 'completado' },
+                          { value: 'bloqueado', label: 'bloqueado' },
+                          { value: 'omitido', label: 'omitido' },
+                        ]}
                         value={procesoEdit.estado}
-                        onChange={(e) => setProcesoEdit((p) => ({ ...p, estado: e.target.value }))}
-                      >
-                        <option value="pendiente">pendiente</option>
-                        <option value="en_proceso">en_proceso</option>
-                        <option value="completado">completado</option>
-                        <option value="bloqueado">bloqueado</option>
-                        <option value="omitido">omitido</option>
-                      </select>
+                        onChange={(v) => setProcesoEdit((p) => ({ ...p, estado: v }))}
+                        placeholder="Estado"
+                      />
                     </div>
                     <div className="field">
                       <label>{dbLabel('responsable_id')}</label>
@@ -680,12 +679,8 @@ export default function LotesPage() {
                         onChange={(v) => setProcesoEdit((p) => ({ ...p, maquina_id: v }))}
                         placeholder={maquinaProcesoRequerida ? 'Selecciona máquina...' : 'Opcional para este proceso'}
                       />
-                      <span className="muted">
-                        {maquinaProcesoRequerida
-                          ? 'Obligatoria para Seccionado, Enchape, Mecanizado y Armado.'
-                          : 'Opcional para Transporte e Instalación.'}
-                      </span>
                     </div>
+
                     <div className="field">
                       <label>{dbLabel('fecha_programada')}</label>
                       <input
@@ -710,17 +705,25 @@ export default function LotesPage() {
                         onChange={(e) => setProcesoEdit((p) => ({ ...p, fecha_fin_real: e.target.value }))}
                       />
                     </div>
-                    <div className="field">
-                      <label>{dbLabel('motivo_bloqueo')}</label>
-                      <input
-                        placeholder={dbLabel('motivo_bloqueo')}
-                        value={procesoEdit.motivo_bloqueo}
-                        onChange={(e) => setProcesoEdit((p) => ({ ...p, motivo_bloqueo: e.target.value }))}
-                      />
+
+                    <div className="field field-full">
+                      <label>Notas y Bloqueos</label>
+                      <div className="grid grid-2">
+                        <input
+                          placeholder={dbLabel('motivo_bloqueo')}
+                          value={procesoEdit.motivo_bloqueo}
+                          onChange={(e) => setProcesoEdit((p) => ({ ...p, motivo_bloqueo: e.target.value }))}
+                        />
+                        <button type="button" className="save-btn" onClick={guardarProceso} style={{ margin: 0, height: '100%' }}>
+                          Guardar cambios
+                        </button>
+                      </div>
+                      <p className="muted" style={{ fontSize: '11px', marginTop: '6px' }}>
+                        {maquinaProcesoRequerida
+                          ? 'Máquina obligatoria para Seccionado, Enchape, Mecanizado y Armado.'
+                          : 'Máquina opcional para Transporte e Instalación.'}
+                      </p>
                     </div>
-                    <button type="button" className="small save-btn" onClick={guardarProceso}>
-                      Guardar proceso
-                    </button>
                   </div>
                 )}
               </>

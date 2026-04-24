@@ -87,21 +87,21 @@ function prioridadStyle(val) {
     return {
       color: 'var(--cobalt)',
       borderColor: 'color-mix(in srgb, var(--cobalt) 40%, var(--border) 60%)',
-      background: 'color-mix(in srgb, var(--cobalt) 16%, var(--surface-elevated) 84%)',
+      backgroundColor: 'color-mix(in srgb, var(--cobalt) 16%, var(--surface-elevated) 84%)',
     };
   }
   if (v === 2) {
     return {
       color: 'var(--status-warn)',
       borderColor: 'color-mix(in srgb, var(--status-warn) 42%, var(--border) 58%)',
-      background: 'color-mix(in srgb, var(--status-warn) 15%, var(--surface-elevated) 85%)',
+      backgroundColor: 'color-mix(in srgb, var(--status-warn) 15%, var(--surface-elevated) 85%)',
     };
   }
   if (v === 1) {
     return {
       color: 'var(--status-danger)',
       borderColor: 'color-mix(in srgb, var(--status-danger) 42%, var(--border) 58%)',
-      background: 'color-mix(in srgb, var(--status-danger) 15%, var(--surface-elevated) 85%)',
+      backgroundColor: 'color-mix(in srgb, var(--status-danger) 15%, var(--surface-elevated) 85%)',
     };
   }
   return {};
@@ -442,16 +442,18 @@ export default function ProyectosPage() {
           )}
           <div className="field">
             <label>{dbLabel('prioridad')}</label>
-            <select
+            <SearchableSelect
+              options={[
+                { value: 1, label: 'Alta' },
+                { value: 2, label: 'Media' },
+                { value: 3, label: 'Baja' },
+              ]}
               value={form.prioridad}
               className="priority-select"
               style={prioridadStyle(form.prioridad)}
-              onChange={(e) => setForm((p) => ({ ...p, prioridad: Number(e.target.value) }))}
-            >
-              <option value={1}>Alta</option>
-              <option value={2}>Media</option>
-              <option value={3}>Baja</option>
-            </select>
+              onChange={(v) => setForm((p) => ({ ...p, prioridad: Number(v) }))}
+              placeholder="Prioridad"
+            />
           </div>
           <div className="field">
             <label>{dbLabel('responsable_id')}</label>
@@ -464,13 +466,12 @@ export default function ProyectosPage() {
           </div>
           <div className="field">
             <label>{dbLabel('estado')}</label>
-            <select value={form.estado} onChange={(e) => setForm((p) => ({ ...p, estado: e.target.value }))}>
-              {estadoProyectoOptions.map((estado) => (
-                <option key={estado.value} value={estado.value}>
-                  {estado.label}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={estadoProyectoOptions}
+              value={form.estado}
+              onChange={(v) => setForm((p) => ({ ...p, estado: v }))}
+              placeholder="Estado"
+            />
           </div>
           <div className="field field-full">
             <label>{dbLabel('notas')}</label>
@@ -504,28 +505,26 @@ export default function ProyectosPage() {
         <div className="row wrap" style={{ marginBottom: 12 }}>
           <div className="field">
             <label>{dbLabel('estado')}</label>
-            <select value={filtros.estado} onChange={(e) => setFiltros((f) => ({ ...f, estado: e.target.value }))}>
-              <option value="">Todos</option>
-              {estadoProyectoOptions.map((estado) => (
-                <option key={estado.value} value={estado.value}>
-                  {estado.label}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              options={[{ value: '', label: 'Todos' }, ...estadoProyectoOptions]}
+              value={filtros.estado}
+              onChange={(v) => setFiltros((f) => ({ ...f, estado: v }))}
+            />
           </div>
           <div className="field">
             <label>{dbLabel('prioridad')}</label>
-            <select
+            <SearchableSelect
+              options={[
+                { value: '', label: 'Todas' },
+                { value: '1', label: 'Alta' },
+                { value: '2', label: 'Media' },
+                { value: '3', label: 'Baja' },
+              ]}
               value={filtros.prioridad}
               className="priority-select"
               style={prioridadStyle(filtros.prioridad)}
-              onChange={(e) => setFiltros((f) => ({ ...f, prioridad: e.target.value }))}
-            >
-              <option value="">Todas</option>
-              <option value="1">Alta</option>
-              <option value="2">Media</option>
-              <option value="3">Baja</option>
-            </select>
+              onChange={(v) => setFiltros((f) => ({ ...f, prioridad: v }))}
+            />
           </div>
           <div className="field">
             <label>{dbLabel('nombre')}</label>

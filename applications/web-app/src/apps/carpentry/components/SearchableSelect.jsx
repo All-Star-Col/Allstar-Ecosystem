@@ -21,6 +21,7 @@ export default function SearchableSelect({
     placeholder = 'Buscar...',
     disabled,
     className = '',
+    style = {},
 })
 {
     const [query, setQuery] = useState('');
@@ -101,11 +102,16 @@ export default function SearchableSelect({
         });
     };
 
+    const wrapperClassName = ['searchable-select', open ? 'is-open' : '', className]
+        .filter(Boolean)
+        .join(' ');
+
     return (
-        <div ref={ref} className={`searchable-select ${className}`.trim()}>
+        <div ref={ref} className={wrapperClassName}>
             <input
                 type="text"
                 className="searchable-select-input"
+                style={style}
                 value={open ? query : (selected?.label || '')}
                 onChange={(event) =>
                 {
@@ -164,9 +170,13 @@ export default function SearchableSelect({
         disabled={disabled}
         autoComplete="off"
         aria-expanded={open}
+        aria-haspopup="listbox"
         role="combobox"
         aria-autocomplete="list"
       />
+      <svg className="searchable-select-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="6 9 12 15 18 9"></polyline>
+      </svg>
 
       {open && filtered.length > 0 && (
         <ul className="searchable-select-menu" role="listbox">
@@ -183,7 +193,12 @@ export default function SearchableSelect({
                 onMouseEnter={() => setHighlightedIndex(index)}
                 onClick={() => selectOption(option)}
               >
-                {option.label}
+                <span>{option.label}</span>
+                {isSelected && (
+                  <svg className="selected-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                )}
               </li>
             );
           })}

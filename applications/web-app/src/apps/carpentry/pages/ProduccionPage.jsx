@@ -750,16 +750,18 @@ export default function ProduccionPage()
                   <div className="form-grid mt">
                     <div className="field">
                       <label>Estado</label>
-                      <select
+                      <SearchableSelect
+                        options={[
+                          { value: 'pendiente', label: 'Pendiente' },
+                          { value: 'en_proceso', label: 'En proceso' },
+                          { value: 'completado', label: 'Completado' },
+                          { value: 'bloqueado', label: 'Bloqueado' },
+                          { value: 'omitido', label: 'Omitido' },
+                        ]}
                         value={procesoEdit.estado}
-                        onChange={(e) => setProcesoEdit((p) => ({ ...p, estado: e.target.value }))}
-                      >
-                        <option value="pendiente">Pendiente</option>
-                        <option value="en_proceso">En proceso</option>
-                        <option value="completado">Completado</option>
-                        <option value="bloqueado">Bloqueado</option>
-                        <option value="omitido">Omitido</option>
-                      </select>
+                        onChange={(v) => setProcesoEdit((p) => ({ ...p, estado: v }))}
+                        placeholder="Estado"
+                      />
                     </div>
 
                     <div className="field">
@@ -799,32 +801,27 @@ export default function ProduccionPage()
                       />
                     </div>
 
-                    <div className="field">
-                      <label>Notas</label>
-                      <input
-                        value={procesoEdit.notas}
-                        onChange={(e) => setProcesoEdit((p) => ({ ...p, notas: e.target.value }))}
-                        placeholder="Notas del proceso"
-                      />
-                    </div>
-
                     <div className="field field-full">
-                      <label>Motivo Bloqueo</label>
-                      <input
-                        value={procesoEdit.motivo_bloqueo}
-                        onChange={(e) => setProcesoEdit((p) => ({ ...p, motivo_bloqueo: e.target.value }))}
-                        placeholder="Motivo de bloqueo"
-                      />
+                      <label>Notas y Bloqueos</label>
+                      <div className="grid grid-3">
+                        <input
+                          value={procesoEdit.notas}
+                          onChange={(e) => setProcesoEdit((p) => ({ ...p, notas: e.target.value }))}
+                          placeholder="Notas generales..."
+                        />
+                        <input
+                          value={procesoEdit.motivo_bloqueo}
+                          onChange={(e) => setProcesoEdit((p) => ({ ...p, motivo_bloqueo: e.target.value }))}
+                          placeholder="Motivo del bloqueo (si aplica)"
+                        />
+                        <button type="button" className="save-btn" onClick={guardarProcesoPipeline} style={{ margin: 0, height: '100%' }}>
+                          Guardar cambios del proceso
+                        </button>
+                      </div>
+                      <span className="muted" style={{ fontSize: '11px', marginTop: '6px', display: 'block' }}>
+                        Usa el estado para marcar el proceso como bloqueado cuando aplique.
+                      </span>
                     </div>
-
-                    <div className="field field-full">
-                      <label>&nbsp;</label>
-                      <span className="muted">Usa el estado para marcar el proceso como bloqueado cuando aplique.</span>
-                    </div>
-
-                    <button type="button" className="small" onClick={guardarProcesoPipeline}>
-                      Guardar proceso
-                    </button>
                   </div>
                 )}
               </div>

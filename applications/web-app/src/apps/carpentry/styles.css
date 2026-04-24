@@ -716,7 +716,7 @@
 }
 
 .items-grupo.items-grupo-collapsed {
-  border: 1.5px dashed var(--foreground-subtle);
+  border: 1px dashed var(--foreground-subtle);
   background: color-mix(in srgb, var(--surface-subtle) 82%, var(--foreground-subtle) 18%);
 }
 
@@ -915,9 +915,9 @@
 }
 
 .carpentry-app input, .carpentry-app select, .carpentry-app textarea {
-  border: 1.5px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  padding: 7px 10px;
+  padding: 8px 12px;
   background: var(--surface-elevated);
   color: var(--foreground);
   font: inherit;
@@ -929,14 +929,49 @@
   outline: none;
 }
 
+.carpentry-app select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%238094B8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-position: right 10px center;
+  background-size: 16px 16px;
+  background-repeat: no-repeat;
+  transition: border-color var(--t), box-shadow var(--t), background-image var(--t);
+}
+
+.app-shell[data-theme='dark'] .carpentry-app select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%237E94BA' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.carpentry-app select::-ms-expand {
+  display: none;
+}
+
 .carpentry-app input:hover, .carpentry-app select:hover, .carpentry-app textarea:hover {
   border-color: var(--border-strong);
 }
 
-.carpentry-app input:focus, .carpentry-app select:focus, .carpentry-app textarea:focus {
+.carpentry-app select:hover {
+  border-color: var(--border-strong);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%234A5878' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.carpentry-app select:focus {
   border-color: var(--cobalt);
-  box-shadow: 0 0 0 3px var(--cobalt-glow);
-  background: var(--surface-elevated);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+  /* Use flipped chevron for focus */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%232563EB' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='18 15 12 9 6 15'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.app-shell[data-theme='dark'] .carpentry-app select:hover {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%23A4B6D6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+.app-shell[data-theme='dark'] .carpentry-app select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%2360A5FA' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpolyline points='18 15 12 9 6 15'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
 .carpentry-app input::placeholder, .carpentry-app textarea::placeholder {
@@ -967,46 +1002,96 @@
 .searchable-select-input {
   width: 100%;
   cursor: text;
+  padding-right: 38px !important; /* Force padding for the SVG */
 }
 
+.searchable-select-caret {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--foreground-subtle);
+  transform: translateY(-50%);
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1), color var(--t);
+  pointer-events: none;
+  z-index: 2;
+  will-change: transform;
+}
+
+.searchable-select:hover .searchable-select-caret {
+  color: var(--foreground-muted);
+}
+
+.searchable-select.is-open .searchable-select-caret,
+.searchable-select-input:focus + .searchable-select-caret {
+  color: var(--cobalt);
+}
+
+.searchable-select.is-open .searchable-select-caret {
+  transform: translateY(-50%) rotate(180deg);
+}
+
+/* Dropdown Menu - Premium Styling */
 .searchable-select-menu,
 .searchable-select-empty {
   position: absolute;
-  top: calc(100% + 6px);
+  top: 100%;
+  margin-top: 6px;
   left: 0;
   right: 0;
-  z-index: 40;
+  z-index: 50;
+  overflow: hidden;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  transform-origin: top center;
+  backface-visibility: hidden;
+}
+
+/* Glassmorphism for modern browsers */
+@supports (backdrop-filter: blur(10px)) {
+  .searchable-select-menu,
+  .searchable-select-empty {
+    background: color-mix(in srgb, var(--surface-elevated) 85%, transparent);
+    backdrop-filter: blur(12px) saturate(180%);
+  }
 }
 
 .searchable-select-menu {
-  margin: 0;
-  padding: 4px 0;
+  padding: 6px;
   list-style: none;
-  border: 1.5px solid var(--border);
-  border-radius: var(--r);
-  background: var(--surface-elevated);
-  box-shadow: var(--shadow-lg);
-  max-height: 220px;
-  overflow: auto;
+  box-shadow: var(--shadow-lg), 0 0 0 1px var(--border);
+  max-height: 280px;
+  overflow-y: auto;
+  animation: searchable-select-enter 280ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  will-change: transform, opacity;
 }
 
 .searchable-select-option {
-  padding: 8px 12px;
+  padding: 10px 12px;
   cursor: pointer;
   color: var(--foreground);
-  font-size: 13px;
-  transition:
-    background var(--t-fast),
-    color var(--t-fast);
+  font-size: 13.5px;
+  border-radius: calc(var(--r-sm) + 2px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+  transition: all var(--t-fast);
+}
+
+.searchable-select-option:last-child {
+  margin-bottom: 0;
 }
 
 .searchable-select-option:hover,
-.searchable-select-option:focus-visible {
-  background: var(--surface-hover);
-}
-
 .searchable-select-option.is-highlighted {
-  background: color-mix(in srgb, var(--surface-hover) 70%, var(--cobalt-light) 30%);
+  background: var(--surface-hover);
+  color: var(--foreground);
 }
 
 .searchable-select-option.is-selected {
@@ -1015,13 +1100,29 @@
   background: var(--cobalt-light);
 }
 
+.searchable-select-option .selected-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--cobalt);
+}
+
 .searchable-select-empty {
-  border: 1.5px solid var(--border);
-  border-radius: var(--r);
-  padding: 10px 12px;
-  background: var(--surface-elevated);
+  padding: 14px;
   color: var(--foreground-subtle);
+  font-size: 13px;
+  text-align: center;
   box-shadow: var(--shadow-lg);
+}
+
+@keyframes searchable-select-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .multi-picker {
