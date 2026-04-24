@@ -294,6 +294,20 @@
   box-shadow: inset 3px 0 0 var(--cobalt);
 }
 
+.nav-item.is-disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.nav-item.is-disabled .nav-icon {
+  opacity: 0.55;
+  transform: none;
+}
+
 .nav-item.active .nav-icon {
   color: var(--cobalt);
   opacity: 1;

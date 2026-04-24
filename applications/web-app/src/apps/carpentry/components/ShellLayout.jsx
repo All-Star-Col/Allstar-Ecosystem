@@ -67,15 +67,15 @@ const IconBack = () => (
 );
 
 const items = [
-    { to: carpentryPath(),             label: 'Dashboard',   Icon: IconDashboard  },
-    { to: carpentryPath('proyectos'),  label: 'Proyectos',   Icon: IconProyectos  },
-    { to: carpentryPath('lotes'),      label: 'Lotes',       Icon: IconLotes      },
-    { to: carpentryPath('bom'),        label: 'BOM / Diseño',Icon: IconBom        },
-    { to: carpentryPath('catalogo'),   label: 'Catálogo Mat.',Icon: IconCatalogo   },
-    { to: carpentryPath('inventario'), label: 'Inventario',  Icon: IconInventario },
-    { to: carpentryPath('produccion'), label: 'Producción',  Icon: IconProduccion },
-    { to: carpentryPath('recursos'),   label: 'Recursos',    Icon: IconRecursos   },
-    { to: carpentryPath('reportes'),   label: 'Reportes',    Icon: IconReportes   },
+    { to: carpentryPath(),             label: 'Dashboard',     Icon: IconDashboard  },
+    { to: carpentryPath('proyectos'),  label: 'Proyectos',     Icon: IconProyectos  },
+    { to: carpentryPath('lotes'),      label: 'Lotes',         Icon: IconLotes      },
+    { to: carpentryPath('bom'),        label: 'BOM / Diseño',  Icon: IconBom        },
+    { to: carpentryPath('catalogo'),   label: 'Catálogo Mat.', Icon: IconCatalogo   },
+    { to: carpentryPath('inventario'), label: 'Inventario',    Icon: IconInventario },
+    { to: carpentryPath('produccion'), label: 'Producción',    Icon: IconProduccion, disabled: true },
+    { to: carpentryPath('recursos'),   label: 'Recursos',      Icon: IconRecursos   },
+    { to: carpentryPath('reportes'),   label: 'Reportes',      Icon: IconReportes, disabled: true },
 ];
 
 //_______________________________________
@@ -116,20 +116,38 @@ export default function ShellLayout({ children })
 
                 {/* Navigation */}
                 <nav className="sidebar-nav">
-                    {items.map(({ to, label, Icon }) => (
-                        <NavLink
-                            key={to}
-                            to={to}
-                            end={to === carpentryPath()}
-                            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                            title={collapsed ? label : undefined}
-                        >
-                            <span className="nav-icon">
-                                <Icon />
-                            </span>
-                            {!collapsed && <span className="nav-label">{label}</span>}
-                        </NavLink>
-                    ))}
+                    {items.map(({ to, label, Icon, disabled }) => {
+                        if (disabled) {
+                            return (
+                                <span
+                                    key={to}
+                                    className="nav-item is-disabled"
+                                    aria-disabled="true"
+                                    title={collapsed ? `${label} (deshabilitado)` : undefined}
+                                >
+                                    <span className="nav-icon">
+                                        <Icon />
+                                    </span>
+                                    {!collapsed && <span className="nav-label">{label}</span>}
+                                </span>
+                            );
+                        }
+
+                        return (
+                            <NavLink
+                                key={to}
+                                to={to}
+                                end={to === carpentryPath()}
+                                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                                title={collapsed ? label : undefined}
+                            >
+                                <span className="nav-icon">
+                                    <Icon />
+                                </span>
+                                {!collapsed && <span className="nav-label">{label}</span>}
+                            </NavLink>
+                        );
+                    })}
                 </nav>
 
                 {/* Footer */}
