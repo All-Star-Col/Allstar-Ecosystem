@@ -1,14 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { dbLabel } from '../utils/labels';
+import { formatUnidadMedida } from '../utils/format';
 import useToast from '../utils/useToast';
 import CollapseToggle from '../components/CollapseToggle.jsx';
+
+const unidadPorCategoria = (categoria) =>
+{
+  if (categoria === 'tablero') return 'm2';
+  if (categoria === 'canto') return 'm';
+  if (categoria === 'herraje') return 'unidad';
+  return 'unidad';
+};
 
 const initialMaterialForm = {
   id: null,
   nombre: '',
   categoria: 'tablero',
-  unidad_medida: 'm2',
+  unidad_medida: unidadPorCategoria('tablero'),
   descripcion: '',
   activo: true,
   material: '',
@@ -84,7 +93,11 @@ export default function CatalogoMaterialesPage()
     {
       await api.materiales.guardar(materialForm);
       showToast('Material guardado.');
-      setMaterialForm({ ...initialMaterialForm, categoria: catalogTab });
+      setMaterialForm({
+        ...initialMaterialForm,
+        categoria: catalogTab,
+        unidad_medida: unidadPorCategoria(catalogTab),
+      });
       await cargarMateriales();
     }
     catch (error)
@@ -111,7 +124,11 @@ export default function CatalogoMaterialesPage()
   const cambiarTab = (tab) =>
   {
     setCatalogTab(tab);
-    setMaterialForm({ ...initialMaterialForm, categoria: tab });
+    setMaterialForm({
+      ...initialMaterialForm,
+      categoria: tab,
+      unidad_medida: unidadPorCategoria(tab),
+    });
   };
 
   return (
@@ -306,8 +323,8 @@ export default function CatalogoMaterialesPage()
                   value={materialForm.unidad_medida}
                   onChange={(e) => setMaterialForm((p) => ({ ...p, unidad_medida: e.target.value }))}
                 >
-                  <option value="m2">m2</option>
-                  <option value="ml">ml</option>
+                  <option value="m2">m²</option>
+                  <option value="m">m</option>
                   <option value="unidad">unidad</option>
                   <option value="kg">kg</option>
                   <option value="par">par</option>
@@ -329,7 +346,12 @@ export default function CatalogoMaterialesPage()
                 <button
                   type="button"
                   className="small ghost"
-                  onClick={() => setMaterialForm({ ...initialMaterialForm, categoria: catalogTab })}
+                  onClick={() =>
+                    setMaterialForm({
+                      ...initialMaterialForm,
+                      categoria: catalogTab,
+                      unidad_medida: unidadPorCategoria(catalogTab),
+                    })}
                 >
                   Cancelar edición
                 </button>
@@ -385,7 +407,7 @@ export default function CatalogoMaterialesPage()
                     {materialesPagina.map((m) => (
                         <tr key={m.id}>
                           <td>{m.nombre}</td>
-                          <td>{m.unidad_medida}</td>
+                          <td>{formatUnidadMedida(m.unidad_medida)}</td>
                           <td>{m.tablero_proveedor || m.canto_proveedor || m.herraje_proveedor || '-'}</td>
                           <td>{m.tablero_costo || m.canto_costo || m.herraje_costo || '-'}</td>
                           <td>{m.activo ? 'Sí' : 'No'}</td>
@@ -401,7 +423,9 @@ export default function CatalogoMaterialesPage()
                                     id: m.id,
                                     nombre: m.nombre || '',
                                     categoria: m.categoria || 'tablero',
-                                    unidad_medida: m.unidad_medida || 'unidad',
+                                    unidad_medida: m.categoria === 'canto' && m.unidad_medida === 'ml'
+                                      ? 'm'
+                                      : (m.unidad_medida || unidadPorCategoria(m.categoria || 'tablero')),
                                     descripcion: m.descripcion || '',
                                     activo: m.activo,
                                     material: m.material || m.nombre || '',

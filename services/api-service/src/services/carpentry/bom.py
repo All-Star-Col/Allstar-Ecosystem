@@ -12,7 +12,7 @@ def _unidad_por_categoria(categoria: str | None) -> str:
     if categoria == "tablero":
         return "m2"
     if categoria == "canto":
-        return "ml"
+        return "m"
     if categoria == "herraje":
         return "unidad"
     return "unidad"
@@ -521,6 +521,8 @@ async def guardar_material(db: AsyncSession, payload: dict | None = None) -> dic
 
     nombre_canonico = _nombre_canonico_por_categoria(data)
     unidad = data["unidad_medida"] or _unidad_por_categoria(data["categoria"])
+    if data["categoria"] == "canto" and unidad and unidad.lower() == "ml":
+        unidad = "m"
 
     if not nombre_canonico or not data["categoria"] or not unidad:
         raise AppError(

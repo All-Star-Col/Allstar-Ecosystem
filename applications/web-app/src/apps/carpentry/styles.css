@@ -33,6 +33,13 @@
   --foreground:        #0D1629;
   --foreground-muted:  #4A5878;
   --foreground-subtle: #8094B8;
+  --button-on-accent:  #FFFFFF;
+  --button-on-success: #FFFFFF;
+  --button-on-danger:  #FFFFFF;
+  --control-solid-bg:  #334155;
+  --control-solid-fg:  #FFFFFF;
+  --control-solid-border: rgba(15, 23, 42, 0.65);
+  --control-solid-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
 
   /* Accent aliases (points to cobalt) */
   --accent:       var(--cobalt);
@@ -84,18 +91,25 @@
   --background:       #070C18;
   --surface:          #0E1525;
   --surface-elevated: #16203A;
-  --surface-hover:    #1B2B4A;
+  --surface-hover:    #1F2D45;
   --surface-subtle:   #111826;
-  --border:           #1D2D4A;
-  --border-strong:    #253C68;
+  --border:           #2A3A5B;
+  --border-strong:    #3A5686;
   --foreground:       #E2E8F8;
-  --foreground-muted: #7A90B8;
-  --foreground-subtle: #4A5878;
+  --foreground-muted: #A4B6D6;
+  --foreground-subtle: #7E94BA;
   --cobalt:           #60A5FA;
   --cobalt-hover:     #93C5FD;
   --cobalt-light:     rgba(96, 165, 250, 0.1);
   --cobalt-glow:      rgba(96, 165, 250, 0.2);
   --cobalt-ring:      rgba(96, 165, 250, 0.35);
+  --button-on-accent: #081326;
+  --button-on-success: #04271E;
+  --button-on-danger: #2A0E0E;
+  --control-solid-bg: #243349;
+  --control-solid-fg: #E2E8F8;
+  --control-solid-border: rgba(148, 163, 184, 0.55);
+  --control-solid-shadow: 0 6px 16px rgba(0, 0, 0, 0.38);
   --status-ok:        #34D399;
   --status-ok-bg:     rgba(52, 211, 153, 0.1);
   --status-warn:      #FBBF24;
@@ -149,11 +163,16 @@
 .app-shell {
   display: grid;
   grid-template-columns: 238px 1fr;
+  color-scheme: light;
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
   min-width: 1024px;
   transition: grid-template-columns var(--t-slow);
+}
+
+.app-shell[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 .app-shell.collapsed {
@@ -199,7 +218,7 @@
   font-size: 1.1rem;
   font-weight: 800;
   letter-spacing: 0.12em;
-  color: #FFFFFF;
+  color: var(--sidebar-text-on);
   white-space: nowrap;
 }
 
@@ -269,7 +288,7 @@
 }
 
 .nav-item.active {
-  color: #FFFFFF;
+  color: var(--sidebar-text-on);
   background: var(--sidebar-active);
   border-color: rgba(37, 99, 235, 0.4);
   box-shadow: inset 3px 0 0 var(--cobalt);
@@ -278,10 +297,6 @@
 .nav-item.active .nav-icon {
   color: var(--cobalt);
   opacity: 1;
-}
-
-.app-shell[data-theme='dark'] .nav-item.active .nav-icon {
-  color: #60A5FA;
 }
 
 .nav-icon {
@@ -589,10 +604,10 @@
   min-width: 34px;
   min-height: 34px;
   border-radius: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.65);
-  background: #334155;
-  color: #FFFFFF;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
+  border: 1px solid var(--control-solid-border);
+  background: var(--control-solid-bg);
+  color: var(--control-solid-fg);
+  box-shadow: var(--control-solid-shadow);
   font-size: 17px;
   font-weight: 700;
   line-height: 1;
@@ -608,7 +623,7 @@
 }
 
 .inventory-section-toggle:hover {
-  color: #FFFFFF;
+  color: var(--button-on-success);
   background: var(--status-ok);
   border-color: var(--status-ok);
   box-shadow: 0 4px 14px rgba(5, 150, 105, 0.28);
@@ -724,10 +739,10 @@
   min-width: 34px;
   min-height: 34px;
   border-radius: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.65);
-  background: #334155;
-  color: #FFFFFF;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
+  border: 1px solid var(--control-solid-border);
+  background: var(--control-solid-bg);
+  color: var(--control-solid-fg);
+  box-shadow: var(--control-solid-shadow);
   font-size: 17px;
   font-weight: 700;
   line-height: 1;
@@ -743,13 +758,14 @@
 }
 
 .items-grupo-toggle:hover {
-  color: #FFFFFF;
+  color: var(--control-solid-fg);
 }
 
 /* Si la tabla está abierta, el hover debe ser rojo */
 .items-grupo-toggle[data-collapsed="false"]:hover {
   background: var(--status-danger);
   border-color: var(--status-danger);
+  color: var(--button-on-danger);
   box-shadow: 0 4px 14px rgba(220, 38, 38, 0.3);
 }
 
@@ -757,6 +773,7 @@
 .items-grupo-toggle[data-collapsed="true"]:hover {
   background: var(--status-ok);
   border-color: var(--status-ok);
+  color: var(--button-on-success);
   box-shadow: 0 4px 14px rgba(5, 150, 105, 0.28);
 }
 
@@ -1167,7 +1184,7 @@
 }
 
 .carpentry-app button:hover {
-  color: #FFFFFF;
+  color: var(--button-on-accent);
   border-color: var(--cobalt);
   box-shadow: 4px 8px 19px -3px rgba(37, 99, 235, 0.30);
 }
@@ -1230,7 +1247,7 @@
 }
 
 .carpentry-app button.danger:hover {
-  color: #fff;
+  color: var(--button-on-danger);
   border-color: var(--status-danger);
   box-shadow: 4px 8px 19px -3px rgba(220, 38, 38, 0.28);
 }
@@ -1247,7 +1264,7 @@
 }
 
 .carpentry-app button.success:hover {
-  color: #fff;
+  color: var(--button-on-success);
   border-color: var(--status-ok);
   box-shadow: 4px 8px 19px -3px rgba(5, 150, 105, 0.26);
 }
@@ -1259,19 +1276,20 @@
   min-width: 32px;
   min-height: 32px;
   border-radius: 50%;
-  background: #1a1a1a;
-  border: none;
+  background: var(--control-solid-bg);
+  border: 1px solid var(--control-solid-border);
   padding: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 16px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--control-solid-shadow);
   cursor: pointer;
   transition: background 280ms ease, gap 280ms ease;
   overflow: hidden;
   position: relative;
   gap: 2px;
+  color: var(--control-solid-fg);
 }
 
 .btn-delete::before {
@@ -1285,7 +1303,7 @@
 }
 
 .btn-delete .bin-svg path {
-  fill: white;
+  fill: currentColor;
 }
 
 .btn-delete .bin-top {
@@ -1297,7 +1315,7 @@
   gap: 0;
   border-color: transparent;
   box-shadow: 0 0 18px rgba(220, 38, 38, 0.35);
-  color: #fff;
+  color: var(--button-on-danger);
 }
 
 .btn-delete:hover .bin-top {
@@ -1515,14 +1533,10 @@
 }
 
 .pipeline-node:hover {
-  background: #EAECF0;
+  background: var(--surface-hover);
   border-color: var(--border-strong);
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
-}
-
-.app-shell[data-theme='dark'] .pipeline-node:hover {
-  background: #252D3D;
 }
 
 .pipeline-node.active:hover {
@@ -2728,15 +2742,15 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--control-solid-border);
   border-radius: 10px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
   transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
-  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.22);
-  background: #334155;
-  color: #FFFFFF;
+  box-shadow: var(--control-solid-shadow);
+  background: var(--control-solid-bg);
+  color: var(--control-solid-fg);
   padding: 0;
   min-width: 34px;
   min-height: 34px;
@@ -2762,20 +2776,28 @@
 }
 
 .collapse-toggle-btn:hover {
-  color: #FFFFFF;
+  color: var(--control-solid-fg);
 }
 
 .collapse-toggle-btn[data-collapsed="false"]:hover {
   background: var(--status-danger);
   border-color: var(--status-danger);
+  color: var(--button-on-danger);
 }
 
 .collapse-toggle-btn[data-collapsed="true"]:hover {
   background: var(--status-ok);
   border-color: var(--status-ok);
+  color: var(--button-on-success);
 }
 
-/* Force light theme on native select options */
+/* Keep native options and pickers legible across themes */
+.carpentry-app select,
+.carpentry-app input[type="date"],
+.carpentry-app input[type="time"] {
+  color-scheme: inherit;
+}
+
 .carpentry-app select option {
   background: var(--surface-elevated);
   color: var(--foreground);

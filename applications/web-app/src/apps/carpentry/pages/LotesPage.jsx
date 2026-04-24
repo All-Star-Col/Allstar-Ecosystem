@@ -6,15 +6,33 @@ import StatusPill from '../components/StatusPill.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 import CollapseToggle from '../components/CollapseToggle.jsx';
 import { carpentryPath } from '../routes';
-import { formatFecha, prioridadTexto } from '../utils/format';
+import { formatFecha, formatUnidadMedida, prioridadTexto } from '../utils/format';
 import { dbLabel } from '../utils/labels';
 import useToast from '../utils/useToast';
 
 function prioridadStyle(val) {
   const v = Number(val);
-  if (v === 3) return { color: '#2563EB', borderColor: '#93C5FD', background: '#EFF4FF' };
-  if (v === 2) return { color: '#D97706', borderColor: '#FCD34D', background: '#FFFBEB' };
-  if (v === 1) return { color: '#DC2626', borderColor: '#FCA5A5', background: '#FEF2F2' };
+  if (v === 3) {
+    return {
+      color: 'var(--cobalt)',
+      borderColor: 'color-mix(in srgb, var(--cobalt) 40%, var(--border) 60%)',
+      background: 'color-mix(in srgb, var(--cobalt) 16%, var(--surface-elevated) 84%)',
+    };
+  }
+  if (v === 2) {
+    return {
+      color: 'var(--status-warn)',
+      borderColor: 'color-mix(in srgb, var(--status-warn) 42%, var(--border) 58%)',
+      background: 'color-mix(in srgb, var(--status-warn) 15%, var(--surface-elevated) 85%)',
+    };
+  }
+  if (v === 1) {
+    return {
+      color: 'var(--status-danger)',
+      borderColor: 'color-mix(in srgb, var(--status-danger) 42%, var(--border) 58%)',
+      background: 'color-mix(in srgb, var(--status-danger) 15%, var(--surface-elevated) 85%)',
+    };
+  }
   return {};
 }
 
@@ -782,7 +800,7 @@ export default function LotesPage() {
                           <tr key={`${m.material}-${m.categoria}`}>
                             <td>{m.material}</td>
                             <td>{m.categoria}</td>
-                            <td>{m.unidad_medida}</td>
+                            <td>{formatUnidadMedida(m.unidad_medida)}</td>
                             <td>{m.cantidad_requerida}</td>
                             <td>{m.cantidad_en_bodega}</td>
                             <td>{m.cantidad_pendiente}</td>

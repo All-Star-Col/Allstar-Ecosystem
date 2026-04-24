@@ -83,9 +83,27 @@ function personaLabel(persona) {
 
 function prioridadStyle(val) {
   const v = Number(val);
-  if (v === 3) return { color: '#2563EB', borderColor: '#93C5FD', background: '#EFF4FF' };
-  if (v === 2) return { color: '#D97706', borderColor: '#FCD34D', background: '#FFFBEB' };
-  if (v === 1) return { color: '#DC2626', borderColor: '#FCA5A5', background: '#FEF2F2' };
+  if (v === 3) {
+    return {
+      color: 'var(--cobalt)',
+      borderColor: 'color-mix(in srgb, var(--cobalt) 40%, var(--border) 60%)',
+      background: 'color-mix(in srgb, var(--cobalt) 16%, var(--surface-elevated) 84%)',
+    };
+  }
+  if (v === 2) {
+    return {
+      color: 'var(--status-warn)',
+      borderColor: 'color-mix(in srgb, var(--status-warn) 42%, var(--border) 58%)',
+      background: 'color-mix(in srgb, var(--status-warn) 15%, var(--surface-elevated) 85%)',
+    };
+  }
+  if (v === 1) {
+    return {
+      color: 'var(--status-danger)',
+      borderColor: 'color-mix(in srgb, var(--status-danger) 42%, var(--border) 58%)',
+      background: 'color-mix(in srgb, var(--status-danger) 15%, var(--surface-elevated) 85%)',
+    };
+  }
   return {};
 }
 

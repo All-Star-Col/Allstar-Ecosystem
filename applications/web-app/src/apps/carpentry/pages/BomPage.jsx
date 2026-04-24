@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
 import { dbLabel } from '../utils/labels';
+import { formatUnidadMedida } from '../utils/format';
 import useToast from '../utils/useToast';
 import DeleteButton from '../components/DeleteButton.jsx';
 import SearchableSelect from '../components/SearchableSelect.jsx';
@@ -579,7 +580,7 @@ export default function BomPage()
                       <tr key={row.id}>
                         <td>{row.material}</td>
                         <td>{row.categoria}</td>
-                        <td>{row.unidad_medida}</td>
+                        <td>{formatUnidadMedida(row.unidad_medida)}</td>
                         <td>{row.cantidad_requerida}</td>
                         <td>{row.notas || '-'}</td>
                         <td>

@@ -17,6 +17,13 @@ export function formatNumero(value, decimals = 1) {
   }).format(Number(value));
 }
 
+export function formatUnidadMedida(value) {
+  const unidad = String(value ?? '').trim();
+  if (!unidad) return unidad;
+  if (/^m2$/i.test(unidad)) return 'm²';
+  return unidad;
+}
+
 export function semaforoClass(alerta) {
   if (!alerta) return 'pill-gray';
   const normalized = String(alerta).toLowerCase();

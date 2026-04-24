@@ -3,9 +3,24 @@
 //  Utils | Iconos y helpers ShellLayout
 //_______________________________________
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { carpentryPath } from '../routes';
+
+const CARPENTRY_THEME_STORAGE_KEY = 'carpentry-theme';
+
+function resolveInitialTheme()
+{
+    if (typeof window === 'undefined') return 'light';
+
+    const savedTheme = window.localStorage.getItem(CARPENTRY_THEME_STORAGE_KEY);
+    if (savedTheme === 'dark' || savedTheme === 'light')
+    {
+        return savedTheme;
+    }
+
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 
 const IconDashboard = () => (
     <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
@@ -76,9 +91,14 @@ export default function ShellLayout({ children })
 {
     const navigate = useNavigate();
     const [collapsed, setCollapsed] = useState(false);
-    const [theme, setTheme] = useState('light');
+    const [theme, setTheme] = useState(resolveInitialTheme);
 
     const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
+    useEffect(() =>
+    {
+        window.localStorage.setItem(CARPENTRY_THEME_STORAGE_KEY, theme);
+    }, [theme]);
 
     return (
         <div className={`app-shell ${collapsed ? 'collapsed' : ''}`} data-theme={theme}>
@@ -120,6 +140,7 @@ export default function ShellLayout({ children })
                             className="ghost icon-toggle"
                             onClick={toggleTheme}
                             title={theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
+                            aria-pressed={theme === 'dark'}
                         >
                             {theme === 'dark' ? <IconSun /> : <IconMoon />}
                             <span className="sidebar-btn-label">

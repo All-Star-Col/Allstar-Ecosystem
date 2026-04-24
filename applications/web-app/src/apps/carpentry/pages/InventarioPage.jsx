@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client';
-import { formatFecha } from '../utils/format';
+import { formatFecha, formatUnidadMedida } from '../utils/format';
 import KpiCard from '../components/KpiCard.jsx';
 import { dbLabel } from '../utils/labels';
 import useToast from '../utils/useToast';
@@ -334,7 +334,7 @@ export default function InventarioPage() {
                     <tr key={s.material_id}>
                       <td>{s.material}</td>
                       <td>{s.categoria}</td>
-                      <td>{s.unidad_medida}</td>
+                      <td>{formatUnidadMedida(s.unidad_medida)}</td>
                       <td>{s.cantidad_disponible}</td>
                       <td>{formatFecha(s.ultima_actualizacion)}</td>
                       <td>

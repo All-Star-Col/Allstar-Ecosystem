@@ -5,12 +5,11 @@ import StatusPill from '../components/StatusPill.jsx';
 import KpiCard from '../components/KpiCard.jsx';
 import CollapseToggle from '../components/CollapseToggle.jsx';
 import { carpentryPath } from '../routes';
-import { formatFecha, formatNumero } from '../utils/format';
+import { formatFecha, formatNumero, formatUnidadMedida } from '../utils/format';
 import useToast from '../utils/useToast';
 
 const ALERTA_OPTIONS = [
   { value: 'todos', label: 'Todo el tablero' },
-  { value: 'EN_RIESGO', label: 'En riesgo' },
   { value: 'RETRASADO', label: 'Retrasados' },
 ];
 
@@ -794,7 +793,7 @@ export default function DashboardPage() {
                       <p>
                         {(row.faltantes || [])
                           .slice(0, 2)
-                          .map((faltante) => `${faltante.material} (${formatNumero(faltante.cantidad_pendiente, 0)} ${faltante.unidad_medida})`)
+                          .map((faltante) => `${faltante.material} (${formatNumero(faltante.cantidad_pendiente, 0)} ${formatUnidadMedida(faltante.unidad_medida)})`)
                           .join(' · ')}
                       </p>
                     </article>
