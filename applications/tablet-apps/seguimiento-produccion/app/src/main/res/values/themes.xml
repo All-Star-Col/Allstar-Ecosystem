@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.ProduccionTablet" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#122337</item>
+        <item name="android:navigationBarColor">#122337</item>
+        <item name="android:windowBackground">#F6F5F0</item>
+    </style>
+
+</resources>
