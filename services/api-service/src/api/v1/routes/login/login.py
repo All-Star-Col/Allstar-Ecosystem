@@ -11,9 +11,8 @@ from src.db.database import get_db
 from src.schemas.models import Token
 from src.services.users import update_login_time
 from src.core.logging_config import get_logger
+
 logger = get_logger(__name__)
-
-
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/v1/login")
@@ -22,7 +21,9 @@ router = APIRouter()
 
 
 @router.post("/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)
+):
 
     user = await authenticate_user(db, form_data.username, form_data.password)
 
@@ -38,6 +39,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
     access_token = create_access_token(
         data={"sub": user.username},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
-        )
+    )
 
     return {"access_token": access_token, "token_type": "bearer"}
