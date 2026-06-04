@@ -27,8 +27,20 @@ async def get_db():
 
 
 async def get_sqlserver_db():
-    conn = await run_in_threadpool(pyodbc.connect, settings.SQLSERVER_URL_DATABASE)
+    conn = None
+    try:
+        conn = await run_in_threadpool(pyodbc.connect, settings.SQLSERVER_URL_DATABASE)
+    except Exception as e:
+        logger.exception(f"Error conectando a SQL Server: {e}")
+        # Degrade gracefully: yield None so endpoints can continue without SQL Server
+        yield None
+        return
+
     try:
         yield conn
     finally:
-        await run_in_threadpool(conn.close)
+        if conn is not None:
+            try:
+                await run_in_threadpool(conn.close)
+            except Exception:
+                pass

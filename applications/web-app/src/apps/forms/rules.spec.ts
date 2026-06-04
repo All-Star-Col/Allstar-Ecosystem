@@ -4,6 +4,7 @@ import {
     shouldUseHybridTextField,
     isProductDerivedColumn,
     isProductDerivationContext,
+    shouldUseProductModificationDateTimeField,
 } from "./rules";
 
 describe("forms rules", () => {
@@ -18,6 +19,27 @@ describe("forms rules", () => {
         expect(isProductDerivedColumn("data.productos", "sku")).toBe(true);
         expect(isProductDerivedColumn("data.productos", "nombre")).toBe(true);
         expect(isProductDerivedColumn("data.productos", "estado")).toBe(false);
+    });
+
+    it("uses date-time input only for product modification date", () => {
+        expect(
+            shouldUseProductModificationDateTimeField(
+                "data.productos",
+                "fecha_modificacion",
+            ),
+        ).toBe(true);
+        expect(
+            shouldUseProductModificationDateTimeField(
+                "data.productos",
+                "fecha_creacion",
+            ),
+        ).toBe(false);
+        expect(
+            shouldUseProductModificationDateTimeField(
+                "data.ordencompra",
+                "fecha_modificacion",
+            ),
+        ).toBe(false);
     });
 
     it("enables hybrid text mode for material/tela with schema-qualified names", () => {

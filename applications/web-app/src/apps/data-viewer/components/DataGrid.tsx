@@ -3,7 +3,6 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Pencil } from "lucide-react";
 import { Switch } from "@/shared/ui/switch";
 import { Button } from "@/shared/ui/button";
 import {
-    Table,
     TableHeader,
     TableBody,
     TableHead,
@@ -32,11 +31,34 @@ const DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
     year: "numeric",
 });
 
-function CellRenderer({ value }: { value: unknown }) {
+function isIdentifierColumn(columnKey: string): boolean {
+    const normalized = columnKey.toLowerCase();
+    return (
+        normalized === "id" ||
+        normalized.startsWith("id_") ||
+        normalized.endsWith("_id")
+    );
+}
+
+function CellRenderer({
+    value,
+    columnKey,
+}: {
+    value: unknown;
+    columnKey: string;
+}) {
     const cellType = getColumnType(value);
 
     if (value === null || value === undefined) {
         return <span className="text-muted-foreground italic">null</span>;
+    }
+
+    if (isIdentifierColumn(columnKey)) {
+        return (
+            <span className="font-mono tabular-nums" title={String(value)}>
+                {String(value)}
+            </span>
+        );
     }
 
     if (cellType === "boolean") {
@@ -85,7 +107,7 @@ function CellRenderer({ value }: { value: unknown }) {
     }
 
     return (
-        <span className="truncate block max-w-[220px]" title={String(value)}>
+        <span className="block whitespace-nowrap" title={String(value)}>
             {String(value)}
         </span>
     );
@@ -198,7 +220,7 @@ export function DataGrid({
     return (
         <div className="h-full bg-card rounded-lg shadow-sm border border-border flex flex-col overflow-hidden">
             <div className="flex-1 overflow-auto">
-                <Table>
+                <table className="w-full min-w-max caption-bottom text-sm">
                     <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur border-b border-border/70 [&_tr]:border-b-0">
                         <tr>
                             {visibleColumnKeys.map((columnKey) => (
@@ -246,6 +268,7 @@ export function DataGrid({
                                         <div className="flex items-center justify-center w-full">
                                             <CellRenderer
                                                 value={row[columnKey]}
+                                                columnKey={columnKey}
                                             />
                                         </div>
                                     </TableCell>
@@ -260,7 +283,7 @@ export function DataGrid({
                             </TableRow>
                         ))}
                     </TableBody>
-                </Table>
+                </table>
             </div>
         </div>
     );

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "937804515185",
+    "project_id": "app-inventarios-all-star",
+    "storage_bucket": "app-inventarios-all-star.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:937804515185:android:a1673683eaca67b4fc98d0",
+        "android_client_info": {
+          "package_name": "com.allstar.pda"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZ8Xs9a9N1tMiip3Md6qIDORvYCx1Q3RI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

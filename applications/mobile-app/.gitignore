@@ -1,0 +1,8 @@
+# Android subprojects
+**/.gradle/
+**/.idea/
+**/.kotlin/
+**/build/
+**/local.properties
+**/keystore.properties
+**/release/

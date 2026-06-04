@@ -26,6 +26,7 @@ import { HybridTextField } from "./HybridTextField";
 import {
     isBooleanEstadoColumn,
     isProductDerivedColumn,
+    shouldUseProductModificationDateTimeField,
     shouldUseHybridTextField,
     shouldUseJsonbPropertiesField,
 } from "../rules";
@@ -43,6 +44,32 @@ interface DynamicFormFieldProps {
         limit: number,
     ) => Promise<{ value: string; label: string }[]>;
     error?: string;
+    selectedForeignKeyLabels?: SelectedForeignKeyLabelsMap;
+    forceAsInput?: boolean;
+}
+
+interface SelectedForeignKeyLabelsMap {
+    [column: string]: string;
+}
+
+function toDateTimeLocalValue(value: any): string {
+    if (!value) return "";
+
+    const stringValue = String(value);
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(stringValue)) {
+        return stringValue.slice(0, 16);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(stringValue)) {
+        return `${stringValue}T00:00`;
+    }
+
+    const date = new Date(stringValue);
+    if (Number.isNaN(date.getTime())) {
+        return stringValue;
+    }
+
+    const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return localDate.toISOString().slice(0, 16);
 }
 
 // Dictionary to translate technical types to human-friendly Spanish names
@@ -78,6 +105,7 @@ interface AsyncForeignKeyComboboxProps {
     ) => Promise<{ value: string; label: string }[]>;
     limit: number;
     hasError: boolean;
+    initialLabel?: string;
 }
 
 export function AsyncForeignKeyCombobox({
@@ -88,6 +116,7 @@ export function AsyncForeignKeyCombobox({
     onLookup,
     limit,
     hasError,
+    initialLabel,
 }: AsyncForeignKeyComboboxProps) {
     const [open, setOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -153,8 +182,9 @@ export function AsyncForeignKeyCombobox({
         }
 
         const selectedFromStatic = options.find((option) => option.value === value);
-        return selectedFromStatic?.label;
-    }, [lookupOptions, options, value]);
+        if (selectedFromStatic) return selectedFromStatic.label;
+        return initialLabel ?? undefined;
+    }, [lookupOptions, options, value, initialLabel]);
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -163,6 +193,7 @@ export function AsyncForeignKeyCombobox({
                     type="button"
                     variant="outline"
                     role="combobox"
+                    aria-label="Buscar valor existente"
                     aria-expanded={open}
                     className={cn(
                         "w-full justify-between",
@@ -245,6 +276,8 @@ export function DynamicFormField({
     onForeignKeyLabelChange,
     onForeignKeyLookup,
     error,
+    selectedForeignKeyLabels,
+    forceAsInput,
 }: DynamicFormFieldProps) {
     const isRequired = column.required && !column.nullable;
     const displayName = column.displayName || column.name;
@@ -268,6 +301,20 @@ export function DynamicFormField({
             );
         }
 
+        // Allow forcing the field to render as a plain text input
+        if (forceAsInput) {
+            return (
+                <Input
+                    id={column.name}
+                    type="text"
+                    value={value || ""}
+                    onChange={(e) => onChange(e.target.value)}
+                    placeholder={column.placeholder}
+                    className={error ? "border-destructive" : ""}
+                />
+            );
+        }
+
         if (shouldUseHybridTextField(tableName, column.name)) {
             return (
                 <HybridTextField
@@ -284,6 +331,18 @@ export function DynamicFormField({
                 <JsonbPropertiesField
                     value={value}
                     onChange={(nextValue) => onChange(nextValue)}
+                />
+            );
+        }
+
+        if (shouldUseProductModificationDateTimeField(tableName, column.name)) {
+            return (
+                <Input
+                    id={column.name}
+                    type="datetime-local"
+                    value={toDateTimeLocalValue(value)}
+                    onChange={(e) => onChange(e.target.value)}
+                    className={error ? "border-destructive" : ""}
                 />
             );
         }
@@ -338,7 +397,7 @@ export function DynamicFormField({
                     <Input
                         id={column.name}
                         type="datetime-local"
-                        value={value || ""}
+                        value={toDateTimeLocalValue(value)}
                         onChange={(e) => onChange(e.target.value)}
                         className={error ? "border-destructive" : ""}
                     />
@@ -429,6 +488,7 @@ export function DynamicFormField({
                             }
                             limit={FOREIGN_KEY_REMOTE_DEFAULT_LIMIT}
                             hasError={Boolean(error)}
+                            initialLabel={selectedForeignKeyLabels?.[column.name]}
                         />
                     );
                 }

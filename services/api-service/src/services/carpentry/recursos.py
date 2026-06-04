@@ -1,7 +1,16 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging_config import get_logger
-from src.services.carpentry.common import AppError, build_where, clean, execute, fetch_all
+from src.services.carpentry.common import (
+    AppError,
+    build_where,
+    clean,
+    execute,
+    fetch_all,
+    int_or_none,
+    decimal_or_none,
+    to_bool,
+)
 
 logger = get_logger(__name__)
 
@@ -56,12 +65,12 @@ async def guardar_persona(db: AsyncSession, payload: dict | None = None) -> dict
     payload = payload or {}
 
     data = {
-        "id": clean(payload.get("id")),
+        "id": int_or_none(payload.get("id")),
         "nombre": clean(payload.get("nombre")),
-        "area_id": clean(payload.get("area_id")),
-        "proceso_id": clean(payload.get("proceso_id")),
-        "horas_dia_disponibles": float(payload.get("horas_dia_disponibles") or 8),
-        "activo": True if payload.get("activo") is None else bool(payload.get("activo")),
+        "area_id": int_or_none(payload.get("area_id")),
+        "proceso_id": int_or_none(payload.get("proceso_id")),
+        "horas_dia_disponibles": decimal_or_none(payload.get("horas_dia_disponibles")) or 8.0,
+        "activo": True if payload.get("activo") is None else to_bool(payload.get("activo")),
     }
 
     if not data["nombre"]:
@@ -173,11 +182,11 @@ async def guardar_maquina(db: AsyncSession, payload: dict | None = None) -> dict
     payload = payload or {}
 
     data = {
-        "id": clean(payload.get("id")),
+        "id": int_or_none(payload.get("id")),
         "nombre": clean(payload.get("nombre")),
-        "proceso_id": clean(payload.get("proceso_id")),
-        "horas_dia_disponibles": float(payload.get("horas_dia_disponibles") or 8),
-        "activo": True if payload.get("activo") is None else bool(payload.get("activo")),
+        "proceso_id": int_or_none(payload.get("proceso_id")),
+        "horas_dia_disponibles": decimal_or_none(payload.get("horas_dia_disponibles")) or 8.0,
+        "activo": True if payload.get("activo") is None else to_bool(payload.get("activo")),
     }
 
     if not data["nombre"] or not data["proceso_id"]:

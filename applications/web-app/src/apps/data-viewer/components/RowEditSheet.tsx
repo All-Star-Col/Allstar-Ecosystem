@@ -90,6 +90,26 @@ function renderColumnBadge(column: DataViewerColumn): string {
     return column.type.toUpperCase();
 }
 
+function normalizeIdentifier(value: string | undefined | null): string {
+    return (value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/^"+|"+$/g, "")
+        .toLowerCase()
+        .trim();
+}
+
+function isProductsTable(tableLabel: string): boolean {
+    const normalized = normalizeIdentifier(tableLabel);
+    return normalized === "producto" || normalized === "productos";
+}
+
+function formatCurrentLocalTimestamp(): string {
+    const now = new Date();
+    const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+    return localDate.toISOString().slice(0, 19);
+}
+
 export function RowEditSheet({
     open,
     row,
@@ -111,12 +131,42 @@ export function RowEditSheet({
             return;
         }
 
+        // Reset the edit draft whenever a different row opens in the sheet.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setDraftValues(getInitialDraftValues(row, editableColumns));
         setValidationErrors({});
     }, [editableColumns, open, row]);
 
     const hasEditableColumns = editableColumns.length > 0;
     const canSubmit = !isSaving && hasEditableColumns && !disabledReason;
+    const productModificationDateColumnName = useMemo(
+        () =>
+            editableColumns.find(
+                (column) =>
+                    normalizeIdentifier(column.name) === "fecha_modificacion",
+            )?.name,
+        [editableColumns],
+    );
+    const shouldAutoUpdateProductModificationDate = useMemo(
+        () =>
+            isProductsTable(tableLabel) &&
+            editableColumns.some(
+                (column) => normalizeIdentifier(column.name) === "precio",
+            ) &&
+            productModificationDateColumnName !== undefined,
+        [editableColumns, productModificationDateColumnName, tableLabel],
+    );
+    const visibleEditableColumns = useMemo(
+        () =>
+            editableColumns.filter(
+                (column) =>
+                    !(
+                        isProductsTable(tableLabel) &&
+                        normalizeIdentifier(column.name) === "fecha_modificacion"
+                    ),
+            ),
+        [editableColumns, tableLabel],
+    );
 
     const rowIdentity = useMemo(() => {
         if (!row) {
@@ -142,6 +192,26 @@ export function RowEditSheet({
         }
 
         onSubmit(draftValues);
+    };
+
+    const handleDraftValueChange = (columnName: string, value: unknown) => {
+        setDraftValues((previous) => {
+            const nextValues = {
+                ...previous,
+                [columnName]: value,
+            };
+
+            if (
+                shouldAutoUpdateProductModificationDate &&
+                normalizeIdentifier(columnName) === "precio" &&
+                productModificationDateColumnName
+            ) {
+                nextValues[productModificationDateColumnName] =
+                    formatCurrentLocalTimestamp();
+            }
+
+            return nextValues;
+        });
     };
 
     const closeSheet = () => {
@@ -190,7 +260,7 @@ export function RowEditSheet({
 
                     {!disabledReason &&
                         hasEditableColumns &&
-                        editableColumns.map((column) => {
+                        visibleEditableColumns.map((column) => {
                             const fieldError = validationErrors[column.name];
                             const value = draftValues[column.name];
                             const isBoolean = column.type === "boolean";
@@ -201,6 +271,7 @@ export function RowEditSheet({
                             const isDate = column.type === "date";
                             const isDateTime = column.type === "datetime" || column.type === "timestamp";
                             const hasEnum = Array.isArray(column.enum_values) && column.enum_values.length > 0;
+                            const checkedValue = value === true || value === "true";
 
                             return (
                                 <div key={column.name} className="space-y-2">
@@ -221,24 +292,24 @@ export function RowEditSheet({
                                         <label className="inline-flex items-center gap-2 text-sm text-foreground">
                                             <Checkbox
                                                 id={`field-${column.name}`}
-                                                checked={Boolean(value)}
+                                                checked={checkedValue}
                                                 onCheckedChange={(checked) =>
-                                                    setDraftValues((previous) => ({
-                                                        ...previous,
-                                                        [column.name]: checked,
-                                                    }))
+                                                    handleDraftValueChange(
+                                                        column.name,
+                                                        checked,
+                                                    )
                                                 }
                                             />
-                                            {Boolean(value) ? "Si" : "No"}
+                                            {checkedValue ? "Si" : "No"}
                                         </label>
                                     ) : hasEnum ? (
                                         <Select
                                             value={getInputValue(value) as string}
                                             onValueChange={(selectedValue) =>
-                                                setDraftValues((previous) => ({
-                                                    ...previous,
-                                                    [column.name]: selectedValue,
-                                                }))
+                                                handleDraftValueChange(
+                                                    column.name,
+                                                    selectedValue,
+                                                )
                                             }
                                         >
                                             <SelectTrigger id={`field-${column.name}`}>
@@ -262,10 +333,10 @@ export function RowEditSheet({
                                             id={`field-${column.name}`}
                                             value={getInputValue(value) as string}
                                             onChange={(event) =>
-                                                setDraftValues((previous) => ({
-                                                    ...previous,
-                                                    [column.name]: event.target.value,
-                                                }))
+                                                handleDraftValueChange(
+                                                    column.name,
+                                                    event.target.value,
+                                                )
                                             }
                                             rows={4}
                                             maxLength={column.max_length ?? undefined}
@@ -285,10 +356,10 @@ export function RowEditSheet({
                                             step={isNumber && (column.type === "integer" || column.type === "bigint") ? "1" : undefined}
                                             value={getInputValue(value)}
                                             onChange={(event) =>
-                                                setDraftValues((previous) => ({
-                                                    ...previous,
-                                                    [column.name]: event.target.value,
-                                                }))
+                                                handleDraftValueChange(
+                                                    column.name,
+                                                    event.target.value,
+                                                )
                                             }
                                             maxLength={column.max_length ?? undefined}
                                         />

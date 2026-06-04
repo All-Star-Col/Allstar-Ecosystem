@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging_config import get_logger
-from src.services.carpentry.common import AppError, clean, execute, fetch_all, fetch_one
+from src.services.carpentry.common import AppError, clean, execute, fetch_all, fetch_one, int_or_none
 
 logger = get_logger(__name__)
 
@@ -94,7 +94,7 @@ async def listar_areas(db: AsyncSession, _payload: dict | None = None) -> list[d
 
 async def guardar_area(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    area_id = clean(payload.get("id"))
+    area_id = int_or_none(payload.get("id"))
     nombre = clean(payload.get("nombre"))
 
     if not nombre:
@@ -130,7 +130,7 @@ async def guardar_area(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def eliminar_area(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    area_id = payload.get("id")
+    area_id = int_or_none(payload.get("id"))
 
     uso = await fetch_one(
         db,

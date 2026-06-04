@@ -439,7 +439,7 @@ export function DataViewerProModule({
 
             return {
                 column: defaultSortColumn,
-                direction: "asc",
+                direction: "desc",
             };
         });
         setGlobalFilterInput("");

@@ -818,16 +818,21 @@
    TABLES
 ═══════════════════════════════════════════ */
 .table-wrap {
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-width: 100%;
+  max-height: min(72vh, 680px);
   border-radius: var(--r);
   border: 1px solid var(--border);
   background: var(--surface);
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .carpentry-app table {
   width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
-  min-width: 720px;
   background: var(--surface);
 }
 
@@ -836,6 +841,7 @@
   padding: 9px 13px;
   text-align: left;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .carpentry-app td { vertical-align: top; }

@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useTables } from "../store";
-import { fetchForeignKeyLookup, submitFormData } from "../api";
+import { fetchForeignKeyLookup, submitFormData, fetchNextConsecutive, fetchUnassignedOrders } from "../api";
 import type { SubmitFormAPI } from "../api";
 import { DynamicFormField } from "../components/DynamicFormField";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -52,6 +52,16 @@ export default function FormBuilder() {
         if (!table) return [];
         return filterVisibleFormColumns(table.columns);
     }, [table]);
+
+    const [legacyColumnName, setLegacyColumnName] = useState<string | null>(null);
+    const [orderColumnName, setOrderColumnName] = useState<string | null>(null);
+    const [clientColumnName, setClientColumnName] = useState<string | null>(null);
+
+    const [orders, setOrders] = useState<{ value: string; order?: string; label: string; client: string; product?: string; quantity?: string; count?: number }[]>([]);
+    const [ordersLoading, setOrdersLoading] = useState(false);
+    const [ordersQ, setOrdersQ] = useState<string | null>(null);
+    const [ordersOffset, setOrdersOffset] = useState(0);
+    const [ordersHasMore, setOrdersHasMore] = useState(false);
     const isProductDerivationEnabled = useMemo(
         () => isProductDerivationContext(table?.name, visibleColumns),
         [table?.name, visibleColumns],
@@ -77,13 +87,73 @@ export default function FormBuilder() {
                 const nextTable = resolvedTable ?? tableSummary;
                 setTableDetails(nextTable);
 
-                setFormData(
-                    buildInitialFormData(
-                        filterVisibleFormColumns(nextTable.columns),
-                    ),
-                );
+                const visible = filterVisibleFormColumns(nextTable.columns);
+                setFormData(buildInitialFormData(visible));
                 setSelectedForeignKeyLabels({});
                 setErrors({});
+
+                // Detect relevant columns for items form (legacy, order, client)
+                const allCols = (nextTable.columns || []).map((c) => c.name.toLowerCase());
+                const findCol = (candidates: string[]) => {
+                    for (const cand of candidates) {
+                        const idx = allCols.findIndex((n) => n === cand || n.includes(cand));
+                        if (idx >= 0) return nextTable.columns[idx].name;
+                    }
+                    return null;
+                };
+
+                const legacyCandidates = [
+                    "item_legado",
+                    "itemlegado",
+                    "item_leg",
+                    "coditem",
+                    "cod_item",
+                    "cod_item_legado",
+                    "item_legacy",
+                ];
+                const orderCandidates = [
+                    "orden_compra",
+                    "ordencompra",
+                    "orden",
+                    "cod_oc_cliente",
+                    "codoccliente",
+                    "oc_cliente",
+                    "oc",
+                ];
+                const clientCandidates = [
+                    "cliente",
+                    "id_cliente",
+                    "cliente_id",
+                    "cod_cliente",
+                ];
+
+                const legacyCol = findCol(legacyCandidates);
+                const orderCol = findCol(orderCandidates);
+                const clientCol = findCol(clientCandidates);
+
+                console.debug("[FormBuilder] detected columns", { legacyCol, orderCol, clientCol });
+
+                setLegacyColumnName(legacyCol);
+                setOrderColumnName(orderCol);
+                setClientColumnName(clientCol);
+
+                // If we found a legacy column and it's not already set in initial data, fetch next consecutive
+                if (legacyCol) {
+                    const current = buildInitialFormData(visible)[legacyCol as string];
+                    // only fetch when initial doesn't provide a default
+                    if (current === undefined) {
+                        // fetch in background
+                        (async () => {
+                            try {
+                                const resp = await fetchNextConsecutive(nextTable.name, legacyCol);
+                                setFormData((prev) => ({ ...prev, [legacyCol]: resp.next }));
+                            } catch (err) {
+                                // ignore errors silently
+                                console.warn("Could not fetch next consecutive:", err);
+                            }
+                        })();
+                    }
+                }
             } catch (error) {
                 if (cancelled) return;
                 setTableDetails(tableSummary);
@@ -105,6 +175,39 @@ export default function FormBuilder() {
             cancelled = true;
         };
     }, [tableId, tableSummary, loadTableById]);
+
+    // Load unassigned orders when we have the necessary column names
+    useEffect(() => {
+        let cancelled = false;
+        async function loadOrders() {
+            if (!table || !orderColumnName || !clientColumnName || !legacyColumnName) return;
+            setOrdersLoading(true);
+            try {
+                const resp = await fetchUnassignedOrders({
+                    tableName: table.name,
+                    orderColumn: orderColumnName,
+                    clientColumn: clientColumnName,
+                    legacyColumn: legacyColumnName,
+                    q: ordersQ ?? undefined,
+                    limit: 10,
+                    offset: ordersOffset,
+                });
+                if (cancelled) return;
+                setOrders(resp.items || []);
+                setOrdersHasMore(Boolean(resp.has_more));
+            } catch (err) {
+                console.error("Error loading unassigned orders:", err);
+                setOrders([]);
+                setOrdersHasMore(false);
+            } finally {
+                if (!cancelled) setOrdersLoading(false);
+            }
+        }
+        loadOrders();
+        return () => {
+            cancelled = true;
+        };
+    }, [table, orderColumnName, clientColumnName, legacyColumnName, ordersQ, ordersOffset]);
 
     useEffect(() => {
         if (!table || !isProductDerivationEnabled) {
@@ -360,12 +463,15 @@ export default function FormBuilder() {
                                                 column={column}
                                                 value={formData[column.name]}
                                                 tableName={table?.name}
-                                                forceReadOnly={
-                                                    isProductDerivationEnabled &&
-                                                    isProductDerivedColumnName(
-                                                        column.name,
-                                                    )
-                                                }
+                                                                forceReadOnly={
+                                                                    (isProductDerivationEnabled &&
+                                                                        isProductDerivedColumnName(
+                                                                            column.name,
+                                                                        )) ||
+                                                                    (legacyColumnName !== null &&
+                                                                        column.name === legacyColumnName)
+                                                                }
+                                                forceAsInput={orderColumnName !== null && column.name === orderColumnName}
                                                 onChange={(value) =>
                                                     handleFieldChange(
                                                         column.name,
@@ -379,10 +485,132 @@ export default function FormBuilder() {
                                                     handleForeignKeyLookup
                                                 }
                                                 error={errors[column.name]}
+                                                    selectedForeignKeyLabels={selectedForeignKeyLabels}
                                             />
                                         </div>
                                     ))}
                                 </div>
+
+                                {/* Unassigned orders selector */}
+                                {(orderColumnName && clientColumnName && legacyColumnName) && (
+                                    <div className="mt-6 p-4 rounded border border-border/60 bg-muted/5 md:col-span-2">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="text-sm font-medium">Órdenes sin Item legado</h3>
+                                            <div className="flex items-center gap-2">
+                                                <input
+                                                    type="search"
+                                                    placeholder="Buscar orden o cliente..."
+                                                    value={ordersQ ?? ""}
+                                                    onChange={(e) => { setOrdersQ(e.target.value || null); setOrdersOffset(0); }}
+                                                    className="input input-sm"
+                                                />
+                                            </div>
+                                        </div>
+                                        {ordersLoading ? (
+                                            <div className="text-sm text-muted-foreground">Cargando órdenes...</div>
+                                        ) : orders.length === 0 ? (
+                                            <div className="text-sm text-muted-foreground">No se encontraron órdenes sin item legado.</div>
+                                        ) : (
+                                            <div className="space-y-3">
+                                                <ul className="space-y-2 max-h-52 overflow-auto">
+                                                    {orders.map((o) => (
+                                                        <li key={o.value} className="flex items-center justify-between gap-4 bg-card/50 p-3 rounded">
+                                                            <div className="flex-1 text-sm">
+                                                                <div className="flex items-baseline gap-2">
+                                                                    <span className="text-xs text-muted-foreground">Orden:</span>
+                                                                    <span className="font-medium text-foreground">{o.order || o.value}</span>
+                                                                </div>
+                                                                <div className="flex items-baseline gap-2 mt-1">
+                                                                    <span className="text-xs text-muted-foreground">Cliente:</span>
+                                                                    <span className="text-sm text-foreground">{o.client || '-'}</span>
+                                                                </div>
+                                                                <div className="flex items-baseline gap-2 mt-1">
+                                                                    <span className="text-xs text-muted-foreground">Producto:</span>
+                                                                    <span className="text-sm text-foreground">{o.product || '-'}</span>
+                                                                </div>
+                                                                <div className="flex flex-wrap items-center gap-3 mt-2">
+                                                                    <span className="inline-flex items-center gap-1 rounded border border-border/70 px-2 py-0.5 text-xs text-muted-foreground">
+                                                                        Cantidad:
+                                                                        <strong className="text-foreground">{o.quantity || '-'}</strong>
+                                                                    </span>
+                                                                    <span className="inline-flex items-center gap-1 rounded border border-border/70 px-2 py-0.5 text-xs text-muted-foreground">
+                                                                        Conteo:
+                                                                        <strong className="text-foreground">{o.count ?? 0}</strong>
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex-shrink-0">
+                                                                <button
+                                                                    type="button"
+                                                                    className="btn btn-sm"
+                                                                    onClick={() => {
+                                                                        if (!legacyColumnName || !table) return;
+                                                                        (async () => {
+                                                                            try {
+                                                                                const resp = await fetchNextConsecutive(table.name, legacyColumnName);
+
+                                                                                // set legacy and order immediately
+                                                                                setFormData((prev) => ({
+                                                                                    ...prev,
+                                                                                    [legacyColumnName]: resp.next,
+                                                                                    ...(orderColumnName ? { [orderColumnName]: o.value } : {}),
+                                                                                }));
+
+                                                                                // try to resolve client FK value -> label mapping
+                                                                                if (clientColumnName) {
+                                                                                    try {
+                                                                                        const lookup = await fetchForeignKeyLookup({
+                                                                                            tableName: table.name,
+                                                                                            columnName: clientColumnName,
+                                                                                            query: o.client || o.value,
+                                                                                            limit: 5,
+                                                                                        });
+
+                                                                                        if (Array.isArray(lookup) && lookup.length > 0) {
+                                                                                            // prefer exact label match
+                                                                                            const match = lookup.find((opt) => opt.label === o.client) || lookup[0];
+                                                                                            setFormData((prev) => ({ ...prev, [clientColumnName]: match.value }));
+                                                                                            handleForeignKeyLabelChange(clientColumnName, match.label);
+                                                                                        } else {
+                                                                                            // fallback: set the raw client value/label
+                                                                                            setFormData((prev) => ({ ...prev, [clientColumnName]: o.client }));
+                                                                                            handleForeignKeyLabelChange(clientColumnName, o.client || "");
+                                                                                        }
+                                                                                    } catch (err) {
+                                                                                        // lookup failed, fallback to raw value
+                                                                                        setFormData((prev) => ({ ...prev, [clientColumnName]: o.client }));
+                                                                                        handleForeignKeyLabelChange(clientColumnName, o.client || "");
+                                                                                    }
+                                                                                }
+
+                                                                                toast.success("Item legado asignado al formulario");
+                                                                            } catch (err) {
+                                                                                console.error(err);
+                                                                                toast.error("No se pudo obtener el consecutivo");
+                                                                            }
+                                                                        })();
+                                                                    }}
+                                                                >
+                                                                    Seleccionar
+                                                                </button>
+                                                            </div>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                                {ordersHasMore && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => setOrdersOffset((current) => current + 10)}
+                                                    >
+                                                        Cargar más
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 <div className="flex gap-3 pt-6 border-t">
                                     <Button

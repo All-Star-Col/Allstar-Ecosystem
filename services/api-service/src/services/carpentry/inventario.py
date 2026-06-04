@@ -1,7 +1,15 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging_config import get_logger
-from src.services.carpentry.common import AppError, clean, execute, fetch_all
+from src.services.carpentry.common import (
+    AppError,
+    clean,
+    execute,
+    fetch_all,
+    int_or_none,
+    decimal_or_none,
+    date_or_none,
+)
 
 logger = get_logger(__name__)
 
@@ -46,19 +54,19 @@ async def registrar_movimiento(db: AsyncSession, payload: dict | None = None) ->
     payload = payload or {}
 
     data = {
-        "material_id": clean(payload.get("material_id")),
+        "material_id": int_or_none(payload.get("material_id")),
         "tipo": clean(payload.get("tipo")),
-        "cantidad": float(payload.get("cantidad")) if payload.get("cantidad") not in (None, "") else None,
-        "lote_id": clean(payload.get("lote_id")),
-        "item_id": clean(payload.get("item_id")),
-        "proyecto_id": clean(payload.get("proyecto_id")),
-        "fecha": clean(payload.get("fecha")),
+        "cantidad": decimal_or_none(payload.get("cantidad")),
+        "lote_id": int_or_none(payload.get("lote_id")),
+        "item_id": int_or_none(payload.get("item_id")),
+        "proyecto_id": int_or_none(payload.get("proyecto_id")),
+        "fecha": date_or_none(payload.get("fecha")),
         "referencia": clean(payload.get("referencia")),
-        "responsable_id": clean(payload.get("responsable_id")),
+        "responsable_id": int_or_none(payload.get("responsable_id")),
         "notas": clean(payload.get("notas")),
     }
 
-    if not data["material_id"] or not data["tipo"] or not data["cantidad"] or data["cantidad"] <= 0:
+    if not data["material_id"] or not data["tipo"] or data["cantidad"] is None or data["cantidad"] <= 0:
         raise AppError("Material, tipo y cantidad (>0) son obligatorios.", 400, "VALIDATION")
 
     if data["tipo"] == "ajuste" and not data["notas"]:

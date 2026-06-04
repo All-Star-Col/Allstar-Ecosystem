@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 from src.schemas.models import Item_LookupResponse, LocationItem, DispatchItem, Returned_Item
+from src.db.database import get_db
 from src.services.sheets import SheetsService, get_sheets_service
 from src.core.logging_config import get_logger
 logger = get_logger(__name__)
@@ -70,13 +72,17 @@ async def get_return_item(item: str, service: SheetsService = Depends(get_sheets
 #___________________________________________________________
 
 @router.post("/new/{item}")
-async def post_product(item: int, service: SheetsService = Depends(get_sheets_service)):
+async def post_product(
+    item: int,
+    service: SheetsService = Depends(get_sheets_service),
+    db: AsyncSession = Depends(get_db),
+):
     """
     post_product()
-    Agrega un nuevo item a INVENTARIO consultando su informacion desde SQL Server.
+    Agrega un nuevo item a INVENTARIO consultando su informacion desde allstar_db.
         - item:int | codigo del item a agregar
     """
-    status = await service.new_item(item=item)
+    status = await service.new_item(item=item, db=db)
 
     if status == 404:
         raise HTTPException(status_code=404, detail="El item no existe en el sistema.")

@@ -55,7 +55,13 @@ class Settings(BaseSettings):
 
     def __init__(self, **values):
         super().__init__(**values)
-        self.load_secrets_from_bw()
+        # Only attempt to load secrets from Bitwarden when a BW access token is provided.
+        # In local/dev environments without BW_ACCESS_TOKEN, rely on keys.dev.env or
+        # environment variables instead to avoid startup failures.
+        if os.getenv("BW_ACCESS_TOKEN"):
+            self.load_secrets_from_bw()
+        else:
+            logger.info("BW_ACCESS_TOKEN not set — skipping Bitwarden secret loading. Using local env values.")
 
     def _normalize_environment(self) -> str:
         environment = (self.ENVIRONMENT or "prod").strip().lower()

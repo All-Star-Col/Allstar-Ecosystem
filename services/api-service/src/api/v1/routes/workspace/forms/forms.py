@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
-from src.db.database import get_db
+from src.db.database import get_db, get_sqlserver_db
 from src.schemas.models import (
     CategoriesForms,
     ForeignKeyLookupResponse,
@@ -138,19 +138,102 @@ async def get_column_values_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/submit", response_model=SubmitFormResponse | None)
-async def submit_form(
-    submit_data: SubmitForm,
+@router.get(
+    "/next-consecutive/{table_name}/{column_name}",
+)
+async def get_next_consecutive_endpoint(
+    table_name: str,
+    column_name: str,
     current_user: User = Depends(get_current_user),
     forms_service: forms.FormsService = Depends(get_forms_service),
 ):
     try:
+        return await forms_service.get_next_consecutive(
+            table_name=table_name,
+            column_name=column_name,
+            user_id=str(current_user.id),
+        )
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/unassigned-orders")
+async def get_unassigned_orders_endpoint(
+    table_name: str,
+    order_column: str,
+    client_column: str,
+    legacy_column: str,
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=forms.DEFAULT_LOOKUP_LIMIT, ge=1, le=forms.MAX_LOOKUP_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_user),
+    sqlserver_conn: object = Depends(get_sqlserver_db),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.get_unassigned_orders(
+            table_name=table_name,
+            order_column=order_column,
+            client_column=client_column,
+            legacy_column=legacy_column,
+            user_id=str(current_user.id),
+            q=q,
+            limit=limit,
+            offset=offset,
+            sqlserver_conn=sqlserver_conn,
+        )
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/submit", response_model=SubmitFormResponse | None)
+async def submit_form(
+    submit_data: SubmitForm,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        logger.debug(
+            "submit_form request path=%s user=%s table=%s data=%s",
+            request.url.path,
+            getattr(current_user, "id", None),
+            getattr(submit_data, "table_name", None),
+            [ {"column": d.column, "value": d.value} for d in submit_data.data ],
+        )
+
         correlation_id = await forms_service.submit_form(
             submit_data,
             user_id=str(current_user.id),
         )
         return SubmitFormResponse(status="success", correlation_id=correlation_id)
     except forms.IdentifierValidationError as e:
+        logger.warning(
+            "IdentifierValidationError submitting form table=%s user=%s detail=%s",
+            getattr(submit_data, "table_name", None),
+            getattr(current_user, "id", None),
+            e.detail,
+        )
         raise HTTPException(status_code=422, detail=e.detail)
     except forms.DBCommunicationError as e:
+        logger.exception(
+            "DBCommunicationError inserting into %s user=%s data=%s: %s",
+            getattr(submit_data, "table_name", None),
+            getattr(current_user, "id", None),
+            [ {"column": d.column, "value": d.value} for d in submit_data.data ],
+            str(e),
+        )
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.exception(
+            "Unexpected error in submit_form user=%s table=%s data=%s: %s",
+            getattr(current_user, "id", None),
+            getattr(submit_data, "table_name", None),
+            getattr(submit_data, "data", None),
+            str(e),
+        )
+        raise HTTPException(status_code=500, detail="Internal Server Error")

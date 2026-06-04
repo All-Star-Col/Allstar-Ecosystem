@@ -509,7 +509,7 @@ async def guardar_material(db: AsyncSession, payload: dict | None = None) -> dic
         "categoria": clean(payload.get("categoria")),
         "unidad_medida": clean(payload.get("unidad_medida")),
         "descripcion": clean(payload.get("descripcion")),
-        "activo": True if payload.get("activo") is None else bool(payload.get("activo")),
+        "activo": True if payload.get("activo") is None else to_bool(payload.get("activo")),
         "material": clean(payload.get("material")),
         "sustrato": clean(payload.get("sustrato")),
         "formato": clean(payload.get("formato")),

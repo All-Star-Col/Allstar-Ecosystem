@@ -12,12 +12,46 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 
 const ALL_CATEGORY_ID = "__all__";
+const MAIN_CATEGORY_ID = "__main__";
+
+function normalizeTableText(value: string | undefined | null): string {
+    return (value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim();
+}
+
+function isProcessOrderTable(table: TableSchema): boolean {
+    const haystack = normalizeTableText(
+        `${table.name} ${table.displayName} ${table.description ?? ""}`,
+    );
+    return haystack.includes("orden") && haystack.includes("proceso");
+}
+
+function isMainFormsTable(table: TableSchema): boolean {
+    const normalizedName = normalizeTableText(table.name);
+    const normalizedDisplay = normalizeTableText(table.displayName);
+    const candidates = new Set([normalizedName, normalizedDisplay]);
+
+    return (
+        candidates.has("items") ||
+        candidates.has("item") ||
+        candidates.has("orden compra") ||
+        candidates.has("orden de compra") ||
+        candidates.has("ordenes compra") ||
+        candidates.has("ordenes de compra") ||
+        candidates.has("ordencompra") ||
+        candidates.has("ordenescompra")
+    );
+}
 
 export default function TableSelection() {
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCategoryId, setSelectedCategoryId] = useState<string>(
-        ALL_CATEGORY_ID,
+        MAIN_CATEGORY_ID,
     );
     const [openCategories, setOpenCategories] = useState<Record<string, boolean>>(
         {},
@@ -35,6 +69,11 @@ export default function TableSelection() {
                 return hydrated ?? table;
             }),
         [tables, getTableById],
+    );
+
+    const availableTables = useMemo(
+        () => tablesWithResolvedCounts.filter((table) => !isProcessOrderTable(table)),
+        [tablesWithResolvedCounts],
     );
 
     useEffect(() => {
@@ -73,16 +112,21 @@ export default function TableSelection() {
     }, [tablesWithResolvedCounts, loadTableById]);
 
     const filteredTables = useMemo(() => {
-        if (!searchQuery.trim()) return tablesWithResolvedCounts;
+        if (!searchQuery.trim()) return availableTables;
 
         const query = searchQuery.toLowerCase();
-        return tablesWithResolvedCounts.filter(
+        return availableTables.filter(
             (table) =>
                 table.displayName.toLowerCase().includes(query) ||
                 table.name.toLowerCase().includes(query) ||
                 table.description?.toLowerCase().includes(query),
         );
-    }, [searchQuery, tablesWithResolvedCounts]);
+    }, [searchQuery, availableTables]);
+
+    const mainTables = useMemo(
+        () => filteredTables.filter(isMainFormsTable),
+        [filteredTables],
+    );
 
     const categoryBuckets = useMemo(() => {
         return categories
@@ -105,6 +149,7 @@ export default function TableSelection() {
     const hasSelectedCategory = useMemo(
         () =>
             selectedCategoryId === ALL_CATEGORY_ID ||
+            selectedCategoryId === MAIN_CATEGORY_ID ||
             categoryBuckets.some(
                 (bucket) => bucket.category.id === selectedCategoryId,
             ),
@@ -116,7 +161,18 @@ export default function TableSelection() {
         : ALL_CATEGORY_ID;
 
     const visibleBuckets =
-        resolvedCategoryId === ALL_CATEGORY_ID
+        resolvedCategoryId === MAIN_CATEGORY_ID
+            ? [
+                  {
+                      category: {
+                          id: MAIN_CATEGORY_ID,
+                          nombre: "Principales",
+                          description: "Items y ordenes de compra",
+                      },
+                      tables: mainTables,
+                  },
+              ].filter((bucket) => bucket.tables.length > 0)
+            : resolvedCategoryId === ALL_CATEGORY_ID
             ? categoryBuckets
             : categoryBuckets.filter(
                   (bucket) => bucket.category.id === resolvedCategoryId,
@@ -161,6 +217,22 @@ export default function TableSelection() {
                         Todas
                         <span className="ml-2 text-xs tabular-nums opacity-80">
                             {filteredTables.length}
+                        </span>
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className={
+                            resolvedCategoryId === MAIN_CATEGORY_ID
+                                ? "rounded-full border-primary/25 bg-primary/10 text-foreground"
+                                : "rounded-full"
+                        }
+                        onClick={() => handleCategorySelect(MAIN_CATEGORY_ID)}
+                    >
+                        Principales
+                        <span className="ml-2 text-xs tabular-nums opacity-80">
+                            {mainTables.length}
                         </span>
                     </Button>
                     {categoryBuckets.map((bucket) => {

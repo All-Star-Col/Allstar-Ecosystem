@@ -65,8 +65,20 @@ const useWorkspace = () => {
 
 // 3️⃣ Componente Dashboard (separado)
 function Dashboard() {
-  const timeString = "09:05";
-  const dateString = "VIERNES, 17 DE ABRIL DE 2026";
+  const [now, setNow] = React.useState(() => new Date());
+  const timeString = now.toLocaleTimeString("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const dateString = now
+    .toLocaleDateString("es-ES", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    })
+    .toUpperCase();
 
   const [selectedTab, setSelectedTab] = React.useState<string>("todas");
 
@@ -77,6 +89,14 @@ function Dashboard() {
 
   const { data: workspaceData } = useWorkspace();
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  React.useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   const [favorites, setFavorites] = React.useState<string[]>(() => {
     const saved = localStorage.getItem("favorite-apps");

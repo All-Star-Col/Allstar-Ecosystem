@@ -270,8 +270,10 @@ describe("Acceptance Criteria Tests", () => {
             fireEvent.change(searchInput, { target: { value: "  proDUCtion  " } });
 
             expect(screen.getByText("Production")).toBeInTheDocument();
-            expect(screen.queryByText("Inventory")).not.toBeInTheDocument();
-            expect(screen.queryByText("Orders")).not.toBeInTheDocument();
+            await waitFor(() => {
+                expect(screen.queryByText("Inventory")).not.toBeInTheDocument();
+                expect(screen.queryByText("Orders")).not.toBeInTheDocument();
+            });
         });
     });
 
@@ -288,7 +290,7 @@ describe("Acceptance Criteria Tests", () => {
             );
 
             expect(screen.getByText("Notificaciones")).toBeInTheDocument();
-            expect(screen.getByText("proximamente")).toBeInTheDocument();
+            expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
         });
 
         it("Footer settings button opens modal with proximamente message", () => {
@@ -302,8 +304,8 @@ describe("Acceptance Criteria Tests", () => {
                 screen.getByRole("button", { name: /Abrir configuracion/i }),
             );
 
-            expect(screen.getByText("Configuracion")).toBeInTheDocument();
-            expect(screen.getByText("proximamente")).toBeInTheDocument();
+            expect(screen.getByText("Configuración")).toBeInTheDocument();
+            expect(screen.getByText(/próximamente/i)).toBeInTheDocument();
         });
     });
 

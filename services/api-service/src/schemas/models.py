@@ -232,10 +232,12 @@ class TableData(BaseModel):
 
 
 class SubmitForm(BaseModel):
+    # Accept either a plain table name or schema.table (e.g. "tela" or "data.tela")
     table_name: str = Field(
         min_length=1,
-        max_length=63,
-        pattern=r"^[A-Za-z_][A-Za-z0-9_]*$",
+        # allow optional schema + dot + table (each identifier up to 63 chars)
+        max_length=127,
+        pattern=r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)?[A-Za-z_][A-Za-z0-9_]*$",
     )
     data: List[TableData]
 

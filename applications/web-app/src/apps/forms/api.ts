@@ -415,3 +415,60 @@ export async function submitFormData(
         throw error;
     }
 }
+
+/*
+ * Fetch next consecutive numeric value for a given table/column
+ */
+export async function fetchNextConsecutive(
+    tableName: string,
+    columnName: string,
+): Promise<{ next: number }> {
+    const token = getToken();
+    const headers: HeadersInit = {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+
+    const url = `${API_SERVER}/workspace/forms/next-consecutive/${encodeURIComponent(
+        tableName,
+    )}/${encodeURIComponent(columnName)}`;
+
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+        throw new Error(`Failed to fetch next consecutive: ${resp.statusText}`);
+    }
+    return (await resp.json()) as { next: number };
+}
+
+/*
+ * Fetch unassigned orders (orders without legacy item) for a table
+ */
+export async function fetchUnassignedOrders(params: {
+    tableName: string;
+    orderColumn: string;
+    clientColumn: string;
+    legacyColumn: string;
+    q?: string | null;
+    limit?: number;
+    offset?: number;
+}): Promise<{ items: { value: string; order?: string; label: string; client: string; product?: string; quantity?: string; count?: number }[]; has_more: boolean }>{
+    const token = getToken();
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const searchParams = new URLSearchParams({
+        table_name: params.tableName,
+        order_column: params.orderColumn,
+        client_column: params.clientColumn,
+        legacy_column: params.legacyColumn,
+    });
+    if (params.q) searchParams.set("q", params.q);
+    if (params.limit) searchParams.set("limit", String(params.limit));
+    if (params.offset) searchParams.set("offset", String(params.offset));
+
+    const url = `${API_SERVER}/workspace/forms/unassigned-orders?${searchParams.toString()}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+        throw new Error(`Failed to fetch unassigned orders: ${resp.statusText}`);
+    }
+    const payload = await resp.json();
+    return payload as { items: { value: string; order?: string; label: string; client: string; product?: string; quantity?: string; count?: number }[]; has_more: boolean };
+}

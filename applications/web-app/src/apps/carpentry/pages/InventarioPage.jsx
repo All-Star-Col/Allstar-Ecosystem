@@ -7,10 +7,11 @@ import useToast from '../utils/useToast';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 
 const initialMovimiento = {
+  categoria: '',
   material_id: '',
   tipo: 'entrada',
   cantidad: '',
-  fecha: '',
+  fecha: new Date().toISOString().slice(0, 10),
   referencia: '',
   proyecto_id: '',
   lote_id: '',
@@ -115,6 +116,13 @@ export default function InventarioPage() {
     () => materiales.map((m) => ({ value: m.id, label: m.nombre })),
     [materiales]
   );
+
+  const registroMaterialOptions = useMemo(() => {
+    const cat = movimiento.categoria;
+    return materiales
+      .filter((m) => (cat ? String(m.categoria) === String(cat) : true))
+      .map((m) => ({ value: m.id, label: m.nombre }));
+  }, [materiales, movimiento.categoria]);
   const proyectoOptions = useMemo(
     () => proyectos.map((p) => ({ value: String(p.id), label: p.nombre })),
     [proyectos]
@@ -369,25 +377,30 @@ export default function InventarioPage() {
           {showRegistroSection && (
             <form className="form-grid touch-form inventory-movement-form" onSubmit={guardarMovimiento}>
               <div className="field field-full">
+                <label>Categoria</label>
+                <select
+                  value={movimiento.categoria}
+                  onChange={(e) => setMovimiento((prev) => ({ ...prev, categoria: e.target.value, material_id: '' }))}
+                >
+                  <option value="">Seleccionar categoría</option>
+                  <option value="tablero">tablero</option>
+                  <option value="canto">canto</option>
+                  <option value="herraje">herraje</option>
+                </select>
+              </div>
+              <div className="field field-full">
                 <label>{dbLabel('material_id')}</label>
                 <SearchableSelect
-                  options={materialOptions}
+                  options={registroMaterialOptions}
                   value={movimiento.material_id}
                   onChange={(v) => setMovimiento((prev) => ({ ...prev, material_id: v }))}
                   placeholder="Escribe para buscar material..."
-                  disabled={!materialOptions.length}
+                  disabled={!registroMaterialOptions.length}
                 />
               </div>
               <div className="field">
                 <label>Tipo</label>
-                <select
-                  value={movimiento.tipo}
-                  onChange={(e) => setMovimiento((m) => ({ ...m, tipo: e.target.value }))}
-                >
-                  <option value="entrada">entrada</option>
-                  <option value="salida">salida</option>
-                  <option value="ajuste">ajuste</option>
-                </select>
+                <input type="text" value="entrada" readOnly />
               </div>
               <div className="field">
                 <label>{dbLabel('cantidad')}</label>
@@ -409,32 +422,7 @@ export default function InventarioPage() {
                   onChange={(e) => setMovimiento((m) => ({ ...m, fecha: e.target.value }))}
                 />
               </div>
-              <div className="field">
-                <label>{dbLabel('referencia')}</label>
-                <input
-                  value={movimiento.referencia}
-                  onChange={(e) => setMovimiento((m) => ({ ...m, referencia: e.target.value }))}
-                  placeholder={dbLabel('referencia')}
-                />
-              </div>
-              <div className="field">
-                <label>{dbLabel('proyecto_id')}</label>
-                <SearchableSelect
-                  options={proyectoOptions}
-                  value={movimiento.proyecto_id}
-                  onChange={(v) => setMovimiento((m) => ({ ...m, proyecto_id: v }))}
-                  placeholder={`Buscar ${dbLabel('proyecto_id')}...`}
-                />
-              </div>
-              <div className="field">
-                <label>{dbLabel('lote_id')}</label>
-                <SearchableSelect
-                  options={loteOptions}
-                  value={movimiento.lote_id}
-                  onChange={(v) => setMovimiento((m) => ({ ...m, lote_id: v }))}
-                  placeholder={`Buscar ${dbLabel('lote_id')}...`}
-                />
-              </div>
+              {/* Referencia / Proyecto / Lote removed for simplified entry-only flow */}
               <div className="field">
                 <label>{dbLabel('responsable_id')}</label>
                 <SearchableSelect

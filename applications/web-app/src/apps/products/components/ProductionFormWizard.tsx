@@ -146,7 +146,7 @@ const extractOCInterno = (subject: string, body?: string): string => {
 
 const extractCantidadProducto = (subject: string, body?: string): string => {
     const source = `${subject || ""}\n${body || ""}`;
-    const qtyMatch = source.match(/\b(?:cantidad|cant)\s*[:\-]?\s*(\d+)\b/i);
+    const qtyMatch = source.match(/\b(?:cantidad|cant)\s*[:-]?\s*(\d+)\b/i);
     if (qtyMatch?.[1]) {
         return qtyMatch[1];
     }

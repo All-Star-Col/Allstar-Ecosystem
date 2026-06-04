@@ -1,5 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 
 from src.core.logging_config import setup_logging, get_logger
 
@@ -21,6 +24,27 @@ from src.core.config import settings
 from src.core.scheduler import scheduler
 
 app = FastAPI(title="AllStar Platform API")
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+
+    logger.error(
+        "Request validation error path=%s method=%s body=%s errors=%s",
+        request.url.path,
+        request.method,
+        body,
+        exc.errors(),
+    )
+
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder({"detail": exc.errors(), "body": body}),
+    )
 
 app.add_middleware(
     CORSMiddleware,

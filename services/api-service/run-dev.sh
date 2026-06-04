@@ -14,4 +14,18 @@ if [[ -z "${BW_ACCESS_TOKEN:-}" ]]; then
   exit 1
 fi
 
+if docker container inspect allstar-api-dev >/dev/null 2>&1; then
+  echo "Recreating existing allstar-api-dev container."
+  docker rm -f allstar-api-dev >/dev/null
+fi
+
+PORT_80_CONTAINER="$(docker ps --filter publish=80 --format '{{.Names}}' | head -n 1 || true)"
+
+if [[ -n "${PORT_80_CONTAINER}" ]]; then
+  echo "Port 80 is already used by Docker container: ${PORT_80_CONTAINER}"
+  echo "Stop that container first. Docker cannot publish two containers on the same host port."
+  exit 1
+fi
+
+echo "Starting API on http://localhost"
 docker compose up --build "$@"

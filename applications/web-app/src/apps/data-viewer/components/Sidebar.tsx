@@ -20,6 +20,99 @@ interface SidebarProps {
     showBackButton?: boolean;
 }
 
+const TABLE_GROUPS = [
+    {
+        key: "active",
+        title: "Activo",
+        order: [
+            "ordenes de compra pendientes",
+            "orden proceso en proceso",
+            "items en proceso",
+        ],
+    },
+    {
+        key: "history",
+        title: "Historial",
+        order: [
+            "ordenes de compra finalizadas",
+            "items finalizados",
+            "orden proceso finalizado",
+            "orden proceso finalizados",
+            "historial consumo material",
+            "historial consumo tela",
+        ],
+    },
+    {
+        key: "general",
+        title: "Datos generales",
+        order: [],
+    },
+] as const;
+
+type TableGroupKey = (typeof TABLE_GROUPS)[number]["key"];
+
+function normalizeTableText(value: string): string {
+    return value
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+}
+
+function getTableGroupKey(table: SidebarTableItem): TableGroupKey {
+    const label = normalizeTableText(table.displayName);
+    const id = normalizeTableText(table.id);
+
+    if (
+        id === "ordencompra_finalizadas" ||
+        id === "items_finalizados" ||
+        id === "ordenproceso_finalizados" ||
+        id === "historialconsumomaterial" ||
+        id === "historialconsumotela" ||
+        label === "ordenes de compra finalizadas" ||
+        label === "items finalizados" ||
+        label === "orden proceso finalizado" ||
+        label === "orden proceso finalizados" ||
+        label === "historial consumo material" ||
+        label === "historial consumo tela"
+    ) {
+        return "history";
+    }
+
+    if (
+        id === "ordencompra" ||
+        id === "items_en_proceso" ||
+        id === "ordenproceso" ||
+        label === "ordenes de compra pendientes" ||
+        label === "orden proceso en proceso" ||
+        label === "items en proceso"
+    ) {
+        return "active";
+    }
+
+    return "general";
+}
+
+function sortTablesInGroup(
+    tables: SidebarTableItem[],
+    order: readonly string[],
+): SidebarTableItem[] {
+    if (order.length === 0) {
+        return tables;
+    }
+
+    const orderIndex = new Map(order.map((label, index) => [label, index]));
+    return [...tables].sort((a, b) => {
+        const aIndex = orderIndex.get(normalizeTableText(a.displayName)) ?? order.length;
+        const bIndex = orderIndex.get(normalizeTableText(b.displayName)) ?? order.length;
+        if (aIndex !== bIndex) {
+            return aIndex - bIndex;
+        }
+
+        return a.displayName.localeCompare(b.displayName, "es");
+    });
+}
+
 export function Sidebar({
     tables,
     title = "Data Viewer Pro",
@@ -46,6 +139,19 @@ export function Sidebar({
             );
         });
     }, [searchQuery, tables]);
+
+    const groupedTables = useMemo(() => {
+        return TABLE_GROUPS.map((group) => {
+            const groupTables = filteredTables.filter(
+                (table) => getTableGroupKey(table) === group.key,
+            );
+
+            return {
+                ...group,
+                tables: sortTablesInGroup(groupTables, group.order),
+            };
+        }).filter((group) => group.tables.length > 0);
+    }, [filteredTables]);
 
     const handleBack = () => {
         if (onBack) {
@@ -91,36 +197,45 @@ export function Sidebar({
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4">
-                <div className="space-y-2">
-                    {filteredTables.map((table) => {
-                        const isActive = activeTable === table.id;
-                        const isBlocked = Boolean(table.disabledReason);
+                <div className="space-y-5">
+                    {groupedTables.map((group) => (
+                        <section key={group.key} className="space-y-2">
+                            <h2 className="px-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                {group.title}
+                            </h2>
+                            <div className="space-y-2">
+                                {group.tables.map((table) => {
+                                    const isActive = activeTable === table.id;
+                                    const isBlocked = Boolean(table.disabledReason);
 
-                        return (
-                            <button
-                                key={table.id}
-                                onClick={() => onTableSelect(table.id)}
-                                className={cn(
-                                    "w-full text-left px-4 py-3 rounded-xl transition-all border",
-                                    isActive
-                                        ? "bg-primary/8 text-foreground border-primary/25 shadow-sm"
-                                        : "bg-card text-muted-foreground border-border/70 hover:bg-primary/5 hover:text-foreground",
-                                )}
-                            >
-                                <div className="flex items-center justify-center">
-                                    <span className="text-sm font-medium text-inherit">
-                                        {table.displayName}
-                                    </span>
-                                </div>
-                                {isBlocked && (
-                                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-warning/10 border border-warning/20 px-2 py-0.5 text-[11px] text-warning-foreground">
-                                        <AlertTriangle className="w-3 h-3" />
-                                        <span>Requiere ajuste backend</span>
-                                    </div>
-                                )}
-                            </button>
-                        );
-                    })}
+                                    return (
+                                        <button
+                                            key={table.id}
+                                            onClick={() => onTableSelect(table.id)}
+                                            className={cn(
+                                                "w-full text-left px-4 py-3 rounded-xl transition-all border",
+                                                isActive
+                                                    ? "bg-primary/8 text-foreground border-primary/25 shadow-sm"
+                                                    : "bg-card text-muted-foreground border-border/70 hover:bg-primary/5 hover:text-foreground",
+                                            )}
+                                        >
+                                            <div className="flex items-center justify-center">
+                                                <span className="text-sm font-medium text-inherit">
+                                                    {table.displayName}
+                                                </span>
+                                            </div>
+                                            {isBlocked && (
+                                                <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-warning/10 border border-warning/20 px-2 py-0.5 text-[11px] text-warning-foreground">
+                                                    <AlertTriangle className="w-3 h-3" />
+                                                    <span>Requiere ajuste backend</span>
+                                                </div>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </section>
+                    ))}
                 </div>
 
                 {filteredTables.length === 0 && (

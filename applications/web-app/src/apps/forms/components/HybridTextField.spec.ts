@@ -4,49 +4,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ColumnSchema } from "../schema";
 import { HybridTextField } from "./HybridTextField";
-import { fetchForeignKeyLookup } from "../api";
+import { fetchColumnValues } from "../api";
 
 vi.mock("../api", () => ({
-    fetchForeignKeyLookup: vi.fn(),
-}));
-
-vi.mock("@/shared/ui/select", () => ({
-    Select: ({
-        value,
-        onValueChange,
-        children,
-    }: {
-        value?: string;
-        onValueChange?: (value: string) => void;
-        children: React.ReactNode;
-    }) =>
-        React.createElement(
-            "select",
-            {
-                "aria-label": "hybrid-select",
-                value,
-                onChange: (event: React.ChangeEvent<HTMLSelectElement>) =>
-                    onValueChange?.(event.target.value),
-            },
-            children,
-        ),
-    SelectTrigger: ({ children }: { children: React.ReactNode }) =>
-        React.createElement(React.Fragment, null, children),
-    SelectValue: ({ placeholder }: { placeholder?: string }) =>
-        React.createElement(
-            "option",
-            { value: "" },
-            placeholder ?? "Selecciona...",
-        ),
-    SelectContent: ({ children }: { children: React.ReactNode }) =>
-        React.createElement(React.Fragment, null, children),
-    SelectItem: ({
-        value,
-        children,
-    }: {
-        value: string;
-        children: React.ReactNode;
-    }) => React.createElement("option", { value }, children),
+    fetchColumnValues: vi.fn(),
 }));
 
 vi.mock("@/shared/ui/button", () => ({
@@ -59,7 +20,7 @@ vi.mock("@/shared/ui/button", () => ({
     }) => React.createElement("button", props, children),
 }));
 
-const mockedFetchForeignKeyLookup = vi.mocked(fetchForeignKeyLookup);
+const mockedFetchColumnValues = vi.mocked(fetchColumnValues);
 
 const BASE_COLUMN: ColumnSchema = {
     name: "nombre",
@@ -67,12 +28,19 @@ const BASE_COLUMN: ColumnSchema = {
     placeholder: "Escribe un nombre",
 };
 
+class MockResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+
 describe("HybridTextField", () => {
     beforeEach(() => {
-        mockedFetchForeignKeyLookup.mockReset();
-        mockedFetchForeignKeyLookup.mockResolvedValue([
+        globalThis.ResizeObserver = MockResizeObserver;
+        mockedFetchColumnValues.mockReset();
+        mockedFetchColumnValues.mockResolvedValue([
             { value: "1", label: "Lino" },
-            { value: "2", label: "Algodón" },
+            { value: "2", label: "Algodon" },
         ]);
     });
 
@@ -89,16 +57,22 @@ describe("HybridTextField", () => {
         );
 
         expect(screen.getByText("Selección")).toBeInTheDocument();
-        expect(screen.getByLabelText("Buscar valor existente")).toBeInTheDocument();
+        const combobox = screen.getByLabelText("Buscar valor existente");
+        expect(combobox).toBeInTheDocument();
 
-        await waitFor(() => {
-            expect(mockedFetchForeignKeyLookup).toHaveBeenCalledWith({
-                tableName: "material",
-                columnName: "nombre",
-                query: "",
-                limit: 30,
-            });
-        }, { timeout: 1500 });
+        fireEvent.click(combobox);
+
+        await waitFor(
+            () => {
+                expect(mockedFetchColumnValues).toHaveBeenCalledWith({
+                    tableName: "material",
+                    columnName: "nombre",
+                    query: "",
+                    limit: 30,
+                });
+            },
+            { timeout: 1500 },
+        );
     });
 
     it("toggles to free text mode and renders a text input", () => {
@@ -117,7 +91,7 @@ describe("HybridTextField", () => {
         expect(screen.getByPlaceholderText("Escribe un nombre")).toBeInTheDocument();
     });
 
-    it("emits selected label string (not id) in selection mode", async () => {
+    it("emits selected value in selection mode", async () => {
         const onChange = vi.fn();
 
         render(
@@ -129,15 +103,18 @@ describe("HybridTextField", () => {
             }),
         );
 
-        await waitFor(() => {
-            expect(screen.getByRole("option", { name: "Lino" })).toBeInTheDocument();
-        }, { timeout: 1500 });
+        fireEvent.click(screen.getByLabelText("Buscar valor existente"));
 
-        fireEvent.change(screen.getByLabelText("hybrid-select"), {
-            target: { value: "Lino" },
-        });
+        await waitFor(
+            () => {
+                expect(screen.getByRole("option", { name: "Lino" })).toBeInTheDocument();
+            },
+            { timeout: 1500 },
+        );
 
-        expect(onChange).toHaveBeenCalledWith("Lino");
+        fireEvent.click(screen.getByRole("option", { name: "Lino" }));
+
+        expect(onChange).toHaveBeenCalledWith("1");
     });
 
     it("emits typed string in free text mode", () => {

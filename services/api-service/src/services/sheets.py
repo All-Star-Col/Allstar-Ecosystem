@@ -1,5 +1,6 @@
 import os
 import pyodbc
+import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -7,6 +8,8 @@ from fastapi.concurrency import run_in_threadpool
 from typing import List, Tuple, Optional, Any
 import json
 from zoneinfo import ZoneInfo
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.logging_config import get_logger
@@ -14,6 +17,409 @@ from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 _EXTERNAL_LOCATIONS = {"Tienda Bucaramanga", "Nihao Principal", "Tienda Unicentro"}
+DATA_SCHEMA = "data"
+FINALIZED_ORDER_STATUS_VALUES = (
+    "finalizado",
+    "finalizada",
+    "finalizados",
+    "finalizadas",
+    "completado",
+    "completada",
+    "completados",
+    "completadas",
+    "terminado",
+    "terminada",
+    "terminados",
+    "terminadas",
+)
+ITEM_TABLE_CANDIDATES = ("item", "items")
+ORDER_TABLE_CANDIDATES = ("ordencompra", "orden_compra", "ordenes_compra")
+PRODUCT_TABLE_CANDIDATES = ("producto", "productos")
+CLIENT_TABLE_CANDIDATES = ("cliente", "clientes")
+FABRIC_TABLE_CANDIDATES = ("tela", "telas")
+FABRIC_REFERENCE_TABLE_CANDIDATES = (
+    "referenciatela",
+    "referencia_tela",
+    "referencias_tela",
+    "referencia_telas",
+)
+ITEM_LEGACY_COLUMN_CANDIDATES = ("item_legado", "id_item_legado", "coditem", "item")
+ITEM_ORDER_COLUMN_CANDIDATES = (
+    "id_orden_compra",
+    "orden_compra_id",
+    "ordencompra_id",
+    "orden_compra",
+    "ordencompra",
+    "id_oc",
+    "oc_id",
+    "oc",
+)
+ITEM_FABRIC_COLUMN_CANDIDATES = (
+    "id_tela",
+    "tela_id",
+    "tela",
+    "id_referencia_tela",
+    "referencia_tela_id",
+    "referencia_tela",
+)
+ITEM_FABRIC_NAME_COLUMN_CANDIDATES = ("id_tela", "tela_id", "tela")
+ITEM_FABRIC_REFERENCE_COLUMN_CANDIDATES = (
+    "id_referencia_tela",
+    "referencia_tela_id",
+    "referencia_tela",
+    "id_referenciatela",
+    "referenciatela_id",
+    "referenciatela",
+)
+ORDER_STATUS_COLUMN_CANDIDATES = (
+    "estado",
+    "status",
+    "estado_oc",
+    "estado_orden",
+    "estado_orden_compra",
+)
+ORDER_CLIENT_ORDER_COLUMN_CANDIDATES = (
+    "oc_cliente",
+    "cod_oc_cliente",
+    "codoccliente",
+    "orden_cliente",
+    "orden_compra_cliente",
+    "numero_orden",
+    "orden",
+    "oc",
+    "id_orden_compra",
+)
+ORDER_CLIENT_COLUMN_CANDIDATES = (
+    "id_cliente",
+    "cliente_id",
+    "cliente",
+    "clientes",
+    "nombre_cliente",
+    "razon_social",
+)
+ORDER_PRODUCT_COLUMN_CANDIDATES = (
+    "id_producto",
+    "producto_id",
+    "producto",
+    "productos",
+    "producto_nombre",
+    "nombre_producto",
+    "referencia",
+    "sku",
+)
+ORDER_QUANTITY_COLUMN_CANDIDATES = (
+    "cantidad",
+    "quantity",
+    "qty",
+    "cant",
+    "unidades",
+    "piezas",
+    "numero_items",
+    "num_items",
+)
+PRODUCT_NAME_COLUMN_CANDIDATES = ("nombre", "producto", "descripcion", "referencia", "sku")
+PRODUCT_COST_COLUMN_CANDIDATES = (
+    "costo",
+    "cost",
+    "costo_unitario",
+    "precio_costo",
+    "cost_price",
+    "valor_costo",
+    "precio",
+    "valor",
+)
+LOOKUP_LABEL_COLUMN_CANDIDATES = (
+    "nombre",
+    "name",
+    "descripcion",
+    "description",
+    "tela",
+    "referencia",
+    "cliente",
+    "razon_social",
+)
+
+
+def _quote_identifier(identifier: str) -> str:
+    if not identifier or not identifier.replace("_", "").isalnum() or identifier[0].isdigit():
+        raise ValueError(f"Invalid SQL identifier: {identifier}")
+    return f'"{identifier}"'
+
+
+def _columns_by_name(columns: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        str(column["column_name"]).strip().lower(): dict(column)
+        for column in columns
+        if column.get("column_name")
+    }
+
+
+def _choose_column(
+    columns: list[dict[str, Any]],
+    candidates: tuple[str, ...],
+) -> str | None:
+    available = _columns_by_name(columns)
+    for candidate in candidates:
+        if candidate in available:
+            return str(available[candidate]["column_name"])
+    return None
+
+
+def _clean_product_name(value: Any) -> str:
+    return str(value or "").replace(".", "").strip()
+
+
+def _clean_sheet_text(value: Any) -> str:
+    return str(value or "").replace(".", "").strip().upper()
+
+
+def _normalize_spaces(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _remove_text_fragment(value: str, fragment: str) -> str:
+    if not value or not fragment:
+        return value
+
+    fragment_tokens = [re.escape(token) for token in _normalize_spaces(fragment).split()]
+    if not fragment_tokens:
+        return value
+
+    separator_pattern = r"[\s\-/|]+"
+    fragment_pattern = separator_pattern.join(fragment_tokens)
+    cleaned = re.sub(
+        rf"(?<!\w){fragment_pattern}(?!\w)",
+        " ",
+        value,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s*[-/|]\s*$", " ", cleaned)
+    cleaned = re.sub(r"^\s*[-/|]\s*", " ", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return _normalize_spaces(cleaned.strip(" -/|"))
+
+
+def _split_product_and_fabric(product_value: Any, fabric_value: Any) -> tuple[str, str]:
+    product = _normalize_spaces(_clean_sheet_text(product_value))
+    fabric = _normalize_spaces(_clean_sheet_text(fabric_value))
+
+    if fabric:
+        return _remove_text_fragment(product, fabric), fabric
+
+    for separator in (" - ", " / ", " | "):
+        if separator in product:
+            product_part, fabric_part = product.rsplit(separator, 1)
+            if product_part.strip() and fabric_part.strip():
+                return _normalize_spaces(product_part), _normalize_spaces(fabric_part)
+
+    return product, fabric
+
+
+def _is_finalized_status(value: Any) -> bool:
+    return str(value or "").strip().lower() in FINALIZED_ORDER_STATUS_VALUES
+
+
+async def _get_pg_table_columns(
+    db: AsyncSession,
+    *,
+    schema_name: str,
+    table_name: str,
+) -> list[dict[str, Any]]:
+    result = await db.execute(
+        text(
+            """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema = :schema_name
+              AND table_name = :table_name
+            ORDER BY ordinal_position
+            """
+        ),
+        {"schema_name": schema_name, "table_name": table_name},
+    )
+    return [dict(row) for row in result.mappings().all()]
+
+
+async def _find_pg_table(
+    db: AsyncSession,
+    *,
+    schema_name: str,
+    candidates: tuple[str, ...],
+) -> tuple[str, list[dict[str, Any]]] | tuple[None, list[dict[str, Any]]]:
+    for table_name in candidates:
+        columns = await _get_pg_table_columns(
+            db,
+            schema_name=schema_name,
+            table_name=table_name,
+        )
+        if columns:
+            return table_name, columns
+    return None, []
+
+
+async def _get_pg_foreign_keys(
+    db: AsyncSession,
+    *,
+    schema_name: str,
+    table_name: str,
+) -> dict[str, dict[str, str]]:
+    result = await db.execute(
+        text(
+            """
+            SELECT
+                kcu.column_name AS source_column,
+                ccu.table_schema AS referenced_schema,
+                ccu.table_name AS referenced_table,
+                ccu.column_name AS referenced_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name
+             AND tc.table_schema = kcu.table_schema
+             AND tc.table_name = kcu.table_name
+            JOIN information_schema.constraint_column_usage ccu
+              ON tc.constraint_name = ccu.constraint_name
+             AND tc.table_schema = ccu.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+              AND tc.table_schema = :schema_name
+              AND tc.table_name = :table_name
+            """
+        ),
+        {"schema_name": schema_name, "table_name": table_name},
+    )
+
+    return {
+        str(row["source_column"]).strip().lower(): {
+            "referenced_schema": str(row["referenced_schema"]).strip(),
+            "referenced_table": str(row["referenced_table"]).strip(),
+            "referenced_column": str(row["referenced_column"]).strip(),
+        }
+        for row in result.mappings().all()
+    }
+
+
+async def _resolve_lookup_expression(
+    db: AsyncSession,
+    *,
+    source_alias: str,
+    source_column: str | None,
+    source_table: str,
+    fallback_tables: tuple[str, ...],
+    fallback_key_candidates: tuple[str, ...],
+    label_candidates: tuple[str, ...],
+    join_alias: str,
+) -> tuple[list[str], str | None]:
+    if not source_column:
+        return [], None
+
+    foreign_keys = await _get_pg_foreign_keys(
+        db,
+        schema_name=DATA_SCHEMA,
+        table_name=source_table,
+    )
+    fk = foreign_keys.get(source_column.lower())
+    ref_table = fk["referenced_table"] if fk else None
+    ref_schema = fk["referenced_schema"] if fk else DATA_SCHEMA
+    ref_key = fk["referenced_column"] if fk else None
+    ref_columns: list[dict[str, Any]] = []
+
+    if ref_table:
+        ref_columns = await _get_pg_table_columns(
+            db,
+            schema_name=ref_schema,
+            table_name=ref_table,
+        )
+    else:
+        found_table, ref_columns = await _find_pg_table(
+            db,
+            schema_name=DATA_SCHEMA,
+            candidates=fallback_tables,
+        )
+        ref_table = found_table
+        ref_key = _choose_column(ref_columns, fallback_key_candidates)
+
+    if not ref_table or not ref_key or not ref_columns:
+        return [], f"{source_alias}.{_quote_identifier(source_column)}::text"
+
+    label_column = _choose_column(ref_columns, label_candidates) or ref_key
+    join_sql = (
+        f"LEFT JOIN {_quote_identifier(ref_schema)}.{_quote_identifier(ref_table)} {join_alias} "
+        f"ON TRIM({join_alias}.{_quote_identifier(ref_key)}::text) = "
+        f"TRIM({source_alias}.{_quote_identifier(source_column)}::text)"
+    )
+    expression = (
+        f"COALESCE(NULLIF(TRIM({join_alias}.{_quote_identifier(label_column)}::text), ''), "
+        f"{source_alias}.{_quote_identifier(source_column)}::text)"
+    )
+    return [join_sql], expression
+
+
+async def _resolve_tela_lookup_expression(
+    db: AsyncSession,
+    *,
+    source_alias: str,
+    source_column: str | None,
+    source_table: str,
+    join_alias: str,
+) -> tuple[list[str], str | None]:
+    if not source_column:
+        return [], None
+
+    foreign_keys = await _get_pg_foreign_keys(
+        db,
+        schema_name=DATA_SCHEMA,
+        table_name=source_table,
+    )
+    fk = foreign_keys.get(source_column.lower())
+    ref_table = fk["referenced_table"] if fk else None
+    ref_schema = fk["referenced_schema"] if fk else DATA_SCHEMA
+    ref_key = fk["referenced_column"] if fk else None
+    ref_columns: list[dict[str, Any]] = []
+
+    if ref_table:
+        ref_columns = await _get_pg_table_columns(
+            db,
+            schema_name=ref_schema,
+            table_name=ref_table,
+        )
+    else:
+        ref_table, ref_columns = await _find_pg_table(
+            db,
+            schema_name=DATA_SCHEMA,
+            candidates=FABRIC_TABLE_CANDIDATES,
+        )
+        ref_key = _choose_column(ref_columns, ("id", "id_tela", "tela_id", "codigo", "codigo_tela"))
+
+    if not ref_table or not ref_key or not ref_columns:
+        return [], f"{source_alias}.{_quote_identifier(source_column)}::text"
+
+    join_sql = (
+        f"LEFT JOIN {_quote_identifier(ref_schema)}.{_quote_identifier(ref_table)} {join_alias} "
+        f"ON TRIM({join_alias}.{_quote_identifier(ref_key)}::text) = "
+        f"TRIM({source_alias}.{_quote_identifier(source_column)}::text)"
+    )
+
+    columns_by_name = _columns_by_name(ref_columns)
+    nombre_column = columns_by_name.get("nombre")
+    referencia_column = columns_by_name.get("referencia")
+    if ref_table in FABRIC_TABLE_CANDIDATES and nombre_column and referencia_column:
+        expression = (
+            "COALESCE(NULLIF(CONCAT_WS(' ', "
+            f"NULLIF(TRIM({join_alias}.{_quote_identifier(str(nombre_column['column_name']))}::text), ''), "
+            f"NULLIF(TRIM({join_alias}.{_quote_identifier(str(referencia_column['column_name']))}::text), '')"
+            "), ''), "
+            f"{source_alias}.{_quote_identifier(source_column)}::text)"
+        )
+        return [join_sql], expression
+
+    label_column = _choose_column(
+        ref_columns,
+        ("tela", "nombre", "descripcion", "referencia", "codigo"),
+    ) or ref_key
+    expression = (
+        f"COALESCE(NULLIF(TRIM({join_alias}.{_quote_identifier(label_column)}::text), ''), "
+        f"{source_alias}.{_quote_identifier(source_column)}::text)"
+    )
+    return [join_sql], expression
 
 
 class SheetsService:
@@ -441,13 +847,411 @@ class SheetsService:
     #   POST | /new/{item}
     #_________________________________________________________
 
-    async def new_item(self, item: int):
+    async def new_item(self, item: int, db: AsyncSession | None = None):
         """
         new_item()
-        Wrapper asincrono de new_item_sync.
+        Agrega un item a INVENTARIO consultando allstar_db.
             - item:int | codigo del item a agregar en INVENTARIO
         """
-        return await run_in_threadpool(self.new_item_sync, item)
+        if db is None:
+            logger.error("new_item requiere AsyncSession para consultar allstar_db")
+            return 500
+
+        service = self.get_google_service()
+        if not service:
+            return 404
+
+        try:
+            item_payload = await self._get_production_item_from_allstar_db(db, item)
+            if not item_payload:
+                return 404
+
+            item_code = str(item_payload["item_legado"])
+            sheet_api = service.spreadsheets()
+
+            exists_in_inventory = await run_in_threadpool(
+                self._sheet_column_contains,
+                sheet_api,
+                self.SHEET_NAME_INV,
+                "A:A",
+                item_code,
+            )
+            if exists_in_inventory:
+                return 409
+
+            exists_in_dispatch = await run_in_threadpool(
+                self._sheet_column_contains,
+                sheet_api,
+                self.SHEET_NAME_DISPATCH,
+                "A:A",
+                item_code,
+            )
+            if exists_in_dispatch:
+                return 409
+
+            producto, tela = _split_product_and_fabric(
+                item_payload["producto"],
+                item_payload["tela"],
+            )
+
+            new_row = [
+                item_code,
+                producto,
+                tela,
+                _clean_sheet_text(item_payload["cliente"]),
+                _clean_sheet_text(item_payload["orden_cliente"]),
+                "Bodega 1 / Piso 1",
+                "1",
+                item_payload["valor_producto"],
+                "",
+            ]
+
+            await run_in_threadpool(
+                self._append_inventory_row,
+                sheet_api,
+                new_row,
+            )
+
+            await self._finalize_order_if_complete(
+                db,
+                sheet_api,
+                order_table=item_payload["order_table"],
+                order_status_column=item_payload["order_status_column"],
+                order_pk_column=item_payload["order_pk_column"],
+                order_pk_value=item_payload["order_pk_value"],
+                order_quantity=item_payload["order_quantity"],
+                order_client_value=item_payload["orden_cliente"],
+            )
+
+            self.sheets_logs_sync(
+                item_code,
+                "Ingreso Produccion",
+                f"Se ingresa el item {item_code} desde allstar_db",
+                "Se finalizo la produccion del item, se reviso el estado y ahora hace parte del inventario",
+            )
+
+            return 200
+        except Exception as e:
+            logger.exception(f"Error agregando item desde allstar_db: {e}")
+            return 500
+
+    def _sheet_column_contains(
+        self,
+        sheet_api: Any,
+        sheet_name: str,
+        column_range: str,
+        expected_value: str,
+    ) -> bool:
+        result = (
+            sheet_api.values()
+            .get(
+                spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
+                range=f"{sheet_name}!{column_range}",
+            )
+            .execute()
+        )
+        for row in result.get("values", []):
+            if row and str(row[0]).strip() == expected_value:
+                return True
+        return False
+
+    def _append_inventory_row(self, sheet_api: Any, new_row: list[Any]) -> None:
+        sheet_api.values().append(
+            spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
+            range=f"{self.SHEET_NAME_INV}!A:I",
+            valueInputOption="USER_ENTERED",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [new_row]},
+        ).execute()
+
+    def _count_loaded_order_items(self, sheet_api: Any, order_client_value: str) -> int:
+        total = 0
+        for sheet_name in (self.SHEET_NAME_INV, self.SHEET_NAME_DISPATCH):
+            result = (
+                sheet_api.values()
+                .get(
+                    spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
+                    range=f"{sheet_name}!E:E",
+                )
+                .execute()
+            )
+            total += sum(
+                1
+                for row in result.get("values", [])
+                if row and str(row[0]).strip() == str(order_client_value).strip()
+            )
+        return total
+
+    async def _get_production_item_from_allstar_db(
+        self,
+        db: AsyncSession,
+        item: int,
+    ) -> dict[str, Any] | None:
+        item_table, item_columns = await _find_pg_table(
+            db,
+            schema_name=DATA_SCHEMA,
+            candidates=ITEM_TABLE_CANDIDATES,
+        )
+        order_table, order_columns = await _find_pg_table(
+            db,
+            schema_name=DATA_SCHEMA,
+            candidates=ORDER_TABLE_CANDIDATES,
+        )
+        if not item_table or not order_table:
+            return None
+
+        item_legacy_column = _choose_column(item_columns, ITEM_LEGACY_COLUMN_CANDIDATES)
+        item_order_column = _choose_column(item_columns, ITEM_ORDER_COLUMN_CANDIDATES)
+        item_fabric_column = _choose_column(item_columns, ITEM_FABRIC_NAME_COLUMN_CANDIDATES)
+        item_fabric_reference_column = _choose_column(
+            item_columns,
+            ITEM_FABRIC_REFERENCE_COLUMN_CANDIDATES,
+        )
+        if not item_fabric_column:
+            item_fabric_column = _choose_column(item_columns, ITEM_FABRIC_COLUMN_CANDIDATES)
+        order_status_column = _choose_column(order_columns, ORDER_STATUS_COLUMN_CANDIDATES)
+        order_client_order_column = _choose_column(
+            order_columns,
+            ORDER_CLIENT_ORDER_COLUMN_CANDIDATES,
+        )
+        order_client_column = _choose_column(order_columns, ORDER_CLIENT_COLUMN_CANDIDATES)
+        order_product_column = _choose_column(order_columns, ORDER_PRODUCT_COLUMN_CANDIDATES)
+        order_quantity_column = _choose_column(order_columns, ORDER_QUANTITY_COLUMN_CANDIDATES)
+        if not (
+            item_legacy_column
+            and item_order_column
+            and order_status_column
+            and order_product_column
+        ):
+            return None
+
+        item_fks = await _get_pg_foreign_keys(
+            db,
+            schema_name=DATA_SCHEMA,
+            table_name=item_table,
+        )
+        item_order_fk = item_fks.get(item_order_column.lower())
+        order_pk_column = (
+            item_order_fk["referenced_column"]
+            if item_order_fk and item_order_fk["referenced_table"] == order_table
+            else _choose_column(
+                order_columns,
+                ("id", "id_orden_compra", "ordencompra_id", "orden_compra_id", "oc"),
+            )
+        )
+        if not order_pk_column:
+            return None
+
+        join_clauses: list[str] = []
+        select_expressions: list[str] = [
+            f"i.{_quote_identifier(item_legacy_column)}::text AS item_legado",
+            f"o.{_quote_identifier(order_pk_column)} AS order_pk_value",
+            f"o.{_quote_identifier(order_status_column)}::text AS order_status",
+        ]
+
+        if order_client_order_column:
+            select_expressions.append(
+                f"o.{_quote_identifier(order_client_order_column)}::text AS orden_cliente"
+            )
+        else:
+            select_expressions.append(
+                f"o.{_quote_identifier(order_pk_column)}::text AS orden_cliente"
+            )
+
+        if order_quantity_column:
+            select_expressions.append(
+                f"o.{_quote_identifier(order_quantity_column)}::text AS order_quantity"
+            )
+        else:
+            select_expressions.append("NULL::text AS order_quantity")
+
+        client_joins, client_expr = await _resolve_lookup_expression(
+            db,
+            source_alias="o",
+            source_column=order_client_column,
+            source_table=order_table,
+            fallback_tables=CLIENT_TABLE_CANDIDATES,
+            fallback_key_candidates=("id", "id_cliente", "cliente_id", "codigo", "codigo_cliente"),
+            label_candidates=LOOKUP_LABEL_COLUMN_CANDIDATES,
+            join_alias="client_ref",
+        )
+        join_clauses.extend(client_joins)
+        select_expressions.append(
+            f"{client_expr or 'NULL::text'} AS cliente"
+        )
+
+        product_joins, product_expr = await _resolve_lookup_expression(
+            db,
+            source_alias="o",
+            source_column=order_product_column,
+            source_table=order_table,
+            fallback_tables=PRODUCT_TABLE_CANDIDATES,
+            fallback_key_candidates=("id", "id_producto", "producto_id", "codigo", "codigo_producto", "sku"),
+            label_candidates=PRODUCT_NAME_COLUMN_CANDIDATES,
+            join_alias="product_ref",
+        )
+        join_clauses.extend(product_joins)
+        select_expressions.append(f"{product_expr or 'o.' + _quote_identifier(order_product_column) + '::text'} AS producto")
+
+        product_cost_expr = "NULL::text"
+        product_fabric_expr = None
+        product_table_name = None
+        product_ref_alias = "product_ref"
+        if product_joins:
+            order_fks = await _get_pg_foreign_keys(
+                db,
+                schema_name=DATA_SCHEMA,
+                table_name=order_table,
+            )
+            product_fk = order_fks.get(order_product_column.lower())
+            product_table_name = product_fk["referenced_table"] if product_fk else None
+        if product_table_name:
+            product_columns = await _get_pg_table_columns(
+                db,
+                schema_name=DATA_SCHEMA,
+                table_name=product_table_name,
+            )
+            product_cost_column = _choose_column(product_columns, PRODUCT_COST_COLUMN_CANDIDATES)
+            if product_cost_column:
+                product_cost_expr = f"{product_ref_alias}.{_quote_identifier(product_cost_column)}::text"
+            product_fabric_column = _choose_column(product_columns, ITEM_FABRIC_NAME_COLUMN_CANDIDATES)
+            if product_fabric_column:
+                product_fabric_joins, product_fabric_expr = await _resolve_tela_lookup_expression(
+                    db,
+                    source_alias=product_ref_alias,
+                    source_column=product_fabric_column,
+                    source_table=product_table_name,
+                    join_alias="product_fabric_ref",
+                )
+                join_clauses.extend(product_fabric_joins)
+        select_expressions.append(f"{product_cost_expr} AS valor_producto")
+
+        fabric_joins, fabric_expr = await _resolve_tela_lookup_expression(
+            db,
+            source_alias="i",
+            source_column=item_fabric_column,
+            source_table=item_table,
+            join_alias="fabric_ref",
+        )
+        join_clauses.extend(fabric_joins)
+
+        fabric_reference_expr = None
+        if (
+            item_fabric_reference_column
+            and item_fabric_reference_column != item_fabric_column
+            and not fabric_expr
+        ):
+            fabric_reference_joins, fabric_reference_expr = await _resolve_lookup_expression(
+                db,
+                source_alias="i",
+                source_column=item_fabric_reference_column,
+                source_table=item_table,
+                fallback_tables=FABRIC_REFERENCE_TABLE_CANDIDATES,
+                fallback_key_candidates=(
+                    "id",
+                    "id_referencia_tela",
+                    "referencia_tela_id",
+                    "id_referenciatela",
+                    "codigo",
+                    "codigo_referencia_tela",
+                ),
+                label_candidates=("referencia", "referencia_tela", "nombre", "descripcion", "codigo"),
+                join_alias="fabric_reference_ref",
+            )
+            join_clauses.extend(fabric_reference_joins)
+
+        fabric_parts = []
+        if product_fabric_expr:
+            fabric_parts.append(f"NULLIF(TRIM(({product_fabric_expr})::text), '')")
+        elif fabric_expr:
+            fabric_parts.append(f"NULLIF(TRIM(({fabric_expr})::text), '')")
+        if fabric_reference_expr:
+            fabric_parts.append(f"NULLIF(TRIM(({fabric_reference_expr})::text), '')")
+
+        if len(fabric_parts) > 1:
+            select_expressions.append(f"CONCAT_WS(' ', {', '.join(fabric_parts)}) AS tela")
+        elif fabric_parts:
+            select_expressions.append(f"COALESCE({fabric_parts[0]}, '') AS tela")
+        else:
+            select_expressions.append("NULL::text AS tela")
+
+        status_params = {
+            f"finalized_status_{index}": status
+            for index, status in enumerate(FINALIZED_ORDER_STATUS_VALUES)
+        }
+        status_placeholders = ", ".join(f":finalized_status_{index}" for index in range(len(FINALIZED_ORDER_STATUS_VALUES)))
+        query = text(
+            f"""
+            SELECT {", ".join(select_expressions)}
+            FROM {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(item_table)} i
+            JOIN {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(order_table)} o
+              ON TRIM(i.{_quote_identifier(item_order_column)}::text) = TRIM(o.{_quote_identifier(order_pk_column)}::text)
+            {" ".join(join_clauses)}
+            WHERE TRIM(i.{_quote_identifier(item_legacy_column)}::text) = :item
+              AND (
+                o.{_quote_identifier(order_status_column)} IS NULL
+                OR LOWER(TRIM(o.{_quote_identifier(order_status_column)}::text)) NOT IN ({status_placeholders})
+              )
+            LIMIT 1
+            """
+        )
+        result = await db.execute(query, {"item": str(item), **status_params})
+        row = result.mappings().first()
+        if not row:
+            return None
+
+        return {
+            "item_legado": row["item_legado"],
+            "producto": row["producto"] or "",
+            "tela": row["tela"] or "",
+            "cliente": row["cliente"] or "",
+            "orden_cliente": row["orden_cliente"] or "",
+            "valor_producto": row["valor_producto"] or "",
+            "order_quantity": row["order_quantity"],
+            "order_table": order_table,
+            "order_status_column": order_status_column,
+            "order_pk_column": order_pk_column,
+            "order_pk_value": row["order_pk_value"],
+        }
+
+    async def _finalize_order_if_complete(
+        self,
+        db: AsyncSession,
+        sheet_api: Any,
+        *,
+        order_table: str,
+        order_status_column: str,
+        order_pk_column: str,
+        order_pk_value: Any,
+        order_quantity: Any,
+        order_client_value: str,
+    ) -> None:
+        try:
+            expected_quantity = int(float(str(order_quantity).replace(",", ".").strip()))
+        except Exception:
+            return
+        if expected_quantity <= 0:
+            return
+
+        loaded_quantity = await run_in_threadpool(
+            self._count_loaded_order_items,
+            sheet_api,
+            order_client_value,
+        )
+        if loaded_quantity < expected_quantity:
+            return
+
+        await db.execute(
+            text(
+                f"""
+                UPDATE {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(order_table)}
+                SET {_quote_identifier(order_status_column)} = :status
+                WHERE {_quote_identifier(order_pk_column)} = :order_pk_value
+                """
+            ),
+            {"status": "finalizado", "order_pk_value": order_pk_value},
+        )
+        await db.commit()
 
     def new_item_sync(self, item: int):
         """

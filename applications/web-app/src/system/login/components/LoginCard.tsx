@@ -258,7 +258,7 @@ export const LoginCard: React.FC = () => {
             <GenericInfoModal
                 isOpen={isHelpCenterOpen}
                 onClose={() => setIsHelpCenterOpen(false)}
-                message="El equipo de IT ha sido notificado."
+                message="El equipo de IT ha sido notificado. Te contactaremos pronto."
                 title={"Help Center"}
             />
         </motion.div>

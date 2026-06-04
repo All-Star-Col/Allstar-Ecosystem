@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from "motion/react";
-import { getIconComponent } from "./IconComponent";
+import { iconComponents } from "./IconComponent";
 import { useNavigate } from "react-router-dom";
 import { useState, useCallback, useEffect } from "react";
 import { Star } from "lucide-react";
@@ -75,7 +75,7 @@ export function AppTitle({
         onAccess?.(id);
     }, [id, path, externalUrl, navigate, onAccess]);
 
-    const IconComponent = getIconComponent(icon);
+    const IconComponent = iconComponents[icon] ?? iconComponents.box;
 
     return (
         <motion.div

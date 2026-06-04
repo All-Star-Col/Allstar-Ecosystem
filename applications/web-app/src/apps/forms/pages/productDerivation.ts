@@ -109,6 +109,11 @@ function toPaddedNumericSegment(rawValue: string, width: number): string {
     return digits.slice(-width).padStart(width, "0");
 }
 
+function resolveSkuSourceValue(label: string, normalizedValue: string): string {
+    const labelCode = label.trim().match(/^(\d+)/)?.[1];
+    return labelCode || normalizedValue;
+}
+
 export function toProductSkuSubmit(value: unknown): string {
     if (value === undefined || value === null) {
         return "";
@@ -155,7 +160,10 @@ export function deriveProductFields(
             labels.push(label);
         }
 
-        return toPaddedNumericSegment(normalizedValue, width);
+        return toPaddedNumericSegment(
+            resolveSkuSourceValue(label, normalizedValue),
+            width,
+        );
     });
 
     return {

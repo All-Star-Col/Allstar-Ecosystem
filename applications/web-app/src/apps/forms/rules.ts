@@ -111,6 +111,16 @@ export function isProductDerivedColumn(
     return isProductDerivedColumnName(columnName);
 }
 
+export function shouldUseProductModificationDateTimeField(
+    tableName: string | undefined,
+    columnName: string,
+): boolean {
+    return (
+        isProductTable(tableName) &&
+        normalizeIdentifier(columnName) === "fecha_modificacion"
+    );
+}
+
 export function shouldUseHybridTextField(
     tableName: string | undefined,
     columnName: string,

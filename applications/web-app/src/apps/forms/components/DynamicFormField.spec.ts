@@ -282,6 +282,26 @@ describe("DynamicFormField producto derived fields", () => {
         const input = screen.getByDisplayValue("Base Modelo Referencia Tela");
         expect(input).toHaveAttribute("readonly");
     });
+
+    it("renders fecha_modificacion as date-time input in producto tables", () => {
+        const onChange = vi.fn();
+        const column: ColumnSchema = {
+            name: "fecha_modificacion",
+            type: "date",
+        };
+
+        render(
+            React.createElement(DynamicFormField, {
+                tableName: "data.productos",
+                column,
+                value: "2026-06-04T15:30",
+                onChange,
+            }),
+        );
+
+        const input = screen.getByDisplayValue("2026-06-04T15:30");
+        expect(input).toHaveAttribute("type", "datetime-local");
+    });
 });
 
 describe("DynamicFormField foreign key", () => {
