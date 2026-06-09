@@ -273,6 +273,27 @@ async def _get_user_role_id(db: AsyncSession, *, user_id: str) -> str | None:
     return str(role_id) if role_id is not None else None
 
 
+async def _get_user_role_context(db: AsyncSession, *, user_id: str) -> dict[str, str] | None:
+    query = text(
+        """
+        SELECT r.id AS role_id, r.code AS role_code
+        FROM auth.user_roles ur
+        JOIN auth.roles r ON r.id = ur.role_id
+        WHERE ur.user_id = :user_id
+        ORDER BY ur.granted_at DESC NULLS LAST
+        LIMIT 1
+        """
+    )
+    result = await db.execute(query, {"user_id": user_id})
+    row = result.mappings().first()
+    if not row:
+        return None
+    return {
+        "role_id": str(row["role_id"]),
+        "role_code": str(row["role_code"] or ""),
+    }
+
+
 async def _resolve_role_tables_create_column(db: AsyncSession) -> str | None:
     query = text(
         """
@@ -438,9 +459,13 @@ async def _get_visible_table_configs(
     if require_form_view_permission and user_id:
         try:
             view_column = await _resolve_role_forms_view_column(db)
-            role_id = await _get_user_role_id(db, user_id=user_id)
+            role_context = await _get_user_role_context(db, user_id=user_id)
+            role_id = role_context["role_id"] if role_context else None
+            is_admin = bool(role_context and role_context["role_code"].upper() == "ADMIN")
 
-            if view_column and role_id:
+            if is_admin:
+                pass
+            elif view_column and role_id:
                 quoted_view_column = view_column.replace('"', '""')
                 permissions_query = text(
                     f"""
