@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, File, HTTPException, Depends, Query, Request, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List
+from typing import Any, List
 
 from src.db.database import get_db, get_sqlserver_db
 from src.schemas.models import (
@@ -12,6 +13,10 @@ from src.schemas.models import (
     User,
 )
 from src.services import forms
+from src.services.forms_bulk_upload import (
+    commit_purchase_order_import,
+    preview_purchase_order_import,
+)
 from src.services.shared import build_etag_response
 from src.api.deps import get_current_user
 from src.core.logging_config import get_logger
@@ -19,6 +24,11 @@ from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+
+class BulkPurchaseOrderCommitRequest(BaseModel):
+    rows: list[dict[str, Any]]
+    create_missing: bool = True
 
 
 def get_forms_service(db: AsyncSession = Depends(get_db)) -> forms.FormsService:
@@ -188,6 +198,44 @@ async def get_unassigned_orders_endpoint(
         raise HTTPException(status_code=422, detail=e.detail)
     except forms.DBCommunicationError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bulk/purchase-orders/preview")
+async def preview_bulk_purchase_orders_endpoint(
+    file: UploadFile = File(...),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(status_code=422, detail="El archivo debe ser .xlsx")
+
+    try:
+        content = await file.read()
+        return await preview_purchase_order_import(db, content)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error previewing bulk purchase orders: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/bulk/purchase-orders/commit")
+async def commit_bulk_purchase_orders_endpoint(
+    payload: BulkPurchaseOrderCommitRequest,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await commit_purchase_order_import(
+            db,
+            payload.rows,
+            create_missing=payload.create_missing,
+        )
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error committing bulk purchase orders: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @router.post("/submit", response_model=SubmitFormResponse | None)

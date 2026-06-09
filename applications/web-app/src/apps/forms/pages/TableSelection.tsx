@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { AlertCircle, ArrowLeft, Loader2, Search } from "lucide-react";
+import { AlertCircle, ArrowLeft, FileSpreadsheet, Loader2, Search } from "lucide-react";
 
 import { CategoryAccordion } from "../components/CategoryAccordion";
 import { SearchBar } from "../components/SearchBar";
@@ -292,6 +292,15 @@ export default function TableSelection() {
 
                             </div>
                         </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => navigate("/app/forms/bulk/purchase-orders")}
+                        >
+                            <FileSpreadsheet className="mr-2 h-4 w-4" />
+                            Carga masiva
+                        </Button>
                     </div>
                 </div>
             </header>

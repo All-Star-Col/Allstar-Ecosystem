@@ -40,6 +40,42 @@ export interface SubmitFormAPI {
     data: TableDataAPI[];
 }
 
+export interface BulkPurchaseOrderRowAPI {
+    row_number: number;
+    cliente: string;
+    base: string;
+    modelo: string;
+    referencia: string;
+    tela: string;
+    oc_interno: string;
+    oc_cliente: string;
+    cantidad: number;
+    product_name: string;
+    resolved: Record<string, string | number | null | undefined>;
+    suggested?: Record<string, string | null | undefined>;
+    options?: Record<string, { id: string | number; label: string }[]>;
+    missing: string[];
+    status: "ready" | "needs_approval";
+}
+
+export interface BulkPurchaseOrderPreviewAPI {
+    rows: BulkPurchaseOrderRowAPI[];
+    summary: {
+        total: number;
+        ready: number;
+        needs_approval: number;
+    };
+}
+
+export interface BulkPurchaseOrderCommitAPI {
+    status: string;
+    created_orders: number;
+    reused_orders: number;
+    created_items: number;
+    created_fabrics: number;
+    created_products: number;
+}
+
 export interface RevalidateOptions {
     etag?: string | null;
     lastModified?: string | null;
@@ -414,6 +450,64 @@ export async function submitFormData(
         console.error("Error submitting form:", error);
         throw error;
     }
+}
+
+export async function previewBulkPurchaseOrders(
+    file: File,
+): Promise<BulkPurchaseOrderPreviewAPI> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/bulk/purchase-orders/preview`,
+        {
+            method: "POST",
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo prevalidar el archivo: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as BulkPurchaseOrderPreviewAPI;
+}
+
+export async function commitBulkPurchaseOrders(params: {
+    rows: BulkPurchaseOrderRowAPI[];
+    createMissing?: boolean;
+}): Promise<BulkPurchaseOrderCommitAPI> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/bulk/purchase-orders/commit`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({
+                rows: params.rows,
+                create_missing: params.createMissing ?? true,
+            }),
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo cargar masivamente: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as BulkPurchaseOrderCommitAPI;
 }
 
 /*

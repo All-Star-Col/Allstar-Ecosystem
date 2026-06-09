@@ -1105,6 +1105,31 @@ class DataViewerService:
                 can_delete=_to_optional_bool(row.get("can_delete")),
             )
 
+        has_order_config = any(
+            not {
+                table_config.table_name.lower(),
+                table_config.full_table_name.lower().split(".")[-1],
+                table_config.table_id.lower(),
+                (table_config.display_name or "").strip().lower(),
+            }.isdisjoint(ORDER_TABLE_NAME_CANDIDATES)
+            for table_config in allowlist.values()
+        )
+        if not has_order_config:
+            existing_tables = await self._get_existing_data_tables()
+            if "ordencompra" in existing_tables:
+                allowlist["ordencompra"] = TableConfig(
+                    table_id="ordencompra",
+                    schema_name="data",
+                    table_name="ordencompra",
+                    full_table_name="data.ordencompra",
+                    display_name="Ordenes de compra",
+                    stable_order_column=None,
+                    default_order_column="id",
+                    can_update=True,
+                    can_insert=False,
+                    can_delete=False,
+                )
+
         expanded_allowlist = dict(allowlist)
         for table_config in list(allowlist.values()):
             item_name_candidates = {
@@ -1132,7 +1157,7 @@ class DataViewerService:
                     full_table_name=table_config.full_table_name,
                     display_name=display_name,
                     stable_order_column=table_config.stable_order_column,
-                    default_order_column=table_config.default_order_column,
+                    default_order_column=table_config.default_order_column or "id",
                     can_update=table_config.can_update,
                     can_insert=table_config.can_insert,
                     can_delete=table_config.can_delete,
