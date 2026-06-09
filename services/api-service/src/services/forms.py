@@ -294,6 +294,19 @@ async def _get_user_role_context(db: AsyncSession, *, user_id: str) -> dict[str,
     }
 
 
+async def _role_has_form_permissions(db: AsyncSession, *, role_id: str) -> bool:
+    query = text(
+        """
+        SELECT 1
+        FROM workspace.role_forms
+        WHERE role_id = :role_id
+        LIMIT 1
+        """
+    )
+    result = await db.execute(query, {"role_id": role_id})
+    return result.scalar_one_or_none() is not None
+
+
 async def _resolve_role_tables_create_column(db: AsyncSession) -> str | None:
     query = text(
         """
@@ -464,6 +477,8 @@ async def _get_visible_table_configs(
             is_admin = bool(role_context and role_context["role_code"].upper() == "ADMIN")
 
             if is_admin:
+                pass
+            elif view_column and role_id and not await _role_has_form_permissions(db, role_id=role_id):
                 pass
             elif view_column and role_id:
                 quoted_view_column = view_column.replace('"', '""')
