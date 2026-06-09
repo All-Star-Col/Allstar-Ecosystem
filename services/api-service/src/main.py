@@ -20,6 +20,8 @@ from src.api.v1.routes.workspace.forms import forms
 from src.api.v1.routes.workspace.data_viewer import data_viewer
 from src.api.v1.routes.workspace.orders import orders
 from src.api.v1.routes.workspace.users import users
+from src.api.v1.routes.tablet import production as tablet_production
+from src.api.v1.routes.tablet import upholstery as tablet_upholstery
 from src.core.config import settings
 from src.core.scheduler import scheduler
 
@@ -71,6 +73,16 @@ app.include_router(
 )
 app.include_router(users.router, prefix="/api/v1/workspace/users", tags=["Workspace"])
 app.include_router(carpentry.router, prefix="/api/v1/workspace/carpentry", tags=["Workspace"])
+app.include_router(
+    tablet_production.router,
+    prefix="/api/v1/tablet/production",
+    tags=["Tablet Production"],
+)
+app.include_router(
+    tablet_upholstery.router,
+    prefix="/api/v1/tablet/tapiceria",
+    tags=["Tablet Upholstery"],
+)
 
 
 @app.on_event("startup")

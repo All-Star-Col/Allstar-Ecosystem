@@ -65,9 +65,17 @@ export interface RoleTablePermission {
     can_create: boolean;
 }
 
+export interface RoleFormPermission {
+    table_id: string;
+    table_name: string;
+    form_label?: string | null;
+    can_view: boolean;
+}
+
 export interface RolePermissionsBundle {
     apps: RoleAppPermission[];
     tables: RoleTablePermission[];
+    forms: RoleFormPermission[];
 }
 
 type UsersListResponse = {
@@ -395,6 +403,71 @@ const normalizeRoleTablesPayload = (payload: unknown): RoleTablePermission[] => 
         .filter((item) => item !== null) as RoleTablePermission[];
 };
 
+const normalizeRoleFormsPayload = (payload: unknown): RoleFormPermission[] => {
+    const directItems = asArray(payload);
+    const objectPayload = isObject(payload) ? payload : null;
+    const nestedData = isObject(objectPayload?.data) ? objectPayload.data : null;
+
+    const items = directItems.length
+        ? directItems
+        : pickFirstArray(
+              objectPayload?.role_forms,
+              objectPayload?.forms,
+              objectPayload?.permissions,
+              objectPayload?.items,
+              objectPayload?.results,
+              nestedData?.role_forms,
+              nestedData?.forms,
+              nestedData?.permissions,
+          );
+
+    return items
+        .map((item) => {
+            if (!isObject(item)) {
+                return null;
+            }
+
+            const formData = isObject(item.form) ? item.form : null;
+            const tableId = readIdentifier(
+                item.table_id,
+                item.id,
+                item.ui_table_id,
+                formData?.id,
+            );
+            const tableName = readString(
+                item.table_name,
+                item.nombre_tabla_sql,
+                item.name,
+                formData?.table_name,
+                formData?.nombre_tabla_sql,
+            );
+
+            if (!tableId) {
+                return null;
+            }
+
+            return {
+                table_id: tableId,
+                table_name: tableName ?? tableId,
+                form_label:
+                    readString(
+                        item.form_label,
+                        item.table_label,
+                        item.nombre_tabla_ui,
+                        item.display_name,
+                        formData?.form_label,
+                        formData?.nombre_tabla_ui,
+                        formData?.display_name,
+                    ) ?? null,
+                can_view: readBoolean(
+                    item.can_view ?? item.visible ?? item.canView,
+                    false,
+                ),
+            } satisfies RoleFormPermission;
+        })
+        .filter((item) => item !== null) as RoleFormPermission[];
+};
+
 export async function fetchWorkspaceSession(): Promise<WorkspaceSessionResponse> {
     return request<WorkspaceSessionResponse>("/workspace", { method: "GET" });
 }
@@ -563,6 +636,7 @@ export async function fetchRolePermissions(
     return {
         apps: normalizeRoleAppsPayload(payload),
         tables: normalizeRoleTablesPayload(payload),
+        forms: normalizeRoleFormsPayload(payload),
     };
 }
 
@@ -647,7 +721,7 @@ export async function saveRoleTablesPermissions(
     permissions: RoleTablePermission[],
 ): Promise<void> {
     const rows = permissions.map((permission) => ({
-        table_id: toTablePayloadId(permission.table_id),
+        table_id: permission.table_id,
         visible: permission.can_view,
         can_edit: permission.can_edit,
         can_create: permission.can_create,
@@ -694,6 +768,45 @@ export async function saveRoleTablesPermissions(
         },
         {
             path: `/workspace/roles/${roleId}/permissions/tables`,
+            init: { method: "PUT", body },
+        },
+    ]);
+}
+
+export async function saveRoleFormsPermissions(
+    roleId: string,
+    permissions: RoleFormPermission[],
+): Promise<void> {
+    const rows = permissions.map((permission) => ({
+        table_id: toTablePayloadId(permission.table_id),
+        can_view: permission.can_view,
+    }));
+
+    const combinedBody = JSON.stringify({
+        apps: [],
+        tables: [],
+        forms: rows,
+    });
+
+    const body = JSON.stringify({
+        role_forms: rows,
+        forms: rows,
+        permissions: rows,
+    });
+
+    await requestWithFallback<void>([
+        {
+            path: `/workspace/users/roles/${roleId}/permissions`,
+            init: { method: "PUT", body: combinedBody },
+            fallbackStatuses: [404, 405],
+        },
+        {
+            path: `/workspace/roles/${roleId}/permissions`,
+            init: { method: "PUT", body: combinedBody },
+            fallbackStatuses: [404, 405],
+        },
+        {
+            path: `/workspace/roles/${roleId}/permissions/forms`,
             init: { method: "PUT", body },
         },
     ]);

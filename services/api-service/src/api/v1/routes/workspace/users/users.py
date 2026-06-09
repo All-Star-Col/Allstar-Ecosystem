@@ -17,6 +17,7 @@ from src.api.deps import require_admin
 from src.services.roles import (
     RoleNotFoundError,
     RoleTablesUnavailableError,
+    RoleFormsUnavailableError,
     UserNotFoundError,
     assign_user_role,
     get_role_permissions,
@@ -132,7 +133,7 @@ async def put_permissions_by_role(
         return await upsert_role_permissions(db=db, role_id=role_id, data=payload)
     except RoleNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    except RoleTablesUnavailableError as exc:
+    except (RoleTablesUnavailableError, RoleFormsUnavailableError) as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
 

@@ -715,8 +715,6 @@ class DataViewerService:
                 for column in metadata.columns
                 if column.get("name") != "timestamp"
             ]
-            logger.info(filtered_columns)
-
             tables.append(
                 DataViewerTable(
                     table_id=metadata.config.table_id,
@@ -735,6 +733,14 @@ class DataViewerService:
             )
 
         return tables
+
+    async def get_table_configs(
+        self,
+        *,
+        user_id: str | None = None,
+    ) -> list[TableConfig]:
+        table_configs = await self._get_allowlist_map(user_id=user_id)
+        return [table_configs[table_id] for table_id in sorted(table_configs)]
 
     async def query(
         self,
@@ -1000,6 +1006,44 @@ class DataViewerService:
                         for row in role_permissions_result.mappings().all()
                         if row.get("table_id") is not None
                     }
+
+                if role_id:
+                    data_viewer_permissions_available = await self.db.execute(
+                        text(
+                            """
+                            SELECT 1
+                            FROM information_schema.tables
+                            WHERE table_schema = 'workspace'
+                              AND table_name = 'role_data_viewer_tables'
+                            LIMIT 1
+                            """
+                        )
+                    )
+                    if data_viewer_permissions_available.scalar_one_or_none() is not None:
+                        data_viewer_permissions_query = text(
+                            """
+                            SELECT
+                                CAST(table_id AS TEXT) AS table_id,
+                                COALESCE(visible, false) AS is_visible,
+                                COALESCE(can_edit, false) AS can_edit
+                            FROM workspace.role_data_viewer_tables
+                            WHERE role_id = :role_id
+                            """
+                        )
+                        data_viewer_permissions_result = await self.db.execute(
+                            data_viewer_permissions_query,
+                            {"role_id": role_id},
+                        )
+                        role_permissions_by_table.update(
+                            {
+                                str(row["table_id"]).strip(): (
+                                    bool(row["is_visible"]),
+                                    bool(row["can_edit"]),
+                                )
+                                for row in data_viewer_permissions_result.mappings().all()
+                                if row.get("table_id") is not None
+                            }
+                        )
             except Exception as error:
                 raise DBCommunicationError(
                     f"Error loading DataViewer role permissions from workspace.role_tables: {error}"
@@ -1012,7 +1056,10 @@ class DataViewerService:
                 continue
 
             ui_config_id = str(row.get("ui_config_id") or "").strip()
-            role_permissions = role_permissions_by_table.get(ui_config_id)
+            role_permissions = role_permissions_by_table.get(
+                table_id,
+                role_permissions_by_table.get(ui_config_id),
+            )
             if role_permissions is not None and not role_permissions[0]:
                 continue
 
@@ -1187,6 +1234,18 @@ class DataViewerService:
             )
 
         await self._sync_purchase_order_statuses(expanded_allowlist)
+
+        if user_id and role_permissions_by_table:
+            for table_id, table_config in list(expanded_allowlist.items()):
+                role_permissions = role_permissions_by_table.get(table_id)
+                if role_permissions is None:
+                    continue
+                if not role_permissions[0]:
+                    expanded_allowlist.pop(table_id, None)
+                    continue
+                if not role_permissions[1]:
+                    table_config.can_update = False
+
         return expanded_allowlist
 
     async def _get_existing_data_tables(self) -> set[str]:

@@ -46,6 +46,7 @@ import {
 import {
     type AdminUser,
     type RoleAppPermission,
+    type RoleFormPermission,
     type RoleTablePermission,
     type UpdateAdminUserPayload,
     type WorkspaceRole,
@@ -57,6 +58,7 @@ import {
     fetchWorkspaceRoles,
     fetchWorkspaceSession,
     saveRoleAppsPermissions,
+    saveRoleFormsPermissions,
     saveRoleTablesPermissions,
     updateAdminUser,
 } from "./profile.api";
@@ -170,6 +172,9 @@ export default function Profile() {
     const [roleTablePermissions, setRoleTablePermissions] = React.useState<
         RoleTablePermission[]
     >([]);
+    const [roleFormPermissions, setRoleFormPermissions] = React.useState<
+        RoleFormPermission[]
+    >([]);
 
     const [statusMessage, setStatusMessage] = React.useState<StatusMessage | null>(
         null,
@@ -185,6 +190,7 @@ export default function Profile() {
         React.useState(false);
     const [isSavingRoleApps, setIsSavingRoleApps] = React.useState(false);
     const [isSavingRoleTables, setIsSavingRoleTables] = React.useState(false);
+    const [isSavingRoleForms, setIsSavingRoleForms] = React.useState(false);
 
     const permissionsRequestRef = React.useRef(0);
 
@@ -326,6 +332,7 @@ export default function Profile() {
 
             setRoleAppPermissions(permissions.apps);
             setRoleTablePermissions(permissions.tables);
+            setRoleFormPermissions(permissions.forms);
         } catch (error) {
             if (permissionsRequestRef.current !== requestId) {
                 return;
@@ -333,6 +340,7 @@ export default function Profile() {
 
             setRoleAppPermissions([]);
             setRoleTablePermissions([]);
+            setRoleFormPermissions([]);
             setStatusMessage({
                 tone: "error",
                 text: toErrorMessage(
@@ -391,6 +399,7 @@ export default function Profile() {
         if (!selectedPermissionsRoleId) {
             setRoleAppPermissions([]);
             setRoleTablePermissions([]);
+            setRoleFormPermissions([]);
             setIsLoadingRolePermissions(false);
             return;
         }
@@ -616,6 +625,35 @@ export default function Profile() {
             setIsSavingRoleTables(false);
         }
     }, [loadRolePermissions, roleTablePermissions, selectedPermissionsRoleId]);
+
+    const handleSaveRoleForms = React.useCallback(async () => {
+        if (!selectedPermissionsRoleId) {
+            return;
+        }
+
+        setIsSavingRoleForms(true);
+        try {
+            await saveRoleFormsPermissions(
+                selectedPermissionsRoleId,
+                roleFormPermissions,
+            );
+            setStatusMessage({
+                tone: "success",
+                text: "Permisos de formularios guardados correctamente.",
+            });
+            await loadRolePermissions(selectedPermissionsRoleId);
+        } catch (error) {
+            setStatusMessage({
+                tone: "error",
+                text: toErrorMessage(
+                    error,
+                    "No fue posible guardar los permisos de formularios.",
+                ),
+            });
+        } finally {
+            setIsSavingRoleForms(false);
+        }
+    }, [loadRolePermissions, roleFormPermissions, selectedPermissionsRoleId]);
 
     const isStatusError = statusMessage?.tone === "error";
 
@@ -985,7 +1023,7 @@ export default function Profile() {
                         </CardTitle>
                         <CardDescription>
                             Selecciona un rol para administrar permisos por aplicaciones y
-                            por tablas.
+                            por tablas y formularios.
                         </CardDescription>
                     </CardHeader>
 
@@ -1166,7 +1204,7 @@ export default function Profile() {
                                                 Tablas
                                             </p>
                                             <p className="text-2xs text-muted-foreground">
-                                                Controla visibilidad, edición y creación por tabla.
+                                                Controla visibilidad y edición por tabla.
                                             </p>
                                         </div>
                                         <Button
@@ -1177,7 +1215,8 @@ export default function Profile() {
                                             disabled={
                                                 isLoadingRolePermissions ||
                                                 roleTablePermissions.length === 0 ||
-                                                isSavingRoleApps
+                                                isSavingRoleApps ||
+                                                isSavingRoleForms
                                             }
                                             onClick={() => {
                                                 void handleSaveRoleTables();
@@ -1204,16 +1243,13 @@ export default function Profile() {
                                                         <TableHead className="text-right">
                                                             Editar
                                                         </TableHead>
-                                                        <TableHead className="text-right">
-                                                            Crear
-                                                        </TableHead>
                                                     </TableRow>
                                                 </TableHeader>
                                                 <TableBody>
                                                     {roleTablePermissions.length === 0 ? (
                                                         <TableRow>
                                                             <TableCell
-                                                                colSpan={4}
+                                                                colSpan={3}
                                                                 className="text-center text-sm text-muted-foreground"
                                                             >
                                                                 No hay tablas configuradas para
@@ -1246,7 +1282,8 @@ export default function Profile() {
                                                                             }
                                                                             disabled={
                                                                                 isSavingRoleTables ||
-                                                                                isSavingRoleApps
+                                                                                isSavingRoleApps ||
+                                                                                isSavingRoleForms
                                                                             }
                                                                             onCheckedChange={(
                                                                                 checked,
@@ -1279,7 +1316,8 @@ export default function Profile() {
                                                                             }
                                                                             disabled={
                                                                                 isSavingRoleTables ||
-                                                                                isSavingRoleApps
+                                                                                isSavingRoleApps ||
+                                                                                isSavingRoleForms
                                                                             }
                                                                             onCheckedChange={(
                                                                                 checked,
@@ -1304,20 +1342,104 @@ export default function Profile() {
                                                                         />
                                                                     </div>
                                                                 </TableCell>
+                                                            </TableRow>
+                                                        ))
+                                                    )}
+                                                </TableBody>
+                                            </Table>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="rounded-lg border border-border/60 bg-card">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+                                        <div>
+                                            <p className="text-sm font-medium text-foreground">
+                                                Formularios
+                                            </p>
+                                            <p className="text-2xs text-muted-foreground">
+                                                Controla visualizacion por formulario.
+                                            </p>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="primary"
+                                            loading={isSavingRoleForms}
+                                            disabled={
+                                                isLoadingRolePermissions ||
+                                                roleFormPermissions.length === 0 ||
+                                                isSavingRoleApps ||
+                                                isSavingRoleTables
+                                            }
+                                            onClick={() => {
+                                                void handleSaveRoleForms();
+                                            }}
+                                            className="cursor-pointer"
+                                        >
+                                            Guardar formularios
+                                        </Button>
+                                    </div>
+
+                                    {isLoadingRolePermissions ? (
+                                        <div className="px-3 py-4 text-sm text-muted-foreground">
+                                            Cargando permisos de formularios...
+                                        </div>
+                                    ) : (
+                                        <div className="max-h-[260px] overflow-y-auto">
+                                            <Table>
+                                                <TableHeader>
+                                                    <TableRow>
+                                                        <TableHead>Formulario</TableHead>
+                                                        <TableHead className="text-right">
+                                                            Ver
+                                                        </TableHead>
+                                                    </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                    {roleFormPermissions.length === 0 ? (
+                                                        <TableRow>
+                                                            <TableCell
+                                                                colSpan={2}
+                                                                className="text-center text-sm text-muted-foreground"
+                                                            >
+                                                                No hay formularios configurados para
+                                                                este rol.
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ) : (
+                                                        roleFormPermissions.map((permission) => (
+                                                            <TableRow key={permission.table_id}>
+                                                                <TableCell className="align-middle">
+                                                                    <div className="font-medium text-foreground">
+                                                                        {
+                                                                            permission.form_label ??
+                                                                            permission.table_name
+                                                                        }
+                                                                    </div>
+                                                                    {permission.form_label ? (
+                                                                        <div className="text-2xs text-muted-foreground">
+                                                                            {
+                                                                                permission.table_name
+                                                                            }
+                                                                        </div>
+                                                                    ) : null}
+                                                                </TableCell>
                                                                 <TableCell className="text-right">
                                                                     <div className="inline-flex items-center justify-end">
                                                                         <Switch
                                                                             checked={
-                                                                                permission.can_create
+                                                                                permission.can_view
                                                                             }
                                                                             disabled={
-                                                                                isSavingRoleTables ||
-                                                                                isSavingRoleApps
+                                                                                isSavingRoleForms ||
+                                                                                isSavingRoleApps ||
+                                                                                isSavingRoleTables
                                                                             }
                                                                             onCheckedChange={(
                                                                                 checked,
                                                                             ) => {
-                                                                                setRoleTablePermissions(
+                                                                                setRoleFormPermissions(
                                                                                     (prev) =>
                                                                                         prev.map(
                                                                                             (
@@ -1327,7 +1449,7 @@ export default function Profile() {
                                                                                                 permission.table_id
                                                                                                     ? {
                                                                                                           ...item,
-                                                                                                          can_create:
+                                                                                                          can_view:
                                                                                                               checked,
                                                                                                       }
                                                                                                     : item,

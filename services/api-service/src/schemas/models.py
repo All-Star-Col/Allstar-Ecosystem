@@ -117,7 +117,7 @@ class RoleAppPermission(BaseModel):
 
 
 class RoleTablePermission(BaseModel):
-    table_id: int
+    table_id: str
     table_name: str | None = None
     table_label: str | None = None
     visible: bool = True
@@ -125,15 +125,24 @@ class RoleTablePermission(BaseModel):
     can_create: bool = False
 
 
+class RoleFormPermission(BaseModel):
+    table_id: int
+    table_name: str | None = None
+    form_label: str | None = None
+    can_view: bool = True
+
+
 class RolePermissionsResponse(BaseModel):
     role_id: UUID
     apps: List[RoleAppPermission] = Field(default_factory=list)
     tables: List[RoleTablePermission] = Field(default_factory=list)
+    forms: List[RoleFormPermission] = Field(default_factory=list)
 
 
 class RolePermissionsUpdateRequest(BaseModel):
     apps: List[RoleAppPermission] = Field(default_factory=list)
     tables: List[RoleTablePermission] = Field(default_factory=list)
+    forms: List[RoleFormPermission] = Field(default_factory=list)
 
 
 # _____________________________________________________

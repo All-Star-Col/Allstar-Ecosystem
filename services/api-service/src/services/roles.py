@@ -8,10 +8,12 @@ from src.core.logging_config import get_logger
 from src.schemas.models import (
     Role,
     RoleAppPermission,
+    RoleFormPermission,
     RolePermissionsResponse,
     RolePermissionsUpdateRequest,
     RoleTablePermission,
 )
+from src.services.data_viewer import DataViewerService
 
 logger = get_logger(__name__)
 
@@ -25,6 +27,10 @@ class UserNotFoundError(ValueError):
 
 
 class RoleTablesUnavailableError(RuntimeError):
+    pass
+
+
+class RoleFormsUnavailableError(RuntimeError):
     pass
 
 
@@ -87,6 +93,108 @@ async def _resolve_role_tables_columns(
         "visible": visible_column,
         "can_edit": can_edit_column,
         "can_create": can_create_column,
+        "has_granted_at": "granted_at" in column_names,
+    }
+
+
+async def _ensure_role_data_viewer_tables_table(db: AsyncSession) -> None:
+    await db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS workspace.role_data_viewer_tables (
+                role_id UUID NOT NULL REFERENCES auth.roles(id) ON DELETE CASCADE,
+                table_id TEXT NOT NULL,
+                visible BOOLEAN NOT NULL DEFAULT false,
+                can_edit BOOLEAN NOT NULL DEFAULT false,
+                can_create BOOLEAN NOT NULL DEFAULT false,
+                granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (role_id, table_id)
+            )
+            """
+        )
+    )
+
+
+async def _resolve_role_data_viewer_tables_columns(
+    db: AsyncSession,
+) -> dict[str, str | bool] | None:
+    try:
+        await _ensure_role_data_viewer_tables_table(db)
+    except Exception as error:
+        logger.warning("workspace.role_data_viewer_tables is not available: %s", error)
+        return None
+
+    q = text(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'workspace'
+          AND table_name = 'role_data_viewer_tables'
+    """
+    )
+    result = await db.execute(q)
+    column_names = {row["column_name"] for row in result.mappings().all()}
+
+    if not {"role_id", "table_id", "visible", "can_edit", "can_create"}.issubset(
+        column_names
+    ):
+        logger.warning(
+            "workspace.role_data_viewer_tables exists but required columns are missing"
+        )
+        return None
+
+    return {
+        "visible": "visible",
+        "can_edit": "can_edit",
+        "can_create": "can_create",
+        "has_granted_at": "granted_at" in column_names,
+    }
+
+
+async def _ensure_role_forms_table(db: AsyncSession) -> None:
+    await db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS workspace.role_forms (
+                role_id UUID NOT NULL REFERENCES auth.roles(id) ON DELETE CASCADE,
+                table_id INTEGER NOT NULL REFERENCES workspace.ui_config_tablas(id) ON DELETE CASCADE,
+                can_view BOOLEAN NOT NULL DEFAULT false,
+                granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (role_id, table_id)
+            )
+            """
+        )
+    )
+
+
+async def _resolve_role_forms_columns(
+    db: AsyncSession,
+) -> dict[str, str | bool] | None:
+    try:
+        await _ensure_role_forms_table(db)
+    except Exception as error:
+        logger.warning("workspace.role_forms is not available: %s", error)
+        return None
+
+    q = text(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'workspace'
+          AND table_name = 'role_forms'
+    """
+    )
+    result = await db.execute(q)
+    column_names = {row["column_name"] for row in result.mappings().all()}
+
+    if not {"role_id", "table_id", "can_view"}.issubset(column_names):
+        logger.warning(
+            "workspace.role_forms exists but role_id/table_id/can_view columns are missing"
+        )
+        return None
+
+    return {
+        "can_view": "can_view",
         "has_granted_at": "granted_at" in column_names,
     }
 
@@ -246,69 +354,135 @@ async def get_role_permissions(
         for row in app_rows
     ]
 
+    role_data_viewer_tables_columns = await _resolve_role_data_viewer_tables_columns(db)
     role_tables_columns = await _resolve_role_tables_columns(db)
     table_permissions: list[RoleTablePermission] = []
 
-    if role_tables_columns:
-        visible_column = _quote_identifier(str(role_tables_columns["visible"]))
-        can_edit_column = _quote_identifier(str(role_tables_columns["can_edit"]))
-        can_create_column = _quote_identifier(str(role_tables_columns["can_create"]))
+    if role_data_viewer_tables_columns:
+        visible_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["visible"])
+        )
+        can_edit_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["can_edit"])
+        )
+        can_create_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["can_create"])
+        )
 
-        role_tables_query = text(
+        role_permissions_query = text(
+            f"""
+            SELECT
+                CAST(table_id AS TEXT) AS table_id,
+                COALESCE({visible_column}, false) AS visible,
+                COALESCE({can_edit_column}, false) AS can_edit,
+                COALESCE({can_create_column}, false) AS can_create
+            FROM workspace.role_data_viewer_tables
+            WHERE role_id = :role_id
+        """
+        )
+        role_permission_rows = (
+            await db.execute(role_permissions_query, {"role_id": role_id})
+        ).mappings().all()
+        role_permissions_by_table = {
+            str(row["table_id"]).strip(): row
+            for row in role_permission_rows
+            if row.get("table_id") is not None
+        }
+
+        legacy_permissions_by_table: dict[str, object] = {}
+        if role_tables_columns:
+            legacy_visible_column = _quote_identifier(str(role_tables_columns["visible"]))
+            legacy_can_edit_column = _quote_identifier(str(role_tables_columns["can_edit"]))
+            legacy_can_create_column = _quote_identifier(
+                str(role_tables_columns["can_create"])
+            )
+            legacy_permissions_query = text(
+                f"""
+                SELECT
+                    CAST(table_id AS TEXT) AS table_id,
+                    COALESCE({legacy_visible_column}, false) AS visible,
+                    COALESCE({legacy_can_edit_column}, false) AS can_edit,
+                    COALESCE({legacy_can_create_column}, false) AS can_create
+                FROM workspace.role_tables
+                WHERE role_id = :role_id
+            """
+            )
+            legacy_permission_rows = (
+                await db.execute(legacy_permissions_query, {"role_id": role_id})
+            ).mappings().all()
+            legacy_permissions_by_table = {
+                str(row["table_id"]).strip(): row
+                for row in legacy_permission_rows
+                if row.get("table_id") is not None
+            }
+
+        data_viewer_tables = await DataViewerService(db).get_table_configs(
+            user_id=None,
+        )
+        table_permissions = [
+            RoleTablePermission(
+                table_id=table.table_id,
+                table_name=table.full_table_name,
+                table_label=table.display_name,
+                visible=bool(
+                    role_permissions_by_table.get(
+                        table.table_id,
+                        legacy_permissions_by_table.get(table.table_id, {}),
+                    ).get("visible", False)
+                ),
+                can_edit=bool(
+                    role_permissions_by_table.get(
+                        table.table_id,
+                        legacy_permissions_by_table.get(table.table_id, {}),
+                    ).get("can_edit", False)
+                ),
+                can_create=bool(
+                    role_permissions_by_table.get(
+                        table.table_id,
+                        legacy_permissions_by_table.get(table.table_id, {}),
+                    ).get("can_create", False)
+                ),
+            )
+            for table in data_viewer_tables
+        ]
+
+    role_forms_columns = await _resolve_role_forms_columns(db)
+    form_permissions: list[RoleFormPermission] = []
+    if role_forms_columns:
+        can_view_column = _quote_identifier(str(role_forms_columns["can_view"]))
+        role_forms_query = text(
             f"""
             SELECT
                 cfg.id AS table_id,
                 cfg.nombre_tabla_sql AS table_name,
-                cfg.nombre_tabla_ui AS table_label,
-                COALESCE(rt.{visible_column}, false) AS visible,
-                COALESCE(rt.{can_edit_column}, false) AS can_edit,
-                COALESCE(rt.{can_create_column}, false) AS can_create
+                cfg.nombre_tabla_ui AS form_label,
+                COALESCE(rf.{can_view_column}, false) AS can_view
             FROM workspace.ui_config_tablas cfg
-            LEFT JOIN workspace.role_tables rt
-                ON rt.table_id = cfg.id
-               AND rt.role_id = :role_id
+            LEFT JOIN workspace.role_forms rf
+                ON rf.table_id = cfg.id
+               AND rf.role_id = :role_id
+            WHERE cfg.es_visible = true
             ORDER BY cfg.id
-        """
-        )
-        table_rows = (
-            await db.execute(role_tables_query, {"role_id": role_id})
-        ).mappings().all()
-        table_permissions = [
-            RoleTablePermission(
-                table_id=row["table_id"],
-                table_name=row["table_name"],
-                table_label=row["table_label"],
-                visible=row["visible"],
-                can_edit=row["can_edit"],
-                can_create=row["can_create"],
-            )
-            for row in table_rows
-        ]
-    else:
-        ui_tables_query = text(
             """
-            SELECT id AS table_id, nombre_tabla_sql AS table_name, nombre_tabla_ui AS table_label
-            FROM workspace.ui_config_tablas
-            ORDER BY id
-        """
         )
-        ui_table_rows = (await db.execute(ui_tables_query)).mappings().all()
-        table_permissions = [
-            RoleTablePermission(
+        form_rows = (
+            await db.execute(role_forms_query, {"role_id": role_id})
+        ).mappings().all()
+        form_permissions = [
+            RoleFormPermission(
                 table_id=row["table_id"],
                 table_name=row["table_name"],
-                table_label=row["table_label"],
-                visible=False,
-                can_edit=False,
-                can_create=False,
+                form_label=row["form_label"],
+                can_view=row["can_view"],
             )
-            for row in ui_table_rows
+            for row in form_rows
         ]
 
     return RolePermissionsResponse(
         role_id=role_id,
         apps=app_permissions,
         tables=table_permissions,
+        forms=form_permissions,
     )
 
 
@@ -329,19 +503,25 @@ async def upsert_role_permissions(
     """
     )
 
-    role_tables_columns = await _resolve_role_tables_columns(db)
+    role_data_viewer_tables_columns = await _resolve_role_data_viewer_tables_columns(db)
 
-    if data.tables and role_tables_columns is None:
+    if data.tables and role_data_viewer_tables_columns is None:
         raise RoleTablesUnavailableError(
-            "workspace.role_tables no está disponible; crea la tabla antes de guardar permisos de tablas."
+            "workspace.role_data_viewer_tables no está disponible; crea la tabla antes de guardar permisos de tablas."
         )
 
     table_permission_query = None
-    if role_tables_columns:
-        visible_column = _quote_identifier(str(role_tables_columns["visible"]))
-        can_edit_column = _quote_identifier(str(role_tables_columns["can_edit"]))
-        can_create_column = _quote_identifier(str(role_tables_columns["can_create"]))
-        has_granted_at = bool(role_tables_columns["has_granted_at"])
+    if role_data_viewer_tables_columns:
+        visible_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["visible"])
+        )
+        can_edit_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["can_edit"])
+        )
+        can_create_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["can_create"])
+        )
+        has_granted_at = bool(role_data_viewer_tables_columns["has_granted_at"])
 
         insert_columns = [
             "role_id",
@@ -364,11 +544,38 @@ async def upsert_role_permissions(
 
         table_permission_query = text(
             f"""
-            INSERT INTO workspace.role_tables ({", ".join(insert_columns)})
+            INSERT INTO workspace.role_data_viewer_tables ({", ".join(insert_columns)})
             VALUES ({", ".join(insert_values)})
             ON CONFLICT (role_id, table_id)
             DO UPDATE SET {", ".join(update_assignments)}
         """
+        )
+
+    role_forms_columns = await _resolve_role_forms_columns(db)
+    if data.forms and role_forms_columns is None:
+        raise RoleFormsUnavailableError(
+            "workspace.role_forms no está disponible; crea la tabla antes de guardar permisos de formularios."
+        )
+
+    form_permission_query = None
+    if role_forms_columns:
+        can_view_column = _quote_identifier(str(role_forms_columns["can_view"]))
+        has_granted_at = bool(role_forms_columns["has_granted_at"])
+        insert_columns = ["role_id", "table_id", can_view_column]
+        insert_values = [":role_id", ":table_id", ":can_view"]
+        update_assignments = [f"{can_view_column} = EXCLUDED.{can_view_column}"]
+        if has_granted_at:
+            insert_columns.append("granted_at")
+            insert_values.append("NOW()")
+            update_assignments.append("granted_at = NOW()")
+
+        form_permission_query = text(
+            f"""
+            INSERT INTO workspace.role_forms ({", ".join(insert_columns)})
+            VALUES ({", ".join(insert_values)})
+            ON CONFLICT (role_id, table_id)
+            DO UPDATE SET {", ".join(update_assignments)}
+            """
         )
 
     try:
@@ -388,10 +595,21 @@ async def upsert_role_permissions(
                     table_permission_query,
                     {
                         "role_id": role_id,
-                        "table_id": permission.table_id,
+                        "table_id": str(permission.table_id),
                         "visible": permission.visible,
                         "can_edit": permission.can_edit,
                         "can_create": permission.can_create,
+                    },
+                )
+
+        if form_permission_query is not None:
+            for permission in data.forms:
+                await db.execute(
+                    form_permission_query,
+                    {
+                        "role_id": role_id,
+                        "table_id": permission.table_id,
+                        "can_view": permission.can_view,
                     },
                 )
 

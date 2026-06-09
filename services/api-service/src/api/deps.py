@@ -38,7 +38,7 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     if user.disabled:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
     return user
 
 

@@ -56,6 +56,20 @@ FK_LABEL_PRIORITY = (
 DEFAULT_LOOKUP_LIMIT = 20
 MAX_LOOKUP_LIMIT = 200
 TELA_LOOKUP_FIELDS = ("nombre", "referencia")
+FINALIZED_STATUS_VALUES = (
+    "finalizado",
+    "finalizada",
+    "finalizados",
+    "finalizadas",
+    "completado",
+    "completada",
+    "completados",
+    "completadas",
+    "terminado",
+    "terminada",
+    "terminados",
+    "terminadas",
+)
 
 
 class DBCommunicationError(Exception):
@@ -240,6 +254,10 @@ def _is_items_table(table_name: str) -> bool:
     return _normalize_table_name_for_match(table_name) in {"item", "items"}
 
 
+def _is_hidden_form_column(table_name: str, column_name: str) -> bool:
+    return _is_items_table(table_name) and column_name == "fecha_entrega"
+
+
 async def _get_user_role_id(db: AsyncSession, *, user_id: str) -> str | None:
     query = text(
         """
@@ -276,6 +294,49 @@ async def _resolve_role_tables_create_column(db: AsyncSession) -> str | None:
             return name
     for name in column_names:
         if name.lower() == "create":
+            return name
+    return None
+
+
+async def _ensure_role_forms_table(db: AsyncSession) -> None:
+    await db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS workspace.role_forms (
+                role_id UUID NOT NULL REFERENCES auth.roles(id) ON DELETE CASCADE,
+                table_id INTEGER NOT NULL REFERENCES workspace.ui_config_tablas(id) ON DELETE CASCADE,
+                can_view BOOLEAN NOT NULL DEFAULT false,
+                granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (role_id, table_id)
+            )
+            """
+        )
+    )
+
+
+async def _resolve_role_forms_view_column(db: AsyncSession) -> str | None:
+    try:
+        await _ensure_role_forms_table(db)
+    except Exception:
+        return None
+
+    query = text(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'workspace'
+          AND table_name = 'role_forms'
+        """
+    )
+    result = await db.execute(query)
+    column_names = [row["column_name"] for row in result.mappings().all()]
+    column_names_lower = {name.lower() for name in column_names}
+
+    if not column_names_lower or "role_id" not in column_names_lower or "table_id" not in column_names_lower:
+        return None
+
+    for name in column_names:
+        if name.lower() == "can_view":
             return name
     return None
 
@@ -332,6 +393,7 @@ async def _get_visible_table_configs(
     table_name: str | None = None,
     user_id: str | None = None,
     require_create_permission: bool = False,
+    require_form_view_permission: bool = False,
 ) -> list[dict[str, Any]]:
     query = text(
         """
@@ -372,6 +434,37 @@ async def _get_visible_table_configs(
                 ]
         except Exception:
             pass
+
+    if require_form_view_permission and user_id:
+        try:
+            view_column = await _resolve_role_forms_view_column(db)
+            role_id = await _get_user_role_id(db, user_id=user_id)
+
+            if view_column and role_id:
+                quoted_view_column = view_column.replace('"', '""')
+                permissions_query = text(
+                    f"""
+                    SELECT CAST(table_id AS TEXT) AS table_id,
+                           COALESCE("{quoted_view_column}", false) AS can_view
+                    FROM workspace.role_forms
+                    WHERE role_id = :role_id
+                    """
+                )
+                permissions_result = await db.execute(permissions_query, {"role_id": role_id})
+                view_permissions = {
+                    str(row["table_id"]).strip(): bool(row["can_view"])
+                    for row in permissions_result.mappings().all()
+                    if row.get("table_id") is not None
+                }
+                rows = [
+                    row
+                    for row in rows
+                    if view_permissions.get(str(row["id"]).strip(), False)
+                ]
+            else:
+                rows = []
+        except Exception:
+            rows = []
 
     if table_name is None:
         return rows
@@ -756,6 +849,9 @@ async def _build_tables_payload(
             column_name = _validate_sql_identifier(
                 column["column_name"], field_name=f"{table_name}.column_name"
             ).lower()
+            if _is_hidden_form_column(table_name, column_name):
+                continue
+
             udt_name = column.get("udt_name")
             udt_enum_values = None
             if udt_name:
@@ -847,7 +943,7 @@ async def get_tables(db: AsyncSession, *, user_id: str | None = None) -> list[di
         tables_config = await _get_visible_table_configs(
             db,
             user_id=user_id,
-            require_create_permission=True,
+            require_form_view_permission=True,
         )
         return await _build_tables_payload(db, tables_config=tables_config)
     except IdentifierValidationError:
@@ -869,7 +965,7 @@ async def get_table(
             db,
             table_name=table_identifier,
             user_id=user_id,
-            require_create_permission=True,
+            require_form_view_permission=True,
         )
         if not tables_config:
             raise IdentifierValidationError(f"Invalid table identifier: {table_name}")
@@ -1418,8 +1514,21 @@ async def get_unassigned_orders(
             # Build WHERE clause
             where_clauses = [f"TRIM(o.{q_src_order}::text) != ''"]
             if q_src_status:
-                where_clauses.append(f"LOWER(TRIM(o.{q_src_status}::text)) = :pending_status")
-                params["pending_status"] = "pendiente"
+                status_params = {}
+                for index, status in enumerate(FINALIZED_STATUS_VALUES):
+                    key = f"finalized_status_{index}"
+                    status_params[key] = status
+                status_placeholders = ", ".join(
+                    f":finalized_status_{index}"
+                    for index in range(len(FINALIZED_STATUS_VALUES))
+                )
+                where_clauses.append(
+                    "("
+                    f"o.{q_src_status} IS NULL "
+                    f"OR LOWER(TRIM(o.{q_src_status}::text)) NOT IN ({status_placeholders})"
+                    ")"
+                )
+                params.update(status_params)
 
             normalized_q = _normalize_search_term(q)
             if normalized_q:
@@ -1936,6 +2045,9 @@ async def new_tabledata(
     row_data: dict[str, Any] = {}
     for item in submit_form.data:
         normalized_column = _validate_sql_identifier(item.column, field_name="column").lower()
+        if _is_hidden_form_column(table_name, normalized_column):
+            continue
+
         raw_value = item.value
 
         meta = col_meta.get(normalized_column)
@@ -2032,7 +2144,7 @@ async def get_allowed_tables(
         table_configs = await _get_visible_table_configs(
             db,
             user_id=user_id,
-            require_create_permission=True,
+            require_form_view_permission=True,
         )
         return {
             _extract_table_name(row["nombre_tabla_sql"], field_name="allowed_table")

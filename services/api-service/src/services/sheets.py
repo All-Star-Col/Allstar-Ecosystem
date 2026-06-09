@@ -912,15 +912,24 @@ class SheetsService:
                 new_row,
             )
 
+            await self._mark_item_delivered_today(
+                db,
+                item_table=item_payload["item_table"],
+                item_legacy_column=item_payload["item_legacy_column"],
+                item_delivery_column=item_payload["item_delivery_column"],
+                item_code=item_code,
+            )
+
             await self._finalize_order_if_complete(
                 db,
-                sheet_api,
+                item_table=item_payload["item_table"],
+                item_order_column=item_payload["item_order_column"],
+                item_delivery_column=item_payload["item_delivery_column"],
                 order_table=item_payload["order_table"],
                 order_status_column=item_payload["order_status_column"],
                 order_pk_column=item_payload["order_pk_column"],
                 order_pk_value=item_payload["order_pk_value"],
                 order_quantity=item_payload["order_quantity"],
-                order_client_value=item_payload["orden_cliente"],
             )
 
             self.sheets_logs_sync(
@@ -964,24 +973,6 @@ class SheetsService:
             body={"values": [new_row]},
         ).execute()
 
-    def _count_loaded_order_items(self, sheet_api: Any, order_client_value: str) -> int:
-        total = 0
-        for sheet_name in (self.SHEET_NAME_INV, self.SHEET_NAME_DISPATCH):
-            result = (
-                sheet_api.values()
-                .get(
-                    spreadsheetId=settings.SHEETS_INVENTARIO_ALLSTAR,
-                    range=f"{sheet_name}!E:E",
-                )
-                .execute()
-            )
-            total += sum(
-                1
-                for row in result.get("values", [])
-                if row and str(row[0]).strip() == str(order_client_value).strip()
-            )
-        return total
-
     async def _get_production_item_from_allstar_db(
         self,
         db: AsyncSession,
@@ -1002,6 +993,7 @@ class SheetsService:
 
         item_legacy_column = _choose_column(item_columns, ITEM_LEGACY_COLUMN_CANDIDATES)
         item_order_column = _choose_column(item_columns, ITEM_ORDER_COLUMN_CANDIDATES)
+        item_delivery_column = _choose_column(item_columns, ("fecha_entrega",))
         item_fabric_column = _choose_column(item_columns, ITEM_FABRIC_NAME_COLUMN_CANDIDATES)
         item_fabric_reference_column = _choose_column(
             item_columns,
@@ -1020,6 +1012,7 @@ class SheetsService:
         if not (
             item_legacy_column
             and item_order_column
+            and item_delivery_column
             and order_status_column
             and order_product_column
         ):
@@ -1208,23 +1201,49 @@ class SheetsService:
             "orden_cliente": row["orden_cliente"] or "",
             "valor_producto": row["valor_producto"] or "",
             "order_quantity": row["order_quantity"],
+            "item_table": item_table,
+            "item_legacy_column": item_legacy_column,
+            "item_order_column": item_order_column,
+            "item_delivery_column": item_delivery_column,
             "order_table": order_table,
             "order_status_column": order_status_column,
             "order_pk_column": order_pk_column,
             "order_pk_value": row["order_pk_value"],
         }
 
+    async def _mark_item_delivered_today(
+        self,
+        db: AsyncSession,
+        *,
+        item_table: str,
+        item_legacy_column: str,
+        item_delivery_column: str,
+        item_code: str,
+    ) -> None:
+        await db.execute(
+            text(
+                f"""
+                UPDATE {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(item_table)}
+                SET {_quote_identifier(item_delivery_column)} = CURRENT_DATE
+                WHERE TRIM({_quote_identifier(item_legacy_column)}::text) = TRIM(:item_code)
+                """
+            ),
+            {"item_code": item_code},
+        )
+        await db.commit()
+
     async def _finalize_order_if_complete(
         self,
         db: AsyncSession,
-        sheet_api: Any,
         *,
+        item_table: str,
+        item_order_column: str,
+        item_delivery_column: str,
         order_table: str,
         order_status_column: str,
         order_pk_column: str,
         order_pk_value: Any,
         order_quantity: Any,
-        order_client_value: str,
     ) -> None:
         try:
             expected_quantity = int(float(str(order_quantity).replace(",", ".").strip()))
@@ -1233,12 +1252,20 @@ class SheetsService:
         if expected_quantity <= 0:
             return
 
-        loaded_quantity = await run_in_threadpool(
-            self._count_loaded_order_items,
-            sheet_api,
-            order_client_value,
+        delivered_items_result = await db.execute(
+            text(
+                f"""
+                SELECT COUNT(*)::integer AS delivered_quantity
+                FROM {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(item_table)}
+                WHERE TRIM({_quote_identifier(item_order_column)}::text) =
+                      TRIM(CAST(:order_pk_value AS text))
+                  AND {_quote_identifier(item_delivery_column)} IS NOT NULL
+                """
+            ),
+            {"order_pk_value": str(order_pk_value)},
         )
-        if loaded_quantity < expected_quantity:
+        delivered_quantity = delivered_items_result.scalar_one() or 0
+        if delivered_quantity < expected_quantity:
             return
 
         await db.execute(
