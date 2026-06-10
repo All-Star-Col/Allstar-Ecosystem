@@ -124,7 +124,10 @@ export const LoginCard: React.FC = () => {
 
             navigate("/dashboard", { replace: true });
         } catch (e) {
-            setError("Error al iniciar sesión. Por favor, intenta nuevamente.");
+            console.error("Login request failed", e);
+            setError(
+                "No se pudo conectar con la API. Revisa la conexión e intenta nuevamente.",
+            );
         } finally {
             setIsLoading(false);
         }
