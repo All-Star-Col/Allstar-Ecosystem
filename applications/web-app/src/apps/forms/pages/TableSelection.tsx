@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { AlertCircle, ArrowLeft, FileSpreadsheet, Loader2, Search } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bot, FileSpreadsheet, Loader2, Search } from "lucide-react";
 
 import { CategoryAccordion } from "../components/CategoryAccordion";
 import { SearchBar } from "../components/SearchBar";
@@ -245,15 +245,26 @@ export default function TableSelection() {
 
                             </div>
                         </div>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => navigate("/app/forms/bulk/purchase-orders")}
-                        >
-                            <FileSpreadsheet className="mr-2 h-4 w-4" />
-                            Carga masiva
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => navigate("/app/forms/sales-assistant")}
+                            >
+                                <Bot className="mr-2 h-4 w-4" />
+                                Asistente IA OC
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => navigate("/app/forms/bulk/purchase-orders")}
+                            >
+                                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                                Carga masiva
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </header>

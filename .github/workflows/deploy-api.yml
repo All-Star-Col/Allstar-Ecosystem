@@ -93,6 +93,13 @@ jobs:
             "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
             "BW_ACCESS_TOKEN='${{ secrets.BW_ACCESS_TOKEN }}' \
             ENVIRONMENT='${{ env.ENVIRONMENT }}' \
+            EMAIL_HOST='${{ secrets.EMAIL_HOST }}' \
+            EMAIL_PORT='${{ secrets.EMAIL_PORT }}' \
+            EMAIL_USER='${{ secrets.EMAIL_USER }}' \
+            EMAIL_PASSWORD='${{ secrets.EMAIL_PASSWORD }}' \
+            ATTACHMENTS_DIR='${{ secrets.ATTACHMENTS_DIR }}' \
+            OPENAI_API_KEY='${{ secrets.OPENAI_API_KEY }}' \
+            OPENAI_MODEL='${{ secrets.OPENAI_MODEL }}' \
             DOCKERHUB_USERNAME='${{ secrets.DOCKERHUB_USERNAME }}' \
             DOCKERHUB_TOKEN='${{ secrets.DOCKERHUB_TOKEN }}' \
             /opt/allstar-api/deploy.sh"
