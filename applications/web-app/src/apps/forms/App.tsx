@@ -9,6 +9,7 @@ import NotFound from "@/shared/components/NotFound";
 const BulkPurchaseOrderUpload = lazy(
     () => import("./pages/BulkPurchaseOrderUpload"),
 );
+const SalesAssistant = lazy(() => import("./pages/SalesAssistant"));
 
 export default function FormsApp() {
     return (
@@ -20,6 +21,14 @@ export default function FormsApp() {
                     element={
                         <Suspense fallback={null}>
                             <BulkPurchaseOrderUpload />
+                        </Suspense>
+                    }
+                />
+                <Route
+                    path="sales-assistant"
+                    element={
+                        <Suspense fallback={null}>
+                            <SalesAssistant />
                         </Suspense>
                     }
                 />

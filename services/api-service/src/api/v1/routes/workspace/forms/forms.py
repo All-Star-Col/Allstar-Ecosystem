@@ -19,6 +19,7 @@ from src.services.forms_bulk_upload import (
 )
 from src.services.shared import build_etag_response
 from src.api.deps import get_current_user
+from src.core.config import settings
 from src.core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +30,23 @@ router = APIRouter()
 class BulkPurchaseOrderCommitRequest(BaseModel):
     rows: list[dict[str, Any]]
     create_missing: bool = True
+
+
+class SalesAssistantEmailImportRequest(BaseModel):
+    max_correos: int = 20
+
+
+def ensure_sales_assistant_enabled() -> None:
+    if not is_sales_assistant_enabled():
+        raise HTTPException(
+            status_code=404,
+            detail="El asistente IA de órdenes de compra está deshabilitado.",
+        )
+
+
+def is_sales_assistant_enabled() -> bool:
+    value = str(settings.SALES_ASSISTANT_ENABLED or "").strip().lower()
+    return value in {"1", "true", "yes", "y", "on", "enabled"}
 
 
 def get_forms_service(db: AsyncSession = Depends(get_db)) -> forms.FormsService:
@@ -235,6 +253,85 @@ async def commit_bulk_purchase_orders_endpoint(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("Error committing bulk purchase orders: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.get("/sales-assistant/status")
+async def get_sales_assistant_status_endpoint(
+    _current_user: User = Depends(get_current_user),
+):
+    return {"enabled": is_sales_assistant_enabled()}
+
+
+@router.get("/sales-assistant/preorders")
+async def list_sales_assistant_preorders_endpoint(
+    limit: int = Query(default=50, ge=1, le=200),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_sales_assistant_enabled()
+    try:
+        from src.services.sales_assistant import list_preorders
+
+        return {"items": await list_preorders(db, limit=limit)}
+    except Exception as e:
+        logger.exception("Error listing sales assistant preorders: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/sales-assistant/import-email")
+async def import_sales_assistant_email_endpoint(
+    payload: SalesAssistantEmailImportRequest,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_sales_assistant_enabled()
+    try:
+        from src.services.sales_assistant import (
+            SalesAssistantConfigError,
+            import_purchase_order_emails,
+        )
+
+        return await import_purchase_order_emails(
+            db,
+            max_emails=payload.max_correos,
+        )
+    except SalesAssistantConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error importing purchase order emails: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/sales-assistant/preorders/{preorder_id}/extract-ai")
+async def extract_sales_assistant_preorder_ai_endpoint(
+    preorder_id: int,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    ensure_sales_assistant_enabled()
+    try:
+        from src.services.sales_assistant import (
+            SalesAssistantAIError,
+            SalesAssistantConfigError,
+            extract_purchase_order_ai,
+        )
+
+        return {
+            "status": "success",
+            "extraccion_ia": await extract_purchase_order_ai(
+                db,
+                preorder_id=preorder_id,
+            ),
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except SalesAssistantConfigError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except SalesAssistantAIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.exception("Error extracting preorder with AI: %s", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 

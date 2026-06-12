@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # --- CONFIGS LOCALES ---
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 600
     CARPENTRY_DB_SCHEMA: str = "carpentry"
+    SALES_ASSISTANT_ENABLED: str = "false"
 
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:5173",

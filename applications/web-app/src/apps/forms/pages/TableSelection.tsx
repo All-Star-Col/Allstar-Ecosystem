@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { AlertCircle, ArrowLeft, FileSpreadsheet, Loader2, Search } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bot, FileSpreadsheet, Loader2, Search } from "lucide-react";
 
 import { CategoryAccordion } from "../components/CategoryAccordion";
 import { SearchBar } from "../components/SearchBar";
+import { fetchSalesAssistantStatus } from "../api";
 import { useTables } from "../store";
 import type { TableSchema } from "../schema";
 
@@ -56,8 +57,32 @@ export default function TableSelection() {
     const [openCategories, setOpenCategories] = useState<Record<string, boolean>>(
         {},
     );
+    const [salesAssistantEnabled, setSalesAssistantEnabled] = useState(false);
 
     const { categories, tables, loading, error } = useTables();
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadSalesAssistantStatus() {
+            try {
+                const status = await fetchSalesAssistantStatus();
+                if (!cancelled) {
+                    setSalesAssistantEnabled(Boolean(status.enabled));
+                }
+            } catch {
+                if (!cancelled) {
+                    setSalesAssistantEnabled(false);
+                }
+            }
+        }
+
+        void loadSalesAssistantStatus();
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const availableTables = useMemo(
         () => tables.filter((table) => !isProcessOrderTable(table)),
@@ -245,15 +270,28 @@ export default function TableSelection() {
 
                             </div>
                         </div>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => navigate("/app/forms/bulk/purchase-orders")}
-                        >
-                            <FileSpreadsheet className="mr-2 h-4 w-4" />
-                            Carga masiva
-                        </Button>
+                        <div className="flex items-center gap-2">
+                            {salesAssistantEnabled && (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => navigate("/app/forms/sales-assistant")}
+                                >
+                                    <Bot className="mr-2 h-4 w-4" />
+                                    Asistente IA OC
+                                </Button>
+                            )}
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => navigate("/app/forms/bulk/purchase-orders")}
+                            >
+                                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                                Carga masiva
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </header>
