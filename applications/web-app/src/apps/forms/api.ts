@@ -76,48 +76,6 @@ export interface BulkPurchaseOrderCommitAPI {
     created_products: number;
 }
 
-export interface SalesAssistantPreorderAPI {
-    id: number;
-    correo_id?: string | null;
-    remitente?: string | null;
-    asunto?: string | null;
-    fecha_correo?: string | null;
-    estado?: string | null;
-    archivo_fuente_url?: string | null;
-    observaciones_ia?: string | null;
-    json_extraido?: Record<string, unknown> | string | null;
-    created_at?: string | null;
-}
-
-export interface SalesAssistantImportSummaryAPI {
-    preordenes_creadas: number;
-    correos_ignorados: number;
-    duplicados: number;
-    errores: number;
-}
-
-export interface SalesAssistantAIExtractionAPI {
-    cliente: string | null;
-    oc_cliente: string | null;
-    oc_interno: string | null;
-    fecha_pedido: string | null;
-    observaciones: string | null;
-    items: {
-        producto: string | null;
-        tela: string | null;
-        cantidad: number | null;
-        valor_unitario: number | null;
-        notas: string | null;
-    }[];
-    confianza: number;
-    campos_pendientes: string[];
-}
-
-export interface SalesAssistantExtractAIResponseAPI {
-    status: string;
-    extraccion_ia: SalesAssistantAIExtractionAPI;
-}
-
 export interface RevalidateOptions {
     etag?: string | null;
     lastModified?: string | null;
@@ -550,89 +508,6 @@ export async function commitBulkPurchaseOrders(params: {
     }
 
     return (await response.json()) as BulkPurchaseOrderCommitAPI;
-}
-
-export async function fetchSalesAssistantPreorders(
-    limit = 50,
-): Promise<SalesAssistantPreorderAPI[]> {
-    const token = getToken();
-    const response = await fetch(
-        `${API_SERVER}/workspace/forms/sales-assistant/preorders?limit=${encodeURIComponent(
-            String(limit),
-        )}`,
-        {
-            headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-        },
-    );
-
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(
-            errorData?.detail ||
-                `No se pudieron cargar las preórdenes: ${response.statusText}`,
-        );
-    }
-
-    const payload = (await response.json()) as {
-        items?: SalesAssistantPreorderAPI[];
-    };
-    return payload.items ?? [];
-}
-
-export async function importSalesAssistantEmails(
-    maxCorreos = 20,
-): Promise<SalesAssistantImportSummaryAPI> {
-    const token = getToken();
-    const response = await fetch(
-        `${API_SERVER}/workspace/forms/sales-assistant/import-email`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-            body: JSON.stringify({ max_correos: maxCorreos }),
-        },
-    );
-
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(
-            errorData?.detail ||
-                `No se pudieron importar correos: ${response.statusText}`,
-        );
-    }
-
-    return (await response.json()) as SalesAssistantImportSummaryAPI;
-}
-
-export async function extractSalesAssistantPreorderAI(
-    preorderId: number,
-): Promise<SalesAssistantExtractAIResponseAPI> {
-    const token = getToken();
-    const response = await fetch(
-        `${API_SERVER}/workspace/forms/sales-assistant/preorders/${encodeURIComponent(
-            String(preorderId),
-        )}/extract-ai`,
-        {
-            method: "POST",
-            headers: {
-                ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            },
-        },
-    );
-
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(
-            errorData?.detail ||
-                `No se pudo ejecutar extracción IA: ${response.statusText}`,
-        );
-    }
-
-    return (await response.json()) as SalesAssistantExtractAIResponseAPI;
 }
 
 /*
