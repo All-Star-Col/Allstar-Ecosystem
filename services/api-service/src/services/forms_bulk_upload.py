@@ -573,6 +573,10 @@ def _number_signature(value: Any) -> frozenset[str]:
     return frozenset(re.findall(r"\d+", normalized))
 
 
+def _reference_number_tokens(value: Any) -> set[str]:
+    return set(re.findall(r"\d+", _normalize_match(value)))
+
+
 def _reference_family_signature(value: Any) -> str:
     normalized = _normalize_match(value)
     tokens = normalized.split()
@@ -590,12 +594,20 @@ def _reference_family_signature(value: Any) -> str:
     return normalized
 
 
+def _score_reference_match(label: Any, product_name: str) -> int:
+    label_numbers = _reference_number_tokens(label)
+    product_numbers = _reference_number_tokens(product_name)
+    if label_numbers and not label_numbers.issubset(product_numbers):
+        return 0
+    return _score_catalog_match(label, product_name)
+
+
 def _reference_matches_product(row: dict[str, Any], product_name: str) -> bool:
     label = _normalize_match(row.get("__label") or row.get("nombre"))
     product = _normalize_match(product_name)
     if not label or not product:
         return False
-    return _score_catalog_match(label, product) > 0
+    return _score_reference_match(label, product) > 0
 
 
 def _find_contained_lookups(
@@ -613,7 +625,7 @@ def _find_contained_lookups(
         row_id = str(row.get("id") or label)
         if row_id in seen_ids:
             continue
-        score = _score_catalog_match(label, product_name)
+        score = _score_reference_match(label, product_name)
         if score > 0:
             candidates.append((score, label, row))
             seen_ids.add(row_id)
@@ -652,7 +664,7 @@ def _reference_lookup_options(
         normalized_label = _normalize_match(label)
         if not normalized_label:
             continue
-        score = _score_catalog_match(normalized_label, product_name)
+        score = _score_reference_match(normalized_label, product_name)
         scored.append((score, label, row))
     scored.sort(key=lambda item: (-item[0], item[1]))
 

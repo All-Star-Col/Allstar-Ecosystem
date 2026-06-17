@@ -811,12 +811,12 @@ export default function BulkPurchaseOrderUpload() {
                                             tableScrollRef.current,
                                         )
                                     }
-                                    className="sticky top-0 z-20 overflow-x-auto overflow-y-hidden rounded-md border border-border bg-card"
+                                    className="fixed bottom-0 left-0 right-0 z-50 overflow-x-auto overflow-y-hidden border-t border-border bg-card/95 px-4 py-2 shadow-lg backdrop-blur"
                                 >
                                     <div
                                         style={{
                                             width: tableScrollWidth,
-                                            height: 12,
+                                            height: 14,
                                         }}
                                     />
                                 </div>
