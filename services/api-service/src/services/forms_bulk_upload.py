@@ -573,6 +573,31 @@ def _number_signature(value: Any) -> frozenset[str]:
     return frozenset(re.findall(r"\d+", normalized))
 
 
+def _reference_family_signature(value: Any) -> str:
+    normalized = _normalize_match(value)
+    tokens = normalized.split()
+    numbers = tuple(re.findall(r"\d+(?:\.\d+)?", normalized.replace(",", ".")))
+    semantic_tokens = {
+        token.rstrip("S")
+        for token in tokens
+        if not re.fullmatch(r"\d+(?:\.\d+)?", token)
+        and token not in {"X", "DE", "LA", "EL", "LOS", "LAS"}
+    }
+    if numbers and semantic_tokens:
+        return "|".join(["NUM", ",".join(numbers), ",".join(sorted(semantic_tokens))])
+    if numbers:
+        return "|".join(["NUM", ",".join(numbers)])
+    return normalized
+
+
+def _reference_matches_product(row: dict[str, Any], product_name: str) -> bool:
+    label = _normalize_match(row.get("__label") or row.get("nombre"))
+    product = _normalize_match(product_name)
+    if not label or not product:
+        return False
+    return _score_catalog_match(label, product) > 0
+
+
 def _find_contained_lookups(
     rows: list[dict[str, Any]],
     product_name: str,
@@ -595,17 +620,67 @@ def _find_contained_lookups(
     candidates.sort(key=lambda item: (-item[0], item[1]))
 
     selected: list[dict[str, Any]] = []
-    used_number_signatures: set[frozenset[str]] = set()
+    used_signatures: set[str] = set()
     for _, label, row in candidates:
-        signature = _number_signature(label)
-        if signature and signature in used_number_signatures:
+        signature = _reference_family_signature(label)
+        if signature and signature in used_signatures:
             continue
         selected.append(row)
         if signature:
-            used_number_signatures.add(signature)
+            used_signatures.add(signature)
         if len(selected) >= limit:
             break
     return selected
+
+
+def _reference_lookup_options(
+    rows: list[dict[str, Any]],
+    product_name: str,
+    selected_reference: dict[str, Any] | None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    selected_id = str(selected_reference.get("id")) if selected_reference and selected_reference.get("id") is not None else ""
+    selected_family = (
+        _reference_family_signature(selected_reference.get("__label") or selected_reference.get("nombre"))
+        if selected_reference
+        else ""
+    )
+
+    scored: list[tuple[int, str, dict[str, Any]]] = []
+    for row in rows:
+        label = str(row.get("__label") or row.get("nombre") or row.get("referencia") or "")
+        normalized_label = _normalize_match(label)
+        if not normalized_label:
+            continue
+        score = _score_catalog_match(normalized_label, product_name)
+        scored.append((score, label, row))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+
+    options: list[dict[str, Any]] = []
+    emitted_families: set[str] = set()
+    for score, label, row in scored:
+        row_id = str(row.get("id")) if row.get("id") is not None else ""
+        family = _reference_family_signature(label)
+        is_selected = bool(selected_id and row_id == selected_id)
+        if family and family in emitted_families and not is_selected:
+            continue
+        emitted_families.add(family)
+        is_suggested = is_selected or (
+            bool(selected_reference)
+            and bool(selected_family)
+            and family == selected_family
+            and _reference_matches_product(row, product_name)
+        )
+        options.append(
+            {
+                "id": row.get("id"),
+                "label": label,
+                "suggested": is_suggested,
+            }
+        )
+        if len(options) >= limit:
+            break
+    return options
 
 
 def _lookup_options(rows: list[dict[str, Any]], product_name: str, limit: int = 200) -> list[dict[str, Any]]:
@@ -942,9 +1017,9 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
                 "options": {
                     "base": _lookup_options(bases, product_name),
                     "modelo": _lookup_options(models, product_name),
-                    "referencia_1": _lookup_options(references, product_name),
-                    "referencia_2": _lookup_options(references, product_name),
-                    "referencia_3": _lookup_options(references, product_name),
+                    "referencia_1": _reference_lookup_options(references, product_name, reference_1),
+                    "referencia_2": _reference_lookup_options(references, product_name, reference_2),
+                    "referencia_3": _reference_lookup_options(references, product_name, reference_3),
                     "tela": _lookup_options(fabrics, row.tela),
                     "tela_unidad_medida": _lookup_options(units, product_name) or [
                         {"id": unit.get("id"), "label": str(unit.get("__label") or unit.get("nombre") or unit.get("id"))}

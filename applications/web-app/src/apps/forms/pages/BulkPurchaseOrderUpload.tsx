@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -164,7 +164,40 @@ export default function BulkPurchaseOrderUpload() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
+    const [tableScrollWidth, setTableScrollWidth] = useState(2020);
+    const tableScrollRef = useRef<HTMLDivElement | null>(null);
+    const topScrollRef = useRef<HTMLDivElement | null>(null);
     const revalidationRunsRef = useRef<Record<number, number>>({});
+
+    useEffect(() => {
+        const tableScroller = tableScrollRef.current;
+        if (!tableScroller) return;
+
+        const updateScrollWidth = () => {
+            setTableScrollWidth(tableScroller.scrollWidth);
+        };
+        updateScrollWidth();
+
+        const resizeObserver =
+            typeof ResizeObserver !== "undefined"
+                ? new ResizeObserver(updateScrollWidth)
+                : null;
+        resizeObserver?.observe(tableScroller);
+
+        window.addEventListener("resize", updateScrollWidth);
+        return () => {
+            resizeObserver?.disconnect();
+            window.removeEventListener("resize", updateScrollWidth);
+        };
+    }, [preview]);
+
+    const syncHorizontalScroll = (
+        source: HTMLDivElement | null,
+        target: HTMLDivElement | null,
+    ) => {
+        if (!source || !target || target.scrollLeft === source.scrollLeft) return;
+        target.scrollLeft = source.scrollLeft;
+    };
 
     const hasBlockingMissing = useMemo(
         () =>
@@ -770,7 +803,33 @@ export default function BulkPurchaseOrderUpload() {
 
                         {preview && preview.rows.length > 0 && (
                             <div className="space-y-4">
-                                <div className="max-h-[calc(100vh-360px)] overflow-auto rounded-md border border-border">
+                                <div
+                                    ref={topScrollRef}
+                                    onScroll={() =>
+                                        syncHorizontalScroll(
+                                            topScrollRef.current,
+                                            tableScrollRef.current,
+                                        )
+                                    }
+                                    className="sticky top-0 z-20 overflow-x-auto overflow-y-hidden rounded-md border border-border bg-card"
+                                >
+                                    <div
+                                        style={{
+                                            width: tableScrollWidth,
+                                            height: 12,
+                                        }}
+                                    />
+                                </div>
+                                <div
+                                    ref={tableScrollRef}
+                                    onScroll={() =>
+                                        syncHorizontalScroll(
+                                            tableScrollRef.current,
+                                            topScrollRef.current,
+                                        )
+                                    }
+                                    className="max-h-[calc(100vh-390px)] overflow-auto rounded-md border border-border"
+                                >
                                     <Table className="min-w-[2020px]">
                                         <TableHeader className="sticky top-0 z-10 bg-card">
                                             <TableRow>
