@@ -24,7 +24,7 @@ import { LoadingSkeleton } from "./LoadingSkeleton";
 import { RowEditSheet } from "./RowEditSheet";
 import {
     DataViewerApiError,
-    exportDataViewerCsv,
+    exportDataViewerExcel,
     fetchDataViewerTables,
     queryDataViewer,
     updateDataViewerRow,
@@ -60,6 +60,18 @@ const FILTER_OPERATOR_LABELS: Record<DataViewerFilterOperator, string> = {
     between: "entre",
 };
 
+const FILTER_OPERATOR_OPTIONS: {
+    value: DataViewerFilterOperator;
+    label: string;
+}[] = [
+    { value: "eq", label: "igual a" },
+    { value: "contains", label: "contiene" },
+    { value: "gt", label: "mayor que" },
+    { value: "lt", label: "menor que" },
+    { value: "in", label: "incluye" },
+    { value: "between", label: "entre" },
+];
+
 interface UiErrorState {
     code?: string;
     detail: string;
@@ -79,6 +91,77 @@ function clampLimit(limit?: number): number {
     }
 
     return Math.min(Math.max(limit, 1), MAX_LIMIT);
+}
+
+function isProductTable(table: DataViewerTable | undefined): boolean {
+    if (!table) {
+        return false;
+    }
+
+    const tableName = `${table.table_name} ${table.display_name} ${table.table_id}`
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    return /\bproductos?\b/.test(tableName);
+}
+
+function getReferenceColumnNumber(columnKey: string): 1 | 2 | 3 | null {
+    const normalized = columnKey
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+    const match = normalized.match(/(?:^|_)referencia_?([123])$/);
+    if (!match) {
+        return null;
+    }
+
+    const referenceNumber = Number(match[1]);
+    return referenceNumber === 1 || referenceNumber === 2 || referenceNumber === 3
+        ? referenceNumber
+        : null;
+}
+
+function placeReferenceColumnsTogether(
+    table: DataViewerTable | undefined,
+    columnKeys: string[],
+): string[] {
+    if (!isProductTable(table)) {
+        return columnKeys;
+    }
+
+    const referenceColumns = new Map<1 | 2 | 3, string>();
+    for (const columnKey of columnKeys) {
+        const referenceNumber = getReferenceColumnNumber(columnKey);
+        if (referenceNumber && !referenceColumns.has(referenceNumber)) {
+            referenceColumns.set(referenceNumber, columnKey);
+        }
+    }
+
+    const referenceOne = referenceColumns.get(1);
+    const referenceTwo = referenceColumns.get(2);
+    const referenceThree = referenceColumns.get(3);
+    if (!referenceOne || !referenceTwo || !referenceThree) {
+        return columnKeys;
+    }
+
+    const withoutExtraReferences = columnKeys.filter(
+        (column) => column !== referenceTwo && column !== referenceThree,
+    );
+    const referenceOneIndex = withoutExtraReferences.indexOf(referenceOne);
+    if (referenceOneIndex < 0) {
+        return columnKeys;
+    }
+
+    return [
+        ...withoutExtraReferences.slice(0, referenceOneIndex + 1),
+        referenceTwo,
+        referenceThree,
+        ...withoutExtraReferences.slice(referenceOneIndex + 1),
+    ];
 }
 
 function getInitialTableId(
@@ -117,6 +200,66 @@ function isNumericType(type: string): boolean {
 
 function isBooleanType(type: string): boolean {
     return type === "boolean";
+}
+
+function isTextualFilterColumn(column: DataViewerTable["columns"][number]): boolean {
+    const normalizedType = column.type.toLowerCase();
+    return (
+        normalizedType.includes("char") ||
+        normalizedType === "text" ||
+        normalizedType === "citext" ||
+        normalizedType === "uuid" ||
+        column.read_only_reason === "FOREIGN_KEY_DISPLAY_VALUE"
+    );
+}
+
+function getAllowedFilterOperators(
+    column: DataViewerTable["columns"][number] | undefined,
+): DataViewerFilterOperator[] {
+    if (!column) {
+        return ["eq", "contains", "gt", "lt", "in", "between"];
+    }
+
+    if (isBooleanType(column.type)) {
+        return ["eq"];
+    }
+
+    if (isDateType(column.type) || isDateTimeType(column.type)) {
+        return ["eq", "gt", "lt", "between"];
+    }
+
+    if (isNumericType(column.type) && column.read_only_reason !== "FOREIGN_KEY_DISPLAY_VALUE") {
+        return ["eq", "gt", "lt", "in", "between"];
+    }
+
+    if (isTextualFilterColumn(column)) {
+        return ["eq", "contains", "in"];
+    }
+
+    return ["eq", "contains"];
+}
+
+function isDateType(type: string): boolean {
+    const normalized = type.toLowerCase();
+    return normalized === "date";
+}
+
+function isDateTimeType(type: string): boolean {
+    const normalized = type.toLowerCase();
+    return normalized === "datetime" || normalized.includes("timestamp");
+}
+
+function getFilterInputType(columnType?: string): string {
+    if (!columnType) {
+        return "text";
+    }
+    if (isDateType(columnType)) {
+        return "date";
+    }
+    if (isDateTimeType(columnType)) {
+        return "datetime-local";
+    }
+    return "text";
 }
 
 function parseScalarValue(rawValue: string, columnType: string): unknown {
@@ -239,7 +382,7 @@ function isIdLikeColumn(columnName: string): boolean {
     return columnName === "id" || columnName.endsWith("_id");
 }
 
-function triggerCsvDownload(blob: Blob, filename: string) {
+function triggerFileDownload(blob: Blob, filename: string) {
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -349,6 +492,11 @@ export function DataViewerProModule({
         [activeTable],
     );
 
+    const allowedFilterOperators = useMemo(
+        () => getAllowedFilterOperators(activeDraftColumn),
+        [activeDraftColumn],
+    );
+
     const editableColumns = useMemo(
         () => getEditableColumns(activeTable),
         [activeTable],
@@ -364,11 +512,33 @@ export function DataViewerProModule({
             .filter((columnName) => visibleColumns.has(columnName));
 
         if (ordered.length > 0) {
-            return ordered;
+            return placeReferenceColumnsTogether(activeTable, ordered);
         }
 
-        return activeTable.columns.map((column) => column.name);
+        return placeReferenceColumnsTogether(
+            activeTable,
+            activeTable.columns.map((column) => column.name),
+        );
     }, [activeTable, visibleColumns]);
+
+    const orderedActiveColumns = useMemo(() => {
+        if (!activeTable) {
+            return [];
+        }
+
+        const columnsByName = new Map(
+            activeTable.columns.map((column) => [column.name, column]),
+        );
+
+        return placeReferenceColumnsTogether(
+            activeTable,
+            activeTable.columns.map((column) => column.name),
+        )
+            .map((columnName) => columnsByName.get(columnName))
+            .filter((column): column is DataViewerTable["columns"][number] =>
+                Boolean(column),
+            );
+    }, [activeTable]);
 
     const visibleColumnsFingerprint = useMemo(
         () => visibleColumnKeys.join("|"),
@@ -391,7 +561,7 @@ export function DataViewerProModule({
         return [...new Set(mergedColumns)];
     }, [activeTable, sort, visibleColumnKeys]);
 
-    const firstVisibleColumn = activeTable?.columns[0]?.name ?? "";
+    const firstVisibleColumn = orderedActiveColumns[0]?.name ?? "";
 
     useEffect(() => {
         const timeoutId = window.setTimeout(() => {
@@ -414,6 +584,17 @@ export function DataViewerProModule({
         includeTotal,
         visibleColumnsFingerprint,
     ]);
+
+    useEffect(() => {
+        if (!allowedFilterOperators.includes(draftFilter.operator)) {
+            setDraftFilter((previous) => ({
+                ...previous,
+                operator: "eq",
+                value: "",
+                valueTo: "",
+            }));
+        }
+    }, [allowedFilterOperators, draftFilter.operator]);
 
     useEffect(() => {
         if (!activeTable) {
@@ -841,9 +1022,9 @@ export function DataViewerProModule({
                 includeTotal: false,
             });
 
-            const { blob, filename } = await exportDataViewerCsv(exportPayload);
-            triggerCsvDownload(blob, filename);
-            toast.success("Archivo CSV exportado correctamente");
+            const { blob, filename } = await exportDataViewerExcel(exportPayload);
+            triggerFileDownload(blob, filename);
+            toast.success("Archivo Excel exportado correctamente");
         } catch (error) {
             const normalized = normalizeError(error);
             toast.error("No fue posible exportar el archivo", {
@@ -865,6 +1046,13 @@ export function DataViewerProModule({
     const canGoNext = queryResult.has_more;
 
     const draftValuePlaceholder = useMemo(() => {
+        if (
+            activeDraftColumn &&
+            (isDateType(activeDraftColumn.type) || isDateTimeType(activeDraftColumn.type))
+        ) {
+            return draftFilter.operator === "between" ? "Fecha inicial" : "Selecciona fecha";
+        }
+
         if (draftFilter.operator === "between") {
             return "Valor inicial";
         }
@@ -967,11 +1155,18 @@ export function DataViewerProModule({
                                             setDraftFilter((previous) => ({
                                                 ...previous,
                                                 column: nextColumn,
-                                                operator: isIdLikeColumn(
-                                                    nextColumn,
-                                                )
-                                                    ? "eq"
-                                                    : previous.operator,
+                                                operator:
+                                                    getAllowedFilterOperators(
+                                                        activeTable?.columns.find(
+                                                            (column) =>
+                                                                column.name ===
+                                                                nextColumn,
+                                                        ),
+                                                    ).includes(previous.operator)
+                                                        ? previous.operator
+                                                        : "eq",
+                                                value: "",
+                                                valueTo: "",
                                             }))
                                         }
                                         disabled={!activeTable}
@@ -983,7 +1178,7 @@ export function DataViewerProModule({
                                             <SelectValue placeholder="Columna" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {(activeTable?.columns ?? []).map(
+                                            {orderedActiveColumns.map(
                                                 (column) => (
                                                     <SelectItem
                                                         key={column.name}
@@ -1016,28 +1211,23 @@ export function DataViewerProModule({
                                             <SelectValue placeholder="Operador" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="eq">
-                                                igual a
-                                            </SelectItem>
-                                            <SelectItem value="contains">
-                                                contiene
-                                            </SelectItem>
-                                            <SelectItem value="gt">
-                                                mayor que
-                                            </SelectItem>
-                                            <SelectItem value="lt">
-                                                menor que
-                                            </SelectItem>
-                                            <SelectItem value="in">
-                                                incluye
-                                            </SelectItem>
-                                            <SelectItem value="between">
-                                                entre
-                                            </SelectItem>
+                                            {FILTER_OPERATOR_OPTIONS.filter((option) =>
+                                                allowedFilterOperators.includes(
+                                                    option.value,
+                                                ),
+                                            ).map((option) => (
+                                                <SelectItem
+                                                    key={option.value}
+                                                    value={option.value}
+                                                >
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
                                         </SelectContent>
                                     </Select>
 
                                     <Input
+                                        type={getFilterInputType(activeDraftColumn?.type)}
                                         value={draftFilter.value}
                                         onChange={(event) =>
                                             setDraftFilter((previous) => ({
@@ -1052,6 +1242,7 @@ export function DataViewerProModule({
 
                                     {draftFilter.operator === "between" && (
                                         <Input
+                                            type={getFilterInputType(activeDraftColumn?.type)}
                                             value={draftFilter.valueTo}
                                             onChange={(event) =>
                                                 setDraftFilter((previous) => ({
@@ -1128,7 +1319,7 @@ export function DataViewerProModule({
                         </div>
 
                         <DataToolbar
-                            onExportCSV={handleExport}
+                            onExportExcel={handleExport}
                             disabled={
                                 !activeTable || isTablesLoading || isExporting
                             }

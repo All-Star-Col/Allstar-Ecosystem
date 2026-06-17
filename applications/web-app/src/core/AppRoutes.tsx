@@ -37,6 +37,10 @@ export function AppRoutes() {
                     <Route element={<AppLayout />}>
                         <Route path="/dashboard" element={<Dashboard />} />
                         <Route path="/dashboard/profile" element={<Profile />} />
+                        <Route
+                            path="/app"
+                            element={<Navigate to="/dashboard" replace />}
+                        />
                         {modules.map((module) => (
                             <Route
                                 key={module.name}

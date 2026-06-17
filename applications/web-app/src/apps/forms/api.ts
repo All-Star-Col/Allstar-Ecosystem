@@ -46,6 +46,9 @@ export interface BulkPurchaseOrderRowAPI {
     base: string;
     modelo: string;
     referencia: string;
+    referencia_1?: string;
+    referencia_2?: string;
+    referencia_3?: string;
     tela: string;
     oc_interno: string;
     oc_cliente: string;
@@ -53,7 +56,7 @@ export interface BulkPurchaseOrderRowAPI {
     product_name: string;
     resolved: Record<string, string | number | null | undefined>;
     suggested?: Record<string, string | null | undefined>;
-    options?: Record<string, { id: string | number; label: string }[]>;
+    options?: Record<string, { id: string | number; label: string; suggested?: boolean }[]>;
     missing: string[];
     status: "ready" | "needs_approval";
 }
@@ -144,6 +147,39 @@ export interface RevalidateSingleResult<T> {
 export interface ForeignKeyLookupOptionAPI {
     value: string;
     label: string;
+}
+
+export interface ProductComposerOptionAPI {
+    value: string;
+    label: string;
+    nombre?: string | null;
+    referencia?: string | null;
+}
+
+export interface ComposeProductPayloadAPI {
+    base_id?: number | null;
+    base_nombre?: string;
+    modelo_id?: number | null;
+    modelo_nombre?: string;
+    referencia_id?: number | null;
+    referencia_nombre?: string;
+    referencia_1_id?: number | null;
+    referencia_1_nombre?: string;
+    referencia_2_id?: number | null;
+    referencia_2_nombre?: string;
+    referencia_3_id?: number | null;
+    referencia_3_nombre?: string;
+    tela_id?: number | null;
+    tela_nombre?: string;
+    tela_referencia?: string;
+    unidad_medida_id?: number | null;
+    precio?: number | null;
+}
+
+export interface ComposeProductResponseAPI {
+    id: number;
+    label: string;
+    created: boolean;
 }
 
 export interface ForeignKeyLookupParams {
@@ -466,6 +502,66 @@ export async function fetchColumnValues(params: {
     return normalizeForeignKeyLookupPayload(payload);
 }
 
+export async function fetchProductComposerOptions(params: {
+    part: "base" | "modelo" | "referencia" | "tela";
+    query?: string;
+    limit?: number;
+}): Promise<ProductComposerOptionAPI[]> {
+    const token = getToken();
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const searchParams = new URLSearchParams();
+    if (params.query) searchParams.set("q", params.query);
+    if (params.limit) searchParams.set("limit", String(params.limit));
+
+    const queryString = searchParams.toString();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/product-composer/options/${encodeURIComponent(
+            params.part,
+        )}${queryString ? `?${queryString}` : ""}`,
+        { headers },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail ||
+                `No se pudieron cargar opciones de ${params.part}: ${response.statusText}`,
+        );
+    }
+
+    const payload = (await response.json()) as {
+        items?: ProductComposerOptionAPI[];
+    };
+    return payload.items ?? [];
+}
+
+export async function composeProduct(
+    payload: ComposeProductPayloadAPI,
+): Promise<ComposeProductResponseAPI> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/product-composer/compose`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(payload),
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo crear producto: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as ComposeProductResponseAPI;
+}
+
 /*
  * Submit form data to the API
  */
@@ -554,6 +650,32 @@ export async function commitBulkPurchaseOrders(params: {
     }
 
     return (await response.json()) as BulkPurchaseOrderCommitAPI;
+}
+
+export async function revalidateBulkPurchaseOrderProduct(
+    row: BulkPurchaseOrderRowAPI,
+): Promise<BulkPurchaseOrderRowAPI> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/bulk/purchase-orders/revalidate-product`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ row }),
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo revalidar el producto: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as BulkPurchaseOrderRowAPI;
 }
 
 export async function fetchSalesAssistantPreorders(

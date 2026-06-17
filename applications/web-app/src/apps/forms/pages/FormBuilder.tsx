@@ -9,6 +9,7 @@ import { fetchForeignKeyLookup, submitFormData, fetchNextConsecutive, fetchUnass
 import type { SubmitFormAPI } from "../api";
 import { DynamicFormField } from "../components/DynamicFormField";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { ProductComposerDialog } from "../components/ProductComposerDialog";
 import { buildSubmitData } from "./formBuilderSubmit";
 import { buildInitialFormData } from "./formDefaults";
 import { deriveProductFields } from "./productDerivation";
@@ -40,6 +41,7 @@ export default function FormBuilder() {
     >({});
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [showProductComposer, setShowProductComposer] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [tableDetails, setTableDetails] = useState<TableSchema | undefined>();
     const [tableLoadError, setTableLoadError] = useState<string | null>(null);
@@ -66,6 +68,39 @@ export default function FormBuilder() {
         () => isProductDerivationContext(table?.name, visibleColumns),
         [table?.name, visibleColumns],
     );
+
+    const productColumnName = useMemo(() => {
+        if (!table) return null;
+        const tableName = table.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const displayName = table.displayName
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]/g, "");
+        const isPurchaseOrderTable =
+            tableName.includes("ordencompra") ||
+            tableName.includes("ordenescompra") ||
+            displayName.includes("ordenesdecompra") ||
+            displayName.includes("ordendecompra");
+        if (!isPurchaseOrderTable) {
+            return null;
+        }
+
+        const productColumn = visibleColumns.find((column) => {
+            const name = column.name.toLowerCase();
+            const foreignTable = column.foreignKeyTable
+                ?.toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
+            return (
+                name === "id_producto" ||
+                name === "producto_id" ||
+                name.includes("producto") ||
+                foreignTable === "producto" ||
+                foreignTable === "productos"
+            );
+        });
+        return productColumn?.name ?? null;
+    }, [table, visibleColumns]);
 
     useEffect(() => {
         let cancelled = false;
@@ -487,6 +522,20 @@ export default function FormBuilder() {
                                                 error={errors[column.name]}
                                                     selectedForeignKeyLabels={selectedForeignKeyLabels}
                                             />
+                                            {productColumnName === column.name && (
+                                                <div className="mt-2 flex justify-end">
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() =>
+                                                            setShowProductComposer(true)
+                                                        }
+                                                    >
+                                                        Crear producto
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -648,6 +697,16 @@ export default function FormBuilder() {
                 onOpenChange={setShowConfirmModal}
                 onConfirm={handleConfirm}
                 tableName={table?.displayName ?? ""}
+            />
+            <ProductComposerDialog
+                open={showProductComposer}
+                onOpenChange={setShowProductComposer}
+                onProductCreated={(product) => {
+                    if (!productColumnName) return;
+                    handleFieldChange(productColumnName, String(product.id));
+                    handleForeignKeyLabelChange(productColumnName, product.label);
+                    toast.success("Producto listo para la orden de compra");
+                }}
             />
         </div>
     );

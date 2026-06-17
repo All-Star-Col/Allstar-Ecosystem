@@ -240,7 +240,7 @@ async def export_data_viewer(
         )
         streaming_response = StreamingResponse(
             export_result.stream,
-            media_type="text/csv; charset=utf-8",
+            media_type="application/vnd.ms-excel; charset=utf-8",
             headers={
                 "Content-Disposition": f'attachment; filename="{export_result.filename}"',
                 "X-Request-ID": request_id,

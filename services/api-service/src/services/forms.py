@@ -1160,6 +1160,421 @@ async def get_column_values(
         raise DBCommunicationError(f"Error buscando valores de columna: {error}")
 
 
+PRODUCT_COMPOSER_PART_TABLES = {
+    "base": "base",
+    "modelo": "modelo",
+    "referencia": "referencia",
+    "tela": "tela",
+}
+
+
+def _clean_catalog_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+async def get_product_composer_options(
+    db: AsyncSession,
+    *,
+    part: str,
+    q: str | None = None,
+    limit: int = DEFAULT_LOOKUP_LIMIT,
+    offset: int = 0,
+) -> dict[str, Any]:
+    part_key = _normalize_identifier(part).lower()
+    table_name = PRODUCT_COMPOSER_PART_TABLES.get(part_key)
+    if not table_name:
+        raise IdentifierValidationError(f"Invalid product part: {part}")
+
+    _validate_lookup_pagination(limit=limit, offset=offset)
+    columns = {
+        _normalize_identifier(column["column_name"]).lower()
+        for column in await _get_table_columns(db, schema_name=FORMS_SCHEMA, table_name=table_name)
+    }
+    if "id" not in columns:
+        raise DBCommunicationError(f"La tabla {table_name} no tiene columna id")
+
+    quoted_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    quoted_table = _quote_identifier(table_name, field_name="composer_table")
+    params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
+
+    if table_name == "tela":
+        select_label = """
+            TRIM(CONCAT_WS(' ',
+                NULLIF(TRIM(COALESCE("nombre"::text, '')), ''),
+                NULLIF(TRIM(COALESCE("referencia"::text, '')), '')
+            )) AS label,
+            "nombre"::text AS nombre,
+            "referencia"::text AS referencia
+        """
+        where_clauses = ["1 = 1"]
+        normalized_q = _normalize_search_term(q)
+        if normalized_q:
+            where_clauses.append(
+                """(
+                    "nombre"::text ILIKE :q
+                    OR "referencia"::text ILIKE :q
+                    OR CONCAT_WS(' ', "nombre"::text, "referencia"::text) ILIKE :q
+                )"""
+            )
+            params["q"] = f"%{normalized_q}%"
+    else:
+        if "nombre" not in columns:
+            raise DBCommunicationError(f"La tabla {table_name} no tiene columna nombre")
+        select_label = '"nombre"::text AS label, "nombre"::text AS nombre, NULL::text AS referencia'
+        where_clauses = ["NULLIF(TRIM(\"nombre\"::text), '') IS NOT NULL"]
+        normalized_q = _normalize_search_term(q)
+        if normalized_q:
+            where_clauses.append('"nombre"::text ILIKE :q')
+            params["q"] = f"%{normalized_q}%"
+
+    query = text(
+        f"""
+        SELECT "id"::text AS value, {select_label}
+        FROM {quoted_schema}.{quoted_table}
+        WHERE {" AND ".join(where_clauses)}
+        ORDER BY label ASC NULLS LAST, "id" ASC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    result = await db.execute(query, params)
+    rows = result.mappings().all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    return {
+        "items": [
+            {
+                "value": str(row["value"]),
+                "label": str(row["label"] or row["value"]),
+                "nombre": row.get("nombre"),
+                "referencia": row.get("referencia"),
+            }
+            for row in rows
+        ],
+        "total": None,
+        "has_more": has_more,
+    }
+
+
+async def _find_or_create_named_entity(
+    db: AsyncSession,
+    *,
+    table_name: str,
+    entity_id: int | None,
+    nombre: str,
+) -> int:
+    if entity_id:
+        return int(entity_id)
+
+    clean_name = _clean_catalog_text(nombre)
+    if not clean_name:
+        raise DBCommunicationError(f"Falta nombre para crear {table_name}")
+
+    table_columns = {
+        _normalize_identifier(column["column_name"]).lower()
+        for column in await _get_table_columns(db, schema_name=FORMS_SCHEMA, table_name=table_name)
+    }
+    if "nombre" not in table_columns:
+        raise DBCommunicationError(f"La tabla {table_name} no tiene columna nombre")
+
+    quoted_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    quoted_table = _quote_identifier(table_name, field_name=f"{table_name}_table")
+    existing = await db.execute(
+        text(
+            f"""
+            SELECT "id"
+            FROM {quoted_schema}.{quoted_table}
+            WHERE LOWER(TRIM("nombre"::text)) = LOWER(TRIM(:nombre))
+            LIMIT 1
+            """
+        ),
+        {"nombre": clean_name},
+    )
+    existing_id = existing.scalar_one_or_none()
+    if existing_id is not None:
+        return int(existing_id)
+
+    row_data: dict[str, Any] = {"nombre": clean_name}
+    await _add_manual_integer_id_if_needed(db, table_name=table_name, row_data=row_data)
+    columns_sql = ", ".join(_quote_identifier(column, field_name="catalog_column") for column in row_data)
+    placeholders = ", ".join(f":{column}" for column in row_data)
+    result = await db.execute(
+        text(
+            f"""
+            INSERT INTO {quoted_schema}.{quoted_table} ({columns_sql})
+            VALUES ({placeholders})
+            RETURNING "id"
+            """
+        ),
+        row_data,
+    )
+    return int(result.scalar_one())
+
+
+async def _find_or_create_optional_named_entity(
+    db: AsyncSession,
+    *,
+    table_name: str,
+    entity_id: int | None,
+    nombre: str,
+) -> int | None:
+    clean_name = _clean_catalog_text(nombre)
+    if not entity_id and not clean_name:
+        return None
+    return await _find_or_create_named_entity(
+        db,
+        table_name=table_name,
+        entity_id=entity_id,
+        nombre=clean_name,
+    )
+
+
+async def _find_or_create_fabric(
+    db: AsyncSession,
+    *,
+    tela_id: int | None,
+    nombre: str,
+    referencia: str,
+    unidad_medida_id: int | None = None,
+) -> int:
+    if tela_id:
+        return int(tela_id)
+
+    clean_name = _clean_catalog_text(nombre)
+    clean_reference = _clean_catalog_text(referencia)
+    if not clean_name and not clean_reference:
+        raise DBCommunicationError("Falta nombre o referencia para crear tela")
+
+    table_columns = {
+        _normalize_identifier(column["column_name"]).lower()
+        for column in await _get_table_columns(db, schema_name=FORMS_SCHEMA, table_name="tela")
+    }
+    quoted_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    quoted_table = _quote_identifier("tela", field_name="tela_table")
+
+    existing = await db.execute(
+        text(
+            f"""
+            SELECT "id"
+            FROM {quoted_schema}.{quoted_table}
+            WHERE LOWER(TRIM(COALESCE("nombre"::text, ''))) = LOWER(TRIM(:nombre))
+              AND LOWER(TRIM(COALESCE("referencia"::text, ''))) = LOWER(TRIM(:referencia))
+            LIMIT 1
+            """
+        ),
+        {"nombre": clean_name, "referencia": clean_reference},
+    )
+    existing_id = existing.scalar_one_or_none()
+    if existing_id is not None:
+        return int(existing_id)
+
+    row_data: dict[str, Any] = {}
+    if "nombre" in table_columns:
+        row_data["nombre"] = clean_name or clean_reference
+    if "referencia" in table_columns:
+        row_data["referencia"] = clean_reference
+    if unidad_medida_id and "id_unidad_medida" in table_columns:
+        row_data["id_unidad_medida"] = int(unidad_medida_id)
+
+    await _add_manual_integer_id_if_needed(db, table_name="tela", row_data=row_data)
+    columns_sql = ", ".join(_quote_identifier(column, field_name="fabric_column") for column in row_data)
+    placeholders = ", ".join(f":{column}" for column in row_data)
+    result = await db.execute(
+        text(
+            f"""
+            INSERT INTO {quoted_schema}.{quoted_table} ({columns_sql})
+            VALUES ({placeholders})
+            RETURNING "id"
+            """
+        ),
+        row_data,
+    )
+    return int(result.scalar_one())
+
+
+async def compose_product(
+    db: AsyncSession,
+    *,
+    base_id: int | None = None,
+    base_nombre: str = "",
+    modelo_id: int | None = None,
+    modelo_nombre: str = "",
+    referencia_id: int | None = None,
+    referencia_nombre: str = "",
+    referencia_1_id: int | None = None,
+    referencia_1_nombre: str = "",
+    referencia_2_id: int | None = None,
+    referencia_2_nombre: str = "",
+    referencia_3_id: int | None = None,
+    referencia_3_nombre: str = "",
+    tela_id: int | None = None,
+    tela_nombre: str = "",
+    tela_referencia: str = "",
+    unidad_medida_id: int | None = None,
+    precio: Decimal | None = None,
+) -> dict[str, Any]:
+    try:
+        resolved_base_id = await _find_or_create_named_entity(
+            db, table_name="base", entity_id=base_id, nombre=base_nombre
+        )
+        resolved_modelo_id = await _find_or_create_named_entity(
+            db, table_name="modelo", entity_id=modelo_id, nombre=modelo_nombre
+        )
+        resolved_referencia_1_id = await _find_or_create_optional_named_entity(
+            db,
+            table_name="referencia",
+            entity_id=referencia_1_id or referencia_id,
+            nombre=referencia_1_nombre or referencia_nombre,
+        )
+        resolved_referencia_2_id = await _find_or_create_optional_named_entity(
+            db,
+            table_name="referencia",
+            entity_id=referencia_2_id,
+            nombre=referencia_2_nombre,
+        )
+        resolved_referencia_3_id = await _find_or_create_optional_named_entity(
+            db,
+            table_name="referencia",
+            entity_id=referencia_3_id,
+            nombre=referencia_3_nombre,
+        )
+        resolved_tela_id = await _find_or_create_fabric(
+            db,
+            tela_id=tela_id,
+            nombre=tela_nombre,
+            referencia=tela_referencia,
+            unidad_medida_id=unidad_medida_id,
+        )
+
+        quoted_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+        quoted_product_table = _quote_identifier("producto", field_name="producto_table")
+
+        product_columns = {
+            _normalize_identifier(column["column_name"]).lower()
+            for column in await _get_table_columns(db, schema_name=FORMS_SCHEMA, table_name="producto")
+        }
+        row_data: dict[str, Any] = {}
+        if "id_base" in product_columns:
+            row_data["id_base"] = resolved_base_id
+        if "id_modelo" in product_columns:
+            row_data["id_modelo"] = resolved_modelo_id
+        if "id_referencia_1" in product_columns:
+            row_data["id_referencia_1"] = resolved_referencia_1_id
+        elif "id_referencia" in product_columns:
+            row_data["id_referencia"] = resolved_referencia_1_id
+        if "id_referencia_2" in product_columns:
+            row_data["id_referencia_2"] = resolved_referencia_2_id
+        if "id_referencia_3" in product_columns:
+            row_data["id_referencia_3"] = resolved_referencia_3_id
+        if "id_tela" in product_columns:
+            row_data["id_tela"] = resolved_tela_id
+        if precio is not None and "precio" in product_columns:
+            row_data["precio"] = precio
+        if "fecha_modificacion" in product_columns:
+            row_data["fecha_modificacion"] = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        labels_result = await db.execute(
+            text(
+                f"""
+                SELECT
+                    b."nombre"::text AS base,
+                    m."nombre"::text AS modelo,
+                    r1."nombre"::text AS referencia_1,
+                    r2."nombre"::text AS referencia_2,
+                    r3."nombre"::text AS referencia_3,
+                    TRIM(CONCAT_WS(' ',
+                        NULLIF(TRIM(COALESCE(t."nombre"::text, '')), ''),
+                        NULLIF(TRIM(COALESCE(t."referencia"::text, '')), '')
+                    )) AS tela
+                FROM {quoted_schema}."base" b
+                JOIN {quoted_schema}."modelo" m ON m."id" = :modelo_id
+                LEFT JOIN {quoted_schema}."referencia" r1 ON r1."id" = :referencia_1_id
+                LEFT JOIN {quoted_schema}."referencia" r2 ON r2."id" = :referencia_2_id
+                LEFT JOIN {quoted_schema}."referencia" r3 ON r3."id" = :referencia_3_id
+                JOIN {quoted_schema}."tela" t ON t."id" = :tela_id
+                WHERE b."id" = :base_id
+                """
+            ),
+            {
+                "base_id": resolved_base_id,
+                "modelo_id": resolved_modelo_id,
+                "referencia_1_id": resolved_referencia_1_id,
+                "referencia_2_id": resolved_referencia_2_id,
+                "referencia_3_id": resolved_referencia_3_id,
+                "tela_id": resolved_tela_id,
+            },
+        )
+        labels = dict(labels_result.mappings().first() or {})
+        product_name = " ".join(
+            part
+            for part in (
+                _clean_catalog_text(labels.get("base")),
+                _clean_catalog_text(labels.get("modelo")),
+                _clean_catalog_text(labels.get("referencia_1")),
+                _clean_catalog_text(labels.get("referencia_2")),
+                _clean_catalog_text(labels.get("referencia_3")),
+                _clean_catalog_text(labels.get("tela")),
+            )
+            if part
+        )
+        if "nombre" in product_columns:
+            row_data["nombre"] = product_name
+
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
+        for column, value in row_data.items():
+            if column.startswith("id_"):
+                where_clauses.append(f"{_quote_identifier(column, field_name='product_match_column')} IS NOT DISTINCT FROM :{column}")
+                params[column] = value
+        if where_clauses:
+            existing_product = await db.execute(
+                text(
+                    f"""
+                    SELECT "id", "nombre"::text AS nombre
+                    FROM {quoted_schema}.{quoted_product_table}
+                    WHERE {" AND ".join(where_clauses)}
+                    LIMIT 1
+                    """
+                ),
+                params,
+            )
+            row = existing_product.mappings().first()
+            if row:
+                await db.commit()
+                return {
+                    "id": int(row["id"]),
+                    "label": str(row["nombre"] or product_name),
+                    "created": False,
+                }
+
+        await _add_manual_integer_id_if_needed(db, table_name="producto", row_data=row_data)
+        columns_sql = ", ".join(_quote_identifier(column, field_name="product_column") for column in row_data)
+        placeholders = ", ".join(f":{column}" for column in row_data)
+        result = await db.execute(
+            text(
+                f"""
+                INSERT INTO {quoted_schema}.{quoted_product_table} ({columns_sql})
+                VALUES ({placeholders})
+                RETURNING "id", "nombre"::text AS nombre
+                """
+            ),
+            row_data,
+        )
+        created = result.mappings().first()
+        await db.commit()
+        return {
+            "id": int(created["id"]),
+            "label": str(created["nombre"] or product_name),
+            "created": True,
+        }
+    except IdentifierValidationError:
+        await db.rollback()
+        raise
+    except Exception as error:
+        await db.rollback()
+        raise DBCommunicationError(f"No se pudo crear producto compuesto: {error}")
+
+
 async def get_next_consecutive(
     db: AsyncSession,
     *,
@@ -2328,6 +2743,25 @@ class FormsService:
             column_name=column_name,
             user_id=user_id,
         )
+
+    async def get_product_composer_options(
+        self,
+        *,
+        part: str,
+        q: str | None = None,
+        limit: int = DEFAULT_LOOKUP_LIMIT,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return await get_product_composer_options(
+            self.db,
+            part=part,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def compose_product(self, **payload: Any) -> dict[str, Any]:
+        return await compose_product(self.db, **payload)
 
     async def get_unassigned_orders(
         self,

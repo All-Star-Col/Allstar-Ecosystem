@@ -24,7 +24,7 @@ export default function NotFound() {
 
                             <div className="mt-5 flex flex-wrap gap-3">
                                 <a
-                                    href="/"
+                                    href="/dashboard"
                                     className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:opacity-95"
                                 >
                                     Go to Dashboard

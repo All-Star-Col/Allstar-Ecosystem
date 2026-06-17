@@ -21,14 +21,15 @@ from src.services.forms import (
 
 ORDER_HEADERS = {
     "cliente": "Cliente",
-    "oc_interno": "Oc interno",
     "oc_cliente": "Oc cliente",
     "cantidad": "Cantidad",
 }
 FULL_PRODUCT_HEADERS = {
     "base": "Base",
     "modelo": "Modelo",
-    "referencia": "Referencia",
+    "referencia_1": "Referencia 1",
+    "referencia_2": "Referencia 2",
+    "referencia_3": "Referencia 3",
     "tela": "Tela",
 }
 COMPACT_PRODUCT_HEADERS = {
@@ -53,7 +54,9 @@ class BulkRow:
     product_name: str
     base: str
     modelo: str
-    referencia: str
+    referencia_1: str
+    referencia_2: str
+    referencia_3: str
     tela: str
     oc_interno: str
     oc_cliente: str
@@ -292,18 +295,26 @@ async def _get_or_create_product_row(
     *,
     base_id: Any,
     model_id: Any,
-    reference_id: Any,
+    reference_1_id: Any = None,
+    reference_2_id: Any = None,
+    reference_3_id: Any = None,
     fabric_id: Any,
     product_name: str,
 ) -> dict[str, Any]:
-    product_sku = _build_product_sku(base_id, model_id, reference_id, fabric_id)
     rows = await _fetch_lookup(db, "producto", label_columns=("nombre", "sku"))
     existing = next(
         (
             row
             for row in rows
-            if _normalize_match(row.get("sku")) == _normalize_match(product_sku)
-            or _normalize_match(row.get("nombre")) == _normalize_match(product_name)
+            if _normalize_match(row.get("nombre")) == _normalize_match(product_name)
+            or (
+                str(row.get("id_base") or "") == str(base_id or "")
+                and str(row.get("id_modelo") or "") == str(model_id or "")
+                and str(row.get("id_referencia_1") or row.get("id_referencia") or "") == str(reference_1_id or "")
+                and str(row.get("id_referencia_2") or "") == str(reference_2_id or "")
+                and str(row.get("id_referencia_3") or "") == str(reference_3_id or "")
+                and str(row.get("id_tela") or "") == str(fabric_id or "")
+            )
         ),
         None,
     )
@@ -317,9 +328,10 @@ async def _get_or_create_product_row(
         {
             "id_base": base_id,
             "id_modelo": model_id,
-            "id_referencia": reference_id,
+            "id_referencia_1": reference_1_id,
+            "id_referencia_2": reference_2_id,
+            "id_referencia_3": reference_3_id,
             "id_tela": fabric_id,
-            "sku": product_sku,
             "nombre": product_name,
             "fecha_modificacion": datetime.now(),
         },
@@ -391,41 +403,227 @@ def _find_by_label(rows: list[dict[str, Any]], value: str) -> dict[str, Any] | N
     return None
 
 
+def _find_by_id(rows: list[dict[str, Any]], value: Any) -> dict[str, Any] | None:
+    if value is None or str(value).strip() == "":
+        return None
+    target = str(value)
+    return next((row for row in rows if str(row.get("id")) == target), None)
+
+
+def _first_value(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
+
+def _find_product_by_name_tokens(
+    products: list[dict[str, Any]],
+    product_name: str,
+) -> dict[str, Any] | None:
+    target_tokens = _normalize_match(product_name).split()
+    if not target_tokens:
+        return None
+
+    candidates: list[tuple[int, str, dict[str, Any]]] = []
+    for product in products:
+        label = product.get("nombre") or product.get("__label")
+        label_tokens = _normalize_match(label).split()
+        if not label_tokens:
+            continue
+        if _token_groups_match(label_tokens, target_tokens, require_same_size=True):
+            candidates.append((len(label_tokens), str(label), product))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return candidates[0][2]
+
+
+def _is_near_text_token(expected: str, actual: str) -> bool:
+    if expected == actual:
+        return True
+    if expected.rstrip("S") == actual.rstrip("S") and min(len(expected), len(actual)) >= 5:
+        return True
+    if expected.endswith("ES") and expected[:-2] == actual and len(actual) >= 5:
+        return True
+    if actual.endswith("ES") and actual[:-2] == expected and len(expected) >= 5:
+        return True
+    if len(expected) < 5 or len(actual) < 5:
+        return False
+    if expected.isdigit() or actual.isdigit():
+        return False
+    if abs(len(expected) - len(actual)) > 1:
+        return False
+
+    if len(expected) == len(actual):
+        differences = [index for index, char in enumerate(expected) if char != actual[index]]
+        if len(differences) <= 1:
+            return True
+        if len(differences) == 2:
+            first, second = differences
+            return (
+                second == first + 1
+                and expected[first] == actual[second]
+                and expected[second] == actual[first]
+            )
+
+    previous = current = range(len(actual) + 1)
+    for index_expected, char_expected in enumerate(expected, start=1):
+        previous, current = current, [index_expected]
+        for index_actual, char_actual in enumerate(actual, start=1):
+            insert_cost = current[index_actual - 1] + 1
+            delete_cost = previous[index_actual] + 1
+            replace_cost = previous[index_actual - 1] + (char_expected != char_actual)
+            current.append(min(insert_cost, delete_cost, replace_cost))
+    return current[-1] <= 1
+
+
+def _expand_compound_measure_tokens(tokens: list[str]) -> list[str]:
+    expanded = list(tokens)
+    for index, token in enumerate(tokens[:-1]):
+        next_token = tokens[index + 1]
+        if len(token) == 1 and token.isalpha() and next_token.isdigit():
+            expanded.append(f"{token}{next_token}")
+        if token.isdigit() and len(next_token) == 1 and next_token.isalpha():
+            expanded.append(f"{token}{next_token}")
+    return expanded
+
+
+def _token_groups_match(
+    expected_tokens: list[str],
+    actual_tokens: list[str],
+    *,
+    require_same_size: bool = False,
+) -> bool:
+    expected_tokens = _expand_compound_measure_tokens(expected_tokens)
+    actual_tokens = _expand_compound_measure_tokens(actual_tokens)
+
+    if require_same_size and len(expected_tokens) > len(actual_tokens):
+        return False
+
+    used_indexes: set[int] = set()
+    for expected in expected_tokens:
+        matched_index = next(
+            (
+                index
+                for index, actual in enumerate(actual_tokens)
+                if index not in used_indexes and _is_near_text_token(expected, actual)
+            ),
+            None,
+        )
+        if matched_index is None:
+            return False
+        used_indexes.add(matched_index)
+    return True
+
+
+def _score_catalog_match(label: Any, product_name: str) -> int:
+    normalized_label = _normalize_match(label)
+    normalized_product = _normalize_match(product_name)
+    if not normalized_label or not normalized_product:
+        return 0
+
+    label_tokens = [token for token in normalized_label.split() if token]
+    product_tokens = [token for token in normalized_product.split() if token]
+    if not label_tokens or not product_tokens:
+        return 0
+
+    if not _token_groups_match(label_tokens, product_tokens):
+        matched_tokens = [
+            label_token
+            for label_token in label_tokens
+            if len(label_token) >= 5
+            and any(_is_near_text_token(label_token, product_token) for product_token in product_tokens)
+        ]
+        if not matched_tokens:
+            return 0
+        score = len(set(matched_tokens)) * 10 + 40
+        score += sum(len(token) for token in set(matched_tokens))
+        return score
+
+    score = len(set(label_tokens)) * 10 + 100
+    if f" {normalized_label} " in f" {normalized_product} ":
+        score += 50
+    score += len(normalized_label)
+    return score
+
+
 def _find_contained_lookup(
     rows: list[dict[str, Any]],
     product_name: str,
 ) -> dict[str, Any] | None:
-    normalized_product = f" {_normalize_match(product_name)} "
     candidates: list[tuple[int, dict[str, Any]]] = []
     for row in rows:
         label = _normalize_match(row.get("__label") or row.get("nombre"))
         if not label:
             continue
-        if f" {label} " in normalized_product:
-            candidates.append((len(label), row))
+        score = _score_catalog_match(label, product_name)
+        if score > 0:
+            candidates.append((score, row))
     if not candidates:
         return None
     candidates.sort(key=lambda item: item[0], reverse=True)
     return candidates[0][1]
 
 
-def _lookup_options(rows: list[dict[str, Any]], product_name: str, limit: int = 6) -> list[dict[str, Any]]:
-    product_tokens = set(_normalize_match(product_name).split())
+def _number_signature(value: Any) -> frozenset[str]:
+    normalized = _normalize_match(value)
+    return frozenset(re.findall(r"\d+", normalized))
+
+
+def _find_contained_lookups(
+    rows: list[dict[str, Any]],
+    product_name: str,
+    *,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    candidates: list[tuple[int, str, dict[str, Any]]] = []
+    seen_ids: set[str] = set()
+    for row in rows:
+        label = _normalize_match(row.get("__label") or row.get("nombre"))
+        if not label:
+            continue
+        row_id = str(row.get("id") or label)
+        if row_id in seen_ids:
+            continue
+        score = _score_catalog_match(label, product_name)
+        if score > 0:
+            candidates.append((score, label, row))
+            seen_ids.add(row_id)
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+
+    selected: list[dict[str, Any]] = []
+    used_number_signatures: set[frozenset[str]] = set()
+    for _, label, row in candidates:
+        signature = _number_signature(label)
+        if signature and signature in used_number_signatures:
+            continue
+        selected.append(row)
+        if signature:
+            used_number_signatures.add(signature)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _lookup_options(rows: list[dict[str, Any]], product_name: str, limit: int = 200) -> list[dict[str, Any]]:
     scored: list[tuple[int, str, dict[str, Any]]] = []
     for row in rows:
         label = str(row.get("__label") or row.get("nombre") or row.get("referencia") or "")
         normalized_label = _normalize_match(label)
         if not normalized_label:
             continue
-        label_tokens = set(normalized_label.split())
-        score = len(product_tokens.intersection(label_tokens))
-        if f" {normalized_label} " in f" {_normalize_match(product_name)} ":
-            score += 10
-        if score > 0:
-            scored.append((score, label, row))
+        score = _score_catalog_match(normalized_label, product_name)
+        scored.append((score, label, row))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [
-        {"id": item[2].get("id"), "label": str(item[2].get("__label") or item[1])}
+        {
+            "id": item[2].get("id"),
+            "label": str(item[2].get("__label") or item[1]),
+            "suggested": item[0] > 0,
+        }
         for item in scored[:limit]
         if item[2].get("id") is not None
     ]
@@ -434,18 +632,64 @@ def _lookup_options(rows: list[dict[str, Any]], product_name: str, limit: int = 
 def _build_product_name(row: BulkRow) -> str:
     if row.product_name:
         return row.product_name
-    parts = [row.base, row.modelo, row.referencia, row.tela]
+    parts = [row.base, row.modelo, row.referencia_1, row.referencia_2, row.referencia_3, row.tela]
     return " ".join(part for part in parts if part).strip()
+
+
+def _product_search_names(
+    product_name: str,
+    row: BulkRow,
+    fabric: dict[str, Any] | None,
+) -> list[str]:
+    candidates = [
+        product_name,
+        " ".join(part for part in (product_name, row.tela) if part).strip(),
+    ]
+    if fabric:
+        fabric_label = _component_text(fabric.get("__label") or fabric.get("nombre"))
+        fabric_name = _component_text(fabric.get("nombre"))
+        fabric_reference = _component_text(fabric.get("referencia"))
+        candidates.extend(
+            [
+                " ".join(part for part in (product_name, fabric_label) if part).strip(),
+                " ".join(
+                    part for part in (product_name, fabric_name, fabric_reference) if part
+                ).strip(),
+            ]
+        )
+
+    seen: set[str] = set()
+    normalized_candidates: list[str] = []
+    for candidate in candidates:
+        normalized = _normalize_match(candidate)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            normalized_candidates.append(candidate)
+    return normalized_candidates
+
+
+def _find_product_by_search_names(
+    products: list[dict[str, Any]],
+    search_names: list[str],
+) -> dict[str, Any] | None:
+    for search_name in search_names:
+        product = _find_by_label(products, search_name) or _find_product_by_name_tokens(
+            products,
+            search_name,
+        )
+        if product:
+            return product
+    return None
 
 
 def _split_fabric_text(value: Any) -> tuple[str, str]:
     text_value = _display_text(value)
     if "-" not in text_value:
-        return text_value, text_value
+        return text_value, ""
     name, reference = text_value.split("-", 1)
     name = _display_text(name)
     reference = _display_text(reference)
-    return name, reference or name
+    return name, reference
 
 
 def _default_fabric_parts(value: Any) -> dict[str, str]:
@@ -468,11 +712,48 @@ def _build_final_product_name(row: BulkRow, suggested: dict[str, Any]) -> str:
     parts = [
         _component_text(suggested.get("base") or row.base),
         _component_text(suggested.get("modelo") or row.modelo),
-        _component_text(suggested.get("referencia") or row.referencia),
+        _component_text(suggested.get("referencia_1") or row.referencia_1),
+        _component_text(suggested.get("referencia_2") or row.referencia_2),
+        _component_text(suggested.get("referencia_3") or row.referencia_3),
         fabric_text or _component_text(row.tela),
     ]
     combined = " ".join(part for part in parts if part).strip()
     return combined or _build_product_name(row)
+
+
+def _build_product_name_from_payload(
+    row: BulkRow,
+    suggested: dict[str, Any],
+    fabric: dict[str, Any] | None = None,
+) -> str:
+    if fabric:
+        fabric_text = _component_text(fabric.get("__label") or fabric.get("nombre"))
+    else:
+        fabric_name = _component_text(suggested.get("tela_nombre"))
+        fabric_reference = _component_text(suggested.get("tela_referencia"))
+        fabric_parts = []
+        for part in (fabric_name, fabric_reference):
+            if part and part not in fabric_parts:
+                fabric_parts.append(part)
+        fabric_text = " ".join(fabric_parts) or _component_text(suggested.get("tela") or row.tela)
+
+    parts = [
+        _component_text(suggested.get("base") or row.base),
+        _component_text(suggested.get("modelo") or row.modelo),
+        _component_text(suggested.get("referencia_1") or row.referencia_1),
+        _component_text(suggested.get("referencia_2") or row.referencia_2),
+        _component_text(suggested.get("referencia_3") or row.referencia_3),
+        fabric_text,
+    ]
+
+    unique_parts: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        key = _normalize_match(part)
+        if key and key not in seen:
+            seen.add(key)
+            unique_parts.append(part)
+    return " ".join(unique_parts).strip() or _build_final_product_name(row, suggested)
 
 
 def _build_product_sku(base_id: Any, model_id: Any, reference_id: Any, fabric_id: Any) -> str:
@@ -491,7 +772,7 @@ def parse_purchase_order_excel(content: bytes) -> list[BulkRow]:
         for key, label in ORDER_HEADERS.items()
         if key not in headers
     ]
-    has_full_product = all(key in headers for key in FULL_PRODUCT_HEADERS)
+    has_full_product = {"base", "modelo", "tela"}.issubset(headers)
     has_compact_product = all(key in headers for key in COMPACT_PRODUCT_HEADERS)
     if not raw_rows:
         raise DBCommunicationError("El archivo no tiene filas para cargar")
@@ -512,7 +793,9 @@ def parse_purchase_order_excel(content: bytes) -> list[BulkRow]:
                     product_name=_component_text(raw.get("nombre")),
                     base=_component_text(raw.get("base")),
                     modelo=_component_text(raw.get("modelo")),
-                    referencia=_component_text(raw.get("referencia")),
+                    referencia_1=_component_text(raw.get("referencia_1") or raw.get("referencia")),
+                    referencia_2=_component_text(raw.get("referencia_2")),
+                    referencia_3=_component_text(raw.get("referencia_3")),
                     tela=_component_text(raw.get("tela")),
                     oc_interno=_clean_cell_text(raw.get("oc_interno")),
                     oc_cliente=_clean_cell_text(raw.get("oc_cliente")),
@@ -524,6 +807,23 @@ def parse_purchase_order_excel(content: bytes) -> list[BulkRow]:
                 f"Fila {raw.get('_row_number')}: no se pudo leer la fila ({error})"
             )
     return rows
+
+
+def _bulk_row_from_payload(payload: dict[str, Any]) -> BulkRow:
+    return BulkRow(
+        row_number=int(payload.get("row_number") or 0),
+        cliente=_clean_cell_text(payload.get("cliente")),
+        product_name=_component_text(payload.get("product_name")),
+        base=_component_text(payload.get("base")),
+        modelo=_component_text(payload.get("modelo")),
+        referencia_1=_component_text(payload.get("referencia_1") or payload.get("referencia")),
+        referencia_2=_component_text(payload.get("referencia_2")),
+        referencia_3=_component_text(payload.get("referencia_3")),
+        tela=_component_text(payload.get("tela")),
+        oc_interno=_clean_cell_text(payload.get("oc_interno")),
+        oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
+        cantidad=_parse_int(payload.get("cantidad") or 1),
+    )
 
 
 async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dict[str, Any]:
@@ -547,22 +847,54 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
         product_name = _build_product_name(row)
         base = _find_by_label(bases, row.base) if row.base else _find_contained_lookup(bases, product_name)
         model = _find_by_label(models, row.modelo) if row.modelo else _find_contained_lookup(models, product_name)
-        reference = _find_by_label(references, row.referencia) if row.referencia else _find_contained_lookup(references, product_name)
+        contained_references = _find_contained_lookups(references, product_name, limit=3)
+        reference_1 = _find_by_label(references, row.referencia_1) if row.referencia_1 else (contained_references[0] if len(contained_references) > 0 else None)
+        reference_2 = _find_by_label(references, row.referencia_2) if row.referencia_2 else (contained_references[1] if len(contained_references) > 1 else None)
+        reference_3 = _find_by_label(references, row.referencia_3) if row.referencia_3 else (contained_references[2] if len(contained_references) > 2 else None)
         fabric = _find_by_label(fabrics, row.tela)
         default_unit = units[0] if units else None
         fabric_parts = _default_fabric_parts(row.tela)
+        product_search_names = _product_search_names(product_name, row, fabric)
 
-        product = _find_by_label(products, product_name)
-        if not product and base and model and reference and fabric:
-            product_sku = _build_product_sku(base.get("id"), model.get("id"), reference.get("id"), fabric.get("id"))
-            product = next((item for item in products if _normalize_match(item.get("sku")) == _normalize_match(product_sku)), None)
+        product = _find_product_by_search_names(products, product_search_names)
+        if not product and base and model and fabric:
+            product = next(
+                (
+                    item
+                    for item in products
+                    if str(item.get("id_base") or "") == str(base.get("id") or "")
+                    and str(item.get("id_modelo") or "") == str(model.get("id") or "")
+                    and str(item.get("id_referencia_1") or item.get("id_referencia") or "") == str((reference_1 or {}).get("id") or "")
+                    and str(item.get("id_referencia_2") or "") == str((reference_2 or {}).get("id") or "")
+                    and str(item.get("id_referencia_3") or "") == str((reference_3 or {}).get("id") or "")
+                    and str(item.get("id_tela") or "") == str(fabric.get("id") or "")
+                ),
+                None,
+            )
+
+        if product:
+            product_base = _find_by_id(bases, product.get("id_base"))
+            product_model = _find_by_id(models, product.get("id_modelo"))
+            product_reference_1 = _find_by_id(
+                references,
+                _first_value(product, "id_referencia_1", "id_referencia"),
+            )
+            product_reference_2 = _find_by_id(references, product.get("id_referencia_2"))
+            product_reference_3 = _find_by_id(references, product.get("id_referencia_3"))
+            product_fabric = _find_by_id(fabrics, product.get("id_tela"))
+
+            base = product_base or base
+            model = product_model or model
+            reference_1 = product_reference_1
+            reference_2 = product_reference_2
+            reference_3 = product_reference_3
+            fabric = product_fabric or fabric
 
         missing = []
         for key, resolved in (
             ("cliente", client),
             ("base", base),
             ("modelo", model),
-            ("referencia", reference),
             ("tela", fabric),
         ):
             if not resolved:
@@ -576,7 +908,9 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
                 "cliente": row.cliente,
                 "base": row.base,
                 "modelo": row.modelo,
-                "referencia": row.referencia,
+                "referencia_1": row.referencia_1,
+                "referencia_2": row.referencia_2,
+                "referencia_3": row.referencia_3,
                 "tela": row.tela,
                 "oc_interno": row.oc_interno,
                 "oc_cliente": row.oc_cliente,
@@ -586,7 +920,9 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
                     "cliente_id": client.get("id") if client else None,
                     "base_id": base.get("id") if base else None,
                     "modelo_id": model.get("id") if model else None,
-                    "referencia_id": reference.get("id") if reference else None,
+                    "referencia_1_id": reference_1.get("id") if reference_1 else None,
+                    "referencia_2_id": reference_2.get("id") if reference_2 else None,
+                    "referencia_3_id": reference_3.get("id") if reference_3 else None,
                     "tela_id": fabric.get("id") if fabric else None,
                     "tela_unidad_medida_id": default_unit.get("id") if default_unit else None,
                     "producto_id": product.get("id") if product else None,
@@ -594,16 +930,21 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
                 "suggested": {
                     "base": str(base.get("__label") or base.get("nombre") or "") if base else row.base,
                     "modelo": str(model.get("__label") or model.get("nombre") or "") if model else row.modelo,
-                    "referencia": str(reference.get("__label") or reference.get("nombre") or "") if reference else row.referencia,
+                    "referencia_1": str(reference_1.get("__label") or reference_1.get("nombre") or "") if reference_1 else row.referencia_1,
+                    "referencia_2": str(reference_2.get("__label") or reference_2.get("nombre") or "") if reference_2 else row.referencia_2,
+                    "referencia_3": str(reference_3.get("__label") or reference_3.get("nombre") or "") if reference_3 else row.referencia_3,
                     "tela": str(fabric.get("__label") or fabric.get("nombre") or "") if fabric else row.tela,
                     "tela_nombre": fabric_parts["tela_nombre"],
                     "tela_referencia": fabric_parts["tela_referencia"],
                     "tela_unidad_medida": str(default_unit.get("__label") or default_unit.get("nombre") or "") if default_unit else "",
+                    "producto": str(product.get("nombre") or product.get("__label") or "") if product else "",
                 },
                 "options": {
                     "base": _lookup_options(bases, product_name),
                     "modelo": _lookup_options(models, product_name),
-                    "referencia": _lookup_options(references, product_name),
+                    "referencia_1": _lookup_options(references, product_name),
+                    "referencia_2": _lookup_options(references, product_name),
+                    "referencia_3": _lookup_options(references, product_name),
                     "tela": _lookup_options(fabrics, row.tela),
                     "tela_unidad_medida": _lookup_options(units, product_name) or [
                         {"id": unit.get("id"), "label": str(unit.get("__label") or unit.get("nombre") or unit.get("id"))}
@@ -624,6 +965,101 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
             "needs_approval": sum(1 for row in preview_rows if row["status"] != "ready"),
         },
     }
+
+
+async def revalidate_purchase_order_product(
+    db: AsyncSession,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    row = _bulk_row_from_payload(payload)
+    resolved = dict(payload.get("resolved") or {})
+    suggested = dict(payload.get("suggested") or {})
+
+    products = await _fetch_lookup(db, "producto", label_columns=("nombre", "sku"))
+    bases = await _fetch_lookup(db, "base", label_columns=("nombre",))
+    models = await _fetch_lookup(db, "modelo", label_columns=("nombre",))
+    references = await _fetch_lookup(db, "referencia", label_columns=("nombre",))
+    fabrics = await _fetch_lookup(db, "tela", label_columns=("nombre", "referencia"))
+
+    base_id = resolved.get("base_id")
+    model_id = resolved.get("modelo_id")
+    reference_1_id = resolved.get("referencia_1_id") or resolved.get("referencia_id")
+    reference_2_id = resolved.get("referencia_2_id")
+    reference_3_id = resolved.get("referencia_3_id")
+    fabric_id = resolved.get("tela_id")
+    fabric = _find_by_id(fabrics, fabric_id)
+
+    product = None
+    if base_id and model_id and fabric_id:
+        product = next(
+            (
+                item
+                for item in products
+                if str(item.get("id_base") or "") == str(base_id or "")
+                and str(item.get("id_modelo") or "") == str(model_id or "")
+                and str(item.get("id_referencia_1") or item.get("id_referencia") or "") == str(reference_1_id or "")
+                and str(item.get("id_referencia_2") or "") == str(reference_2_id or "")
+                and str(item.get("id_referencia_3") or "") == str(reference_3_id or "")
+                and str(item.get("id_tela") or "") == str(fabric_id or "")
+            ),
+            None,
+        )
+
+    current_product_name = _build_product_name_from_payload(row, suggested, fabric)
+    if not product:
+        search_names = _product_search_names(current_product_name, row, fabric)
+        product = _find_product_by_search_names(products, search_names)
+
+    next_payload = dict(payload)
+    next_resolved = dict(resolved)
+    next_suggested = dict(suggested)
+    missing = [item for item in list(payload.get("missing") or []) if item != "producto"]
+
+    if product:
+        product_base = _find_by_id(bases, product.get("id_base"))
+        product_model = _find_by_id(models, product.get("id_modelo"))
+        product_reference_1 = _find_by_id(
+            references,
+            _first_value(product, "id_referencia_1", "id_referencia"),
+        )
+        product_reference_2 = _find_by_id(references, product.get("id_referencia_2"))
+        product_reference_3 = _find_by_id(references, product.get("id_referencia_3"))
+        product_fabric = _find_by_id(fabrics, product.get("id_tela"))
+
+        next_resolved.update(
+            {
+                "producto_id": product.get("id"),
+                "base_id": product_base.get("id") if product_base else base_id,
+                "modelo_id": product_model.get("id") if product_model else model_id,
+                "referencia_1_id": product_reference_1.get("id") if product_reference_1 else None,
+                "referencia_2_id": product_reference_2.get("id") if product_reference_2 else None,
+                "referencia_3_id": product_reference_3.get("id") if product_reference_3 else None,
+                "tela_id": product_fabric.get("id") if product_fabric else fabric_id,
+            }
+        )
+        next_suggested.update(
+            {
+                "producto": str(product.get("nombre") or product.get("__label") or ""),
+                "base": str(product_base.get("__label") or product_base.get("nombre") or "") if product_base else next_suggested.get("base"),
+                "modelo": str(product_model.get("__label") or product_model.get("nombre") or "") if product_model else next_suggested.get("modelo"),
+                "referencia_1": str(product_reference_1.get("__label") or product_reference_1.get("nombre") or "") if product_reference_1 else "",
+                "referencia_2": str(product_reference_2.get("__label") or product_reference_2.get("nombre") or "") if product_reference_2 else "",
+                "referencia_3": str(product_reference_3.get("__label") or product_reference_3.get("nombre") or "") if product_reference_3 else "",
+                "tela": str(product_fabric.get("__label") or product_fabric.get("nombre") or "") if product_fabric else next_suggested.get("tela"),
+            }
+        )
+        status = "ready" if not missing else "needs_approval"
+    else:
+        next_resolved["producto_id"] = None
+        next_suggested["producto"] = ""
+        missing = list(dict.fromkeys([*missing, "producto"]))
+        status = "needs_approval"
+
+    next_payload["resolved"] = next_resolved
+    next_payload["suggested"] = next_suggested
+    next_payload["missing"] = missing
+    next_payload["status"] = status
+    return next_payload
 
 
 async def _get_next_item_legado(db: AsyncSession) -> int:
@@ -679,7 +1115,9 @@ async def commit_purchase_order_import(
                 product_name=_component_text(payload.get("product_name")),
                 base=_component_text(payload.get("base")),
                 modelo=_component_text(payload.get("modelo")),
-                referencia=_component_text(payload.get("referencia")),
+                referencia_1=_component_text(payload.get("referencia_1") or payload.get("referencia")),
+                referencia_2=_component_text(payload.get("referencia_2")),
+                referencia_3=_component_text(payload.get("referencia_3")),
                 tela=_component_text(payload.get("tela")),
                 oc_interno=_clean_cell_text(payload.get("oc_interno")),
                 oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
@@ -690,7 +1128,9 @@ async def commit_purchase_order_import(
             client_id = resolved.get("cliente_id")
             base_id = resolved.get("base_id")
             model_id = resolved.get("modelo_id")
-            reference_id = resolved.get("referencia_id")
+            reference_1_id = resolved.get("referencia_1_id") or resolved.get("referencia_id")
+            reference_2_id = resolved.get("referencia_2_id")
+            reference_3_id = resolved.get("referencia_3_id")
             fabric_id = resolved.get("tela_id")
             fabric_unit_id = resolved.get("tela_unidad_medida_id")
             product_id = resolved.get("producto_id")
@@ -701,68 +1141,89 @@ async def commit_purchase_order_import(
                     f"Fila {row.row_number}: el cliente debe existir antes de cargar"
                 )
 
-            if not base_id:
-                if not create_missing:
-                    raise DBCommunicationError(f"Fila {row.row_number}: falta homologar base")
-                base = await _get_or_create_named_row(
-                    db,
-                    "base",
-                    suggested.get("base") or row.base,
+            if product_id:
+                product_name = _component_text(suggested.get("producto")) or _build_final_product_name(
+                    row,
+                    suggested,
                 )
-                base_id = base.get("id")
-
-            if not model_id:
-                if not create_missing:
-                    raise DBCommunicationError(f"Fila {row.row_number}: falta homologar modelo")
-                model = await _get_or_create_named_row(
-                    db,
-                    "modelo",
-                    suggested.get("modelo") or row.modelo,
-                )
-                model_id = model.get("id")
-
-            if not reference_id:
-                if not create_missing:
-                    raise DBCommunicationError(f"Fila {row.row_number}: falta homologar referencia")
-                reference = await _get_or_create_named_row(
-                    db,
-                    "referencia",
-                    suggested.get("referencia") or row.referencia,
-                )
-                reference_id = reference.get("id")
-
-            if not fabric_id:
-                if not create_missing:
-                    raise DBCommunicationError(f"Fila {row.row_number}: falta homologar tela")
-                fabric_name = _component_text(suggested.get("tela_nombre"))
-                fabric_reference = _component_text(suggested.get("tela_referencia"))
-                if not fabric_name and not fabric_reference:
-                    fabric_name, fabric_reference = _split_fabric_text(
-                        suggested.get("tela") or row.tela
+            else:
+                if not base_id:
+                    if not create_missing:
+                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar base")
+                    base = await _get_or_create_named_row(
+                        db,
+                        "base",
+                        suggested.get("base") or row.base,
                     )
-                if not fabric_name:
-                    raise DBCommunicationError(f"Fila {row.row_number}: falta nombre de tela")
-                if not fabric_reference:
-                    fabric_reference = fabric_name
-                fabric = await _get_or_create_fabric_row(
-                    db,
-                    name=fabric_name,
-                    reference=fabric_reference,
-                    unit_id=fabric_unit_id,
-                )
-                fabric_id = fabric.get("id")
-                if fabric.get("__was_created"):
-                    created_fabrics += 1
+                    base_id = base.get("id")
 
-            product_name = _build_final_product_name(row, suggested)
-            if not product_id:
+                if not model_id:
+                    if not create_missing:
+                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar modelo")
+                    model = await _get_or_create_named_row(
+                        db,
+                        "modelo",
+                        suggested.get("modelo") or row.modelo,
+                    )
+                    model_id = model.get("id")
+
+                if not reference_1_id and _component_text(suggested.get("referencia_1") or row.referencia_1):
+                    reference_1 = await _get_or_create_named_row(
+                        db,
+                        "referencia",
+                        suggested.get("referencia_1") or row.referencia_1,
+                    )
+                    reference_1_id = reference_1.get("id")
+
+                if not reference_2_id and _component_text(suggested.get("referencia_2") or row.referencia_2):
+                    reference_2 = await _get_or_create_named_row(
+                        db,
+                        "referencia",
+                        suggested.get("referencia_2") or row.referencia_2,
+                    )
+                    reference_2_id = reference_2.get("id")
+
+                if not reference_3_id and _component_text(suggested.get("referencia_3") or row.referencia_3):
+                    reference_3 = await _get_or_create_named_row(
+                        db,
+                        "referencia",
+                        suggested.get("referencia_3") or row.referencia_3,
+                    )
+                    reference_3_id = reference_3.get("id")
+
+                if not fabric_id:
+                    if not create_missing:
+                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar tela")
+                    fabric_name = _component_text(suggested.get("tela_nombre"))
+                    fabric_reference = _component_text(suggested.get("tela_referencia"))
+                    if not fabric_name and not fabric_reference:
+                        fabric_name, fabric_reference = _split_fabric_text(
+                            suggested.get("tela") or row.tela
+                        )
+                    if not fabric_name:
+                        raise DBCommunicationError(f"Fila {row.row_number}: falta nombre de tela")
+                    if not fabric_reference:
+                        fabric_reference = fabric_name
+                    fabric = await _get_or_create_fabric_row(
+                        db,
+                        name=fabric_name,
+                        reference=fabric_reference,
+                        unit_id=fabric_unit_id,
+                    )
+                    fabric_id = fabric.get("id")
+                    if fabric.get("__was_created"):
+                        created_fabrics += 1
+
+                product_name = _build_final_product_name(row, suggested)
                 if not create_missing:
                     raise DBCommunicationError(f"Fila {row.row_number}: falta homologar producto")
                 product = await _get_or_create_product_row(
                     db,
                     base_id=base_id,
                     model_id=model_id,
-                    reference_id=reference_id,
+                    reference_1_id=reference_1_id,
+                    reference_2_id=reference_2_id,
+                    reference_3_id=reference_3_id,
                     fabric_id=fabric_id,
                     product_name=product_name,
                 )

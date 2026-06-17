@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import re
@@ -685,6 +686,81 @@ def _coerce_update_value_for_column(value: Any, column: dict[str, Any]) -> Any:
     return value
 
 
+def _is_filter_text_column(metadata: TableMetadata, column: str) -> bool:
+    if column in metadata.text_columns:
+        return True
+
+    column_meta = next(
+        (item for item in metadata.columns if item.get("name") == column),
+        None,
+    )
+    return bool(
+        column_meta
+        and column_meta.get("read_only_reason") == "FOREIGN_KEY_DISPLAY_VALUE"
+    )
+
+
+def _coerce_filter_value_for_column(value: Any, column: dict[str, Any]) -> Any:
+    if value is None:
+        return None
+
+    data_type = str(column.get("type") or "").lower()
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return value
+        if value.lower() == "null":
+            return None
+
+    try:
+        if data_type == "date":
+            if isinstance(value, datetime):
+                return value.date()
+            if isinstance(value, date):
+                return value
+            value_text = str(value)
+            parsed_value = (
+                _parse_iso_datetime(value_text)
+                if "T" in value_text
+                else date.fromisoformat(value_text[:10])
+            )
+            return parsed_value.date() if isinstance(parsed_value, datetime) else parsed_value
+
+        if "timestamp" in data_type or data_type == "datetime":
+            if isinstance(value, datetime):
+                return value.replace(tzinfo=None)
+            if isinstance(value, date):
+                return datetime.combine(value, datetime.min.time())
+            return _parse_iso_datetime(str(value))
+
+        if data_type in {"integer", "bigint", "smallint"}:
+            return int(value)
+
+        if data_type in {"numeric", "decimal", "real", "double precision", "float4", "float8", "float"}:
+            return float(value)
+
+        if data_type == "boolean":
+            if isinstance(value, bool):
+                return value
+            normalized = str(value).strip().lower()
+            if normalized in {"true", "1", "si", "sí", "yes", "y"}:
+                return True
+            if normalized in {"false", "0", "no", "n"}:
+                return False
+    except (TypeError, ValueError) as error:
+        raise InvalidFilterError(
+            detail=f"Valor de filtro invalido para columna {column.get('name')}: {value}"
+        ) from error
+
+    return value
+
+
+def _casefold_sql(expression: str) -> str:
+    if expression.startswith(":"):
+        return f"LOWER(TRIM(CAST({expression} AS text)))"
+    return f"LOWER(TRIM({expression}::text))"
+
+
 def _resolve_view_status_values(status_value: str) -> list[str]:
     normalized_status = status_value.strip().lower()
     if normalized_status.startswith("finaliz"):
@@ -893,7 +969,7 @@ class DataViewerService:
 
         filename = (
             f"data_viewer_{request_data.table_id}_"
-            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.csv"
+            f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.xls"
         )
 
         logger.info(
@@ -904,7 +980,7 @@ class DataViewerService:
 
         return CsvExportResult(
             filename=filename,
-            stream=self._stream_csv_rows(
+            stream=self._stream_excel_rows(
                 plan=plan,
                 total_rows=total_rows,
             ),
@@ -1572,14 +1648,19 @@ class DataViewerService:
                         ref_value = _quote_identifier(fk_info["referenced_column"])
                         ref_label = _quote_identifier(label_field)
                         source_column = _column_ref(column_name)
-                        display_select_sql[column_name] = (
+                        display_expression = (
                             "COALESCE(("
                             f"SELECT NULLIF(TRIM(ref.{ref_label}::text), '') "
                             f"FROM {ref_schema}.{ref_table} ref "
                             f"WHERE TRIM(ref.{ref_value}::text) = TRIM({source_column}::text) "
                             "LIMIT 1"
-                            f"), {source_column}::text) AS {_quote_identifier(column_name)}"
+                            f"), {source_column}::text)"
                         )
+                        display_select_sql[column_name] = (
+                            f"{display_expression} AS {_quote_identifier(column_name)}"
+                        )
+                        column_expression_sql[column_name] = display_expression
+                        text_columns.add(column_name)
                     editable = False
                     read_only_reason = read_only_reason or (
                         "FOREIGN_KEY_ID_VALUE"
@@ -2210,6 +2291,11 @@ class DataViewerService:
     ) -> tuple[str, dict[str, Any]]:
         clauses: list[str] = []
         params: dict[str, Any] = {}
+        columns_by_name = {
+            str(column.get("name")): column
+            for column in metadata.columns
+            if column.get("name")
+        }
 
         for filter_index, filter_item in enumerate(request_data.filters):
             column = _validate_sql_identifier(
@@ -2227,17 +2313,28 @@ class DataViewerService:
 
             placeholder = f"filter_{filter_index}"
             quoted_column = self._query_column_expr(metadata, column)
+            column_meta = columns_by_name.get(column, {"name": column, "type": "text"})
+            is_text_filter = _is_filter_text_column(metadata, column)
 
             if operator == "eq":
                 if filter_item.value is None:
                     clauses.append(f"{quoted_column} IS NULL")
                 else:
-                    clauses.append(f"{quoted_column} = :{placeholder}")
-                    params[placeholder] = filter_item.value
+                    if is_text_filter:
+                        clauses.append(
+                            f"{_casefold_sql(quoted_column)} = {_casefold_sql(f':{placeholder}')}"
+                        )
+                        params[placeholder] = str(filter_item.value).strip()
+                    else:
+                        clauses.append(f"{quoted_column} = :{placeholder}")
+                        params[placeholder] = _coerce_filter_value_for_column(
+                            filter_item.value,
+                            column_meta,
+                        )
                 continue
 
             if operator == "contains":
-                if column not in metadata.text_columns:
+                if not is_text_filter:
                     raise InvalidFilterError(
                         detail=f"contains operator is only supported on textual columns: {column}"
                     )
@@ -2245,7 +2342,9 @@ class DataViewerService:
                     raise InvalidFilterError(
                         detail=f"Filter value is required for operator contains: {column}"
                     )
-                clauses.append(f"{quoted_column} ILIKE :{placeholder}")
+                clauses.append(
+                    f"{_casefold_sql(quoted_column)} LIKE {_casefold_sql(f':{placeholder}')}"
+                )
                 params[placeholder] = f"%{str(filter_item.value).strip()}%"
                 continue
 
@@ -2253,10 +2352,13 @@ class DataViewerService:
                 if filter_item.value is None:
                     raise InvalidFilterError(
                         detail=f"Filter value is required for operator {operator}: {column}"
-                    )
+                )
                 comparator = ">" if operator == "gt" else "<"
                 clauses.append(f"{quoted_column} {comparator} :{placeholder}")
-                params[placeholder] = filter_item.value
+                params[placeholder] = _coerce_filter_value_for_column(
+                    filter_item.value,
+                    column_meta,
+                )
                 continue
 
             if operator == "in":
@@ -2272,9 +2374,22 @@ class DataViewerService:
                 for value_index, value in enumerate(filter_item.value):
                     value_placeholder = f"{placeholder}_{value_index}"
                     in_placeholders.append(f":{value_placeholder}")
-                    params[value_placeholder] = value
+                    params[value_placeholder] = (
+                        str(value).strip()
+                        if is_text_filter
+                        else _coerce_filter_value_for_column(value, column_meta)
+                    )
 
-                clauses.append(f"{quoted_column} IN ({', '.join(in_placeholders)})")
+                if is_text_filter:
+                    casefold_placeholders = ", ".join(
+                        _casefold_sql(placeholder_sql)
+                        for placeholder_sql in in_placeholders
+                    )
+                    clauses.append(
+                        f"{_casefold_sql(quoted_column)} IN ({casefold_placeholders})"
+                    )
+                else:
+                    clauses.append(f"{quoted_column} IN ({', '.join(in_placeholders)})")
                 continue
 
             if operator == "between":
@@ -2288,8 +2403,14 @@ class DataViewerService:
                 clauses.append(
                     f"{quoted_column} BETWEEN :{lower_placeholder} AND :{upper_placeholder}"
                 )
-                params[lower_placeholder] = filter_item.value
-                params[upper_placeholder] = filter_item.value_to
+                params[lower_placeholder] = _coerce_filter_value_for_column(
+                    filter_item.value,
+                    column_meta,
+                )
+                params[upper_placeholder] = _coerce_filter_value_for_column(
+                    filter_item.value_to,
+                    column_meta,
+                )
 
         if request_data.q:
             if not metadata.text_columns:
@@ -2299,7 +2420,7 @@ class DataViewerService:
 
             q_placeholder = "global_q"
             q_clauses = [
-                f"{self._query_column_expr(metadata, column)} ILIKE :{q_placeholder}"
+                f"{_casefold_sql(self._query_column_expr(metadata, column))} LIKE {_casefold_sql(f':{q_placeholder}')}"
                 for column in sorted(metadata.text_columns)
             ]
             clauses.append("(" + " OR ".join(q_clauses) + ")")
@@ -2523,3 +2644,57 @@ class DataViewerService:
         if isinstance(value, (dict, list)):
             return json.dumps(value, ensure_ascii=False)
         return str(value)
+
+    async def _stream_excel_rows(
+        self,
+        plan: QueryPlan,
+        total_rows: int,
+    ) -> AsyncIterator[bytes]:
+        yield (
+            "<html><head><meta charset=\"utf-8\" /></head><body>"
+            "<table border=\"1\"><thead><tr>"
+            + "".join(
+                f"<th>{html.escape(str(column))}</th>" for column in plan.selected_columns
+            )
+            + "</tr></thead><tbody>"
+        ).encode("utf-8")
+
+        exported_rows = 0
+        while exported_rows < total_rows:
+            chunk_limit = min(EXPORT_CHUNK_SIZE, total_rows - exported_rows)
+            chunk_params = dict(plan.where_params)
+            chunk_params["chunk_limit"] = chunk_limit
+            chunk_params["chunk_offset"] = exported_rows
+
+            chunk_sql = (
+                f"SELECT {plan.select_sql} {plan.base_from_where_sql} "
+                f"{plan.order_clause_sql} LIMIT :chunk_limit OFFSET :chunk_offset"
+            )
+
+            try:
+                await self.db.execute(
+                    text(f"SET LOCAL statement_timeout = {DEFAULT_EXPORT_TIMEOUT_MS}")
+                )
+                chunk_result = await self.db.execute(text(chunk_sql), chunk_params)
+                chunk_rows = chunk_result.mappings().all()
+            except Exception as error:
+                if _is_timeout_error(error):
+                    raise QueryTimeoutError("Export query timeout")
+                raise DBCommunicationError(f"Error exporting DataViewer Excel: {error}")
+
+            if not chunk_rows:
+                break
+
+            row_fragments: list[str] = []
+            for row in chunk_rows:
+                row_fragments.append("<tr>")
+                for column in plan.selected_columns:
+                    value = row.get(column)
+                    cell_value = "" if value is None else self._serialize_csv_value(value)
+                    row_fragments.append(f"<td>{html.escape(cell_value)}</td>")
+                row_fragments.append("</tr>")
+
+            exported_rows += len(chunk_rows)
+            yield "".join(row_fragments).encode("utf-8")
+
+        yield b"</tbody></table></body></html>"

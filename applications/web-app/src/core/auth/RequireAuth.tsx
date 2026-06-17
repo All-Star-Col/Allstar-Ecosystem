@@ -24,7 +24,7 @@ export default function RequireAuth() {
             }
 
             // network/server: no borres token
-            setAuthorized("checking"); // o "confirmed" con warning/retry
+            setAuthorized("confirmed");
         });
     }, [hasToken]);
 

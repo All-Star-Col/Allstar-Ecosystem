@@ -155,7 +155,7 @@ export async function queryDataViewer(
     };
 }
 
-export async function exportDataViewerCsv(
+export async function exportDataViewerExcel(
     payload: DataViewerQueryRequest,
     options?: { signal?: AbortSignal },
 ): Promise<{ blob: Blob; filename: string; requestId: string }> {
@@ -175,7 +175,7 @@ export async function exportDataViewerCsv(
     }
 
     const tableId = payload.table_id || "table";
-    const fallbackFilename = `data_viewer_${tableId}_${new Date().toISOString()}.csv`;
+    const fallbackFilename = `data_viewer_${tableId}_${new Date().toISOString()}.xls`;
 
     return {
         blob: await response.blob(),
@@ -186,6 +186,8 @@ export async function exportDataViewerCsv(
         requestId: response.headers.get("X-Request-ID") ?? requestId,
     };
 }
+
+export const exportDataViewerCsv = exportDataViewerExcel;
 
 export async function updateDataViewerRow(
     payload: DataViewerUpdateRowRequest,

@@ -159,7 +159,7 @@ export function Sidebar({
             return;
         }
 
-        window.history.back();
+        window.location.assign("/dashboard");
     };
 
     return (

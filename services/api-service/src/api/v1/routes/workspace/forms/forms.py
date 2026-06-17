@@ -1,5 +1,6 @@
 from fastapi import APIRouter, File, HTTPException, Depends, Query, Request, UploadFile
 from pydantic import BaseModel
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Any, List
 
@@ -16,6 +17,7 @@ from src.services import forms
 from src.services.forms_bulk_upload import (
     commit_purchase_order_import,
     preview_purchase_order_import,
+    revalidate_purchase_order_product,
 )
 from src.services.shared import build_etag_response
 from src.api.deps import get_current_user
@@ -32,8 +34,32 @@ class BulkPurchaseOrderCommitRequest(BaseModel):
     create_missing: bool = True
 
 
+class BulkPurchaseOrderRowRequest(BaseModel):
+    row: dict[str, Any]
+
+
 class SalesAssistantEmailImportRequest(BaseModel):
     max_correos: int = 20
+
+
+class ProductComposeRequest(BaseModel):
+    base_id: int | None = None
+    base_nombre: str = ""
+    modelo_id: int | None = None
+    modelo_nombre: str = ""
+    referencia_id: int | None = None
+    referencia_nombre: str = ""
+    referencia_1_id: int | None = None
+    referencia_1_nombre: str = ""
+    referencia_2_id: int | None = None
+    referencia_2_nombre: str = ""
+    referencia_3_id: int | None = None
+    referencia_3_nombre: str = ""
+    tela_id: int | None = None
+    tela_nombre: str = ""
+    tela_referencia: str = ""
+    unidad_medida_id: int | None = None
+    precio: Decimal | None = None
 
 
 def ensure_sales_assistant_enabled() -> None:
@@ -166,6 +192,46 @@ async def get_column_values_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/product-composer/options/{part}")
+async def get_product_composer_options_endpoint(
+    part: str,
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(
+        default=forms.DEFAULT_LOOKUP_LIMIT,
+        ge=1,
+        le=forms.MAX_LOOKUP_LIMIT,
+    ),
+    offset: int = Query(default=0, ge=0),
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.get_product_composer_options(
+            part=part,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/product-composer/compose")
+async def compose_product_endpoint(
+    payload: ProductComposeRequest,
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.compose_product(**payload.model_dump())
+    except forms.IdentifierValidationError as e:
+        raise HTTPException(status_code=422, detail=e.detail)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get(
     "/next-consecutive/{table_name}/{column_name}",
 )
@@ -253,6 +319,21 @@ async def commit_bulk_purchase_orders_endpoint(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("Error committing bulk purchase orders: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/bulk/purchase-orders/revalidate-product")
+async def revalidate_bulk_purchase_order_product_endpoint(
+    payload: BulkPurchaseOrderRowRequest,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await revalidate_purchase_order_product(db, payload.row)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error revalidating bulk purchase order product: %s", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 

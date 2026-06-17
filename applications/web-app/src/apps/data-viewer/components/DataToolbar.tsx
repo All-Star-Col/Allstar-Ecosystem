@@ -2,12 +2,12 @@ import { Download } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 
 interface DataToolbarProps {
-    onExportCSV: () => void;
+    onExportExcel: () => void;
     disabled?: boolean;
 }
 
 export function DataToolbar({
-    onExportCSV,
+    onExportExcel,
     disabled = false,
 }: DataToolbarProps) {
     return (
@@ -16,11 +16,11 @@ export function DataToolbar({
                 variant="default"
                 size="sm"
                 className="rounded-full shadow-sm"
-                onClick={onExportCSV}
+                onClick={onExportExcel}
                 disabled={disabled}
             >
                 <Download className="w-4 h-4" />
-                <span>Exportar CSV</span>
+                <span>Exportar Excel</span>
             </Button>
         </div>
     );

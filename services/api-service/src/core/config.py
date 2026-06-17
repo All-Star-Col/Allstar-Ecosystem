@@ -59,7 +59,7 @@ class Settings(BaseSettings):
         # Only attempt to load secrets from Bitwarden when a BW access token is provided.
         # In local/dev environments without BW_ACCESS_TOKEN, rely on keys.dev.env or
         # environment variables instead to avoid startup failures.
-        if os.getenv("BW_ACCESS_TOKEN"):
+        if self._get_bw_access_token():
             self.load_secrets_from_bw()
         else:
             logger.info("BW_ACCESS_TOKEN not set — skipping Bitwarden secret loading. Using local env values.")
@@ -83,6 +83,13 @@ class Settings(BaseSettings):
         placeholder_markers = ("REPLACE", "PLACEHOLDER", "TODO", "CHANGE_ME")
         return any(marker in upper_value for marker in placeholder_markers)
 
+    @staticmethod
+    def _get_bw_access_token() -> str:
+        access_token = (os.getenv("BW_ACCESS_TOKEN") or "").strip()
+        if not access_token or access_token in {"${BW_ACCESS_TOKEN}", "$BW_ACCESS_TOKEN"}:
+            return ""
+        return access_token
+
     def load_secrets_from_bw(self):
         """Conecta con Bitwarden y descarga los valores reales usando los IDs"""
         try:
@@ -95,7 +102,7 @@ class Settings(BaseSettings):
                 )
             )
 
-            access_token = os.getenv("BW_ACCESS_TOKEN")
+            access_token = self._get_bw_access_token()
             if not access_token:
                 raise ValueError("BW_ACCESS_TOKEN no está definido en el entorno")
 
