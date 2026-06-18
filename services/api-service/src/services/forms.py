@@ -2205,6 +2205,77 @@ def _first_existing_column(
     return None
 
 
+async def _find_existing_reference_value(
+    db: AsyncSession,
+    *,
+    ref_schema: str,
+    ref_table: str,
+    ref_column: str,
+) -> Any:
+    ref_columns = await _get_table_columns(
+        db, schema_name=ref_schema, table_name=ref_table
+    )
+    normalized_columns = {
+        _normalize_identifier(column["column_name"]).lower(): column
+        for column in ref_columns
+    }
+    if ref_column not in normalized_columns:
+        return None
+
+    q_ref_schema = _quote_identifier(ref_schema, field_name="employee_ref_schema")
+    q_ref_table = _quote_identifier(ref_table, field_name="employee_ref_table")
+    q_ref_column = _quote_identifier(ref_column, field_name="employee_ref_column")
+
+    text_columns = [
+        column_name
+        for column_name, column in normalized_columns.items()
+        if (column.get("data_type") or "").lower() in TEXTUAL_TYPES
+    ]
+    if text_columns:
+        label_expression = ", ".join(
+            f"COALESCE({_quote_identifier(column, field_name='employee_label_column')}::text, '')"
+            for column in text_columns[:6]
+        )
+        term_conditions = " OR ".join(
+            f"LOWER(CONCAT_WS(' ', {label_expression})) LIKE :term_{index}"
+            for index in range(6)
+        )
+        unassigned_query = text(
+            f"""
+            SELECT {q_ref_column} AS value
+            FROM {q_ref_schema}.{q_ref_table}
+            WHERE {term_conditions}
+            ORDER BY {q_ref_column} ASC
+            LIMIT 1
+            """
+        )
+        result = await db.execute(
+            unassigned_query,
+            {
+                "term_0": "%sin asignar%",
+                "term_1": "%sin empleado%",
+                "term_2": "%pendiente%",
+                "term_3": "%n/a%",
+                "term_4": "%no aplica%",
+                "term_5": "%no asignado%",
+            },
+        )
+        value = result.scalar_one_or_none()
+        if value is not None:
+            return value
+
+    fallback_query = text(
+        f"""
+        SELECT {q_ref_column} AS value
+        FROM {q_ref_schema}.{q_ref_table}
+        ORDER BY {q_ref_column} ASC
+        LIMIT 1
+        """
+    )
+    result = await db.execute(fallback_query)
+    return result.scalar_one_or_none()
+
+
 async def _resolve_initial_employee_value(
     db: AsyncSession,
     *,
@@ -2239,65 +2310,31 @@ async def _resolve_initial_employee_value(
         ref_schema = employee_fk["referenced_schema"]
         ref_table = employee_fk["referenced_table"]
         ref_column = employee_fk["referenced_column"]
-        ref_columns = await _get_table_columns(
-            db, schema_name=ref_schema, table_name=ref_table
+        value = await _find_existing_reference_value(
+            db,
+            ref_schema=ref_schema,
+            ref_table=ref_table,
+            ref_column=ref_column,
         )
-        q_ref_schema = _quote_identifier(ref_schema, field_name="employee_ref_schema")
-        q_ref_table = _quote_identifier(ref_table, field_name="employee_ref_table")
-        q_ref_column = _quote_identifier(ref_column, field_name="employee_ref_column")
-
-        text_columns = [
-            _normalize_identifier(column["column_name"]).lower()
-            for column in ref_columns
-            if (column.get("data_type") or "").lower() in TEXTUAL_TYPES
-        ]
-        if text_columns:
-            label_expression = ", ".join(
-                f"COALESCE({_quote_identifier(column, field_name='employee_label_column')}::text, '')"
-                for column in text_columns[:6]
-            )
-            term_conditions = " OR ".join(
-                f"LOWER(CONCAT_WS(' ', {label_expression})) LIKE :term_{index}"
-                for index in range(6)
-            )
-            unassigned_query = text(
-                f"""
-                SELECT {q_ref_column} AS value
-                FROM {q_ref_schema}.{q_ref_table}
-                WHERE {term_conditions}
-                ORDER BY {q_ref_column} ASC
-                LIMIT 1
-                """
-            )
-            result = await db.execute(
-                unassigned_query,
-                {
-                    "term_0": "%sin asignar%",
-                    "term_1": "%sin empleado%",
-                    "term_2": "%pendiente%",
-                    "term_3": "%n/a%",
-                    "term_4": "%no aplica%",
-                    "term_5": "%no asignado%",
-                },
-            )
-            value = result.scalar_one_or_none()
-            if value is not None:
-                return True, value
-
-        fallback_query = text(
-            f"""
-            SELECT {q_ref_column} AS value
-            FROM {q_ref_schema}.{q_ref_table}
-            ORDER BY {q_ref_column} ASC
-            LIMIT 1
-            """
-        )
-        result = await db.execute(fallback_query)
-        value = result.scalar_one_or_none()
         if value is not None:
             return True, value
 
-    return True, 1
+    employee_table_value = await _find_existing_reference_value(
+        db,
+        ref_schema=FORMS_SCHEMA,
+        ref_table="empleado",
+        ref_column="id",
+    )
+    if employee_table_value is not None:
+        return True, employee_table_value
+
+    raise DBCommunicationError(
+        (
+            "No se pudo crear ordenproceso: la columna "
+            f"{employee_column} es obligatoria, pero no existe un empleado valido "
+            "para asignar automaticamente"
+        )
+    )
 
 
 async def _add_manual_integer_id_if_needed(
