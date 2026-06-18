@@ -675,7 +675,7 @@ export default function BulkPurchaseOrderUpload() {
     };
 
     return (
-        <div className="min-h-screen bg-background">
+        <div className="min-h-screen overflow-x-hidden bg-background">
             <header className="border-b border-border/80 bg-card/80 backdrop-blur">
                 <div className="container mx-auto max-w-6xl px-4 py-5">
                     <div className="flex items-center gap-3">
@@ -701,15 +701,15 @@ export default function BulkPurchaseOrderUpload() {
                 </div>
             </header>
 
-            <main className="container mx-auto max-w-6xl px-4 py-8">
-                <Card className="border border-border/80 bg-card shadow-sm">
+            <main className="container mx-auto max-w-6xl min-w-0 overflow-x-hidden px-4 py-8">
+                <Card className="min-w-0 overflow-hidden border border-border/80 bg-card shadow-sm">
                     <CardHeader className="border-b bg-muted/20">
                         <CardTitle className="flex items-center gap-2 text-xl font-semibold">
                             <FileSpreadsheet className="h-5 w-5" />
                             Archivo de ordenes
                         </CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-5 pt-6">
+                    <CardContent className="min-w-0 space-y-5 pt-6">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                             <input
                                 type="file"
@@ -771,7 +771,7 @@ export default function BulkPurchaseOrderUpload() {
                             <div className="min-w-0 space-y-4">
                                 <div className="max-w-full overflow-x-auto rounded-md border border-border">
                                     <div
-                                        className="max-h-[calc(100vh-390px)] min-w-[2020px] overflow-y-auto"
+                                        className="max-h-[calc(100vh-390px)] min-w-[2020px] overflow-x-hidden overflow-y-auto"
                                         style={{ scrollbarGutter: "stable" }}
                                     >
                                         <table className="w-full caption-bottom text-sm">
