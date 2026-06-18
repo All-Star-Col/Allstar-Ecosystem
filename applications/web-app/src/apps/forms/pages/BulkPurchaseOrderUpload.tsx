@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import type { UIEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -49,6 +50,8 @@ const MISSING_LABELS: Record<string, string> = {
     tela: "Tela",
     producto: "Producto",
 };
+
+const BULK_TABLE_WIDTH = 2020;
 
 function isRowReadyForCommit(row: BulkPurchaseOrderRowAPI): boolean {
     if (row.missing.includes("cliente")) {
@@ -163,6 +166,7 @@ export default function BulkPurchaseOrderUpload() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
+    const [tableScrollLeft, setTableScrollLeft] = useState(0);
     const revalidationRunsRef = useRef<Record<number, number>>({});
 
     const hasBlockingMissing = useMemo(
@@ -180,6 +184,12 @@ export default function BulkPurchaseOrderUpload() {
     );
 
     const canCommit = Boolean(preview?.rows.length) && !hasBlockingMissing && !isCommitting;
+
+    const handleTableHorizontalScroll = (
+        event: UIEvent<HTMLDivElement>,
+    ) => {
+        setTableScrollLeft(event.currentTarget.scrollLeft);
+    };
 
     const previewSummary = useMemo(() => {
         const rows = preview?.rows ?? [];
@@ -718,6 +728,7 @@ export default function BulkPurchaseOrderUpload() {
                                 onChange={(event) => {
                                     setFile(event.target.files?.[0] ?? null);
                                     setPreview(null);
+                                    setTableScrollLeft(0);
                                 }}
                             />
                             <Button
@@ -769,12 +780,18 @@ export default function BulkPurchaseOrderUpload() {
 
                         {preview && preview.rows.length > 0 && (
                             <div className="min-w-0 space-y-4">
-                                <div className="max-w-full overflow-x-auto rounded-md border border-border">
+                                <div className="overflow-hidden rounded-md border border-border">
                                     <div
-                                        className="max-h-[calc(100vh-390px)] min-w-[2020px] overflow-x-hidden overflow-y-auto"
+                                        className="max-h-[calc(100vh-410px)] overflow-x-hidden overflow-y-auto"
                                         style={{ scrollbarGutter: "stable" }}
                                     >
-                                        <table className="w-full caption-bottom text-sm">
+                                        <table
+                                            className="caption-bottom text-sm"
+                                            style={{
+                                                width: BULK_TABLE_WIDTH,
+                                                transform: `translateX(-${tableScrollLeft}px)`,
+                                            }}
+                                        >
                                             <TableHeader className="sticky top-0 z-10 bg-card">
                                                 <TableRow>
                                                     <TableHead className="min-w-16">Fila</TableHead>
@@ -818,6 +835,18 @@ export default function BulkPurchaseOrderUpload() {
                                                 ))}
                                             </TableBody>
                                         </table>
+                                    </div>
+                                    <div
+                                        className="h-5 overflow-x-auto overflow-y-hidden border-t border-border bg-card"
+                                        onScroll={handleTableHorizontalScroll}
+                                        aria-label="Desplazamiento horizontal de carga masiva"
+                                    >
+                                        <div
+                                            style={{
+                                                width: BULK_TABLE_WIDTH,
+                                                height: 1,
+                                            }}
+                                        />
                                     </div>
                                 </div>
 
