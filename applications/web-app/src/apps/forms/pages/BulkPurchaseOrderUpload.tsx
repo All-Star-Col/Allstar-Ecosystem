@@ -23,7 +23,6 @@ import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import {
-    Table,
     TableBody,
     TableCell,
     TableHead,
@@ -774,7 +773,7 @@ export default function BulkPurchaseOrderUpload() {
                                     className="max-h-[calc(100vh-390px)] overflow-auto rounded-md border border-border"
                                     style={{ scrollbarGutter: "stable both-edges" }}
                                 >
-                                    <Table className="min-w-[2020px]">
+                                    <table className="w-full min-w-[2020px] caption-bottom text-sm">
                                         <TableHeader className="sticky top-0 z-10 bg-card">
                                             <TableRow>
                                                 <TableHead className="min-w-16">Fila</TableHead>
@@ -817,7 +816,7 @@ export default function BulkPurchaseOrderUpload() {
                                                 </TableRow>
                                             ))}
                                         </TableBody>
-                                    </Table>
+                                    </table>
                                 </div>
 
                                 <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
