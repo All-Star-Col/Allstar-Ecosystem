@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { UIEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -51,7 +51,7 @@ const MISSING_LABELS: Record<string, string> = {
     producto: "Producto",
 };
 
-const BULK_TABLE_WIDTH = 2020;
+const BULK_TABLE_MIN_WIDTH = 3400;
 
 function isRowReadyForCommit(row: BulkPurchaseOrderRowAPI): boolean {
     if (row.missing.includes("cliente")) {
@@ -167,7 +167,41 @@ export default function BulkPurchaseOrderUpload() {
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
     const [tableScrollLeft, setTableScrollLeft] = useState(0);
+    const [tableScrollWidth, setTableScrollWidth] = useState(BULK_TABLE_MIN_WIDTH);
+    const bulkTableRef = useRef<HTMLTableElement | null>(null);
     const revalidationRunsRef = useRef<Record<number, number>>({});
+
+    useEffect(() => {
+        const table = bulkTableRef.current;
+        if (!table) return;
+
+        const updateTableWidth = () => {
+            const nextWidth = Math.max(
+                BULK_TABLE_MIN_WIDTH,
+                table.scrollWidth,
+                table.offsetWidth,
+                Math.ceil(table.getBoundingClientRect().width),
+            );
+            setTableScrollWidth(nextWidth);
+        };
+
+        updateTableWidth();
+        window.requestAnimationFrame(updateTableWidth);
+        const timer = window.setTimeout(updateTableWidth, 150);
+
+        const resizeObserver =
+            typeof ResizeObserver !== "undefined"
+                ? new ResizeObserver(updateTableWidth)
+                : null;
+        resizeObserver?.observe(table);
+        window.addEventListener("resize", updateTableWidth);
+
+        return () => {
+            window.clearTimeout(timer);
+            resizeObserver?.disconnect();
+            window.removeEventListener("resize", updateTableWidth);
+        };
+    }, [preview, fieldModes]);
 
     const hasBlockingMissing = useMemo(
         () =>
@@ -786,9 +820,10 @@ export default function BulkPurchaseOrderUpload() {
                                         style={{ scrollbarGutter: "stable" }}
                                     >
                                         <table
+                                            ref={bulkTableRef}
                                             className="caption-bottom text-sm"
                                             style={{
-                                                width: BULK_TABLE_WIDTH,
+                                                width: tableScrollWidth,
                                                 transform: `translateX(-${tableScrollLeft}px)`,
                                             }}
                                         >
@@ -843,7 +878,7 @@ export default function BulkPurchaseOrderUpload() {
                                     >
                                         <div
                                             style={{
-                                                width: BULK_TABLE_WIDTH,
+                                                width: tableScrollWidth,
                                                 height: 1,
                                             }}
                                         />
