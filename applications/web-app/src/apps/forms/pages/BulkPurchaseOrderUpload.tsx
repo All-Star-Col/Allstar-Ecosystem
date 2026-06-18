@@ -51,6 +51,8 @@ const MISSING_LABELS: Record<string, string> = {
     producto: "Producto",
 };
 
+const BULK_TABLE_MIN_WIDTH = 2020;
+
 function isRowReadyForCommit(row: BulkPurchaseOrderRowAPI): boolean {
     if (row.missing.includes("cliente")) {
         return false;
@@ -174,8 +176,13 @@ export default function BulkPurchaseOrderUpload() {
         if (!tableScroller) return;
 
         const updateScrollRange = () => {
+            const contentWidth = Math.max(
+                tableScroller.scrollWidth,
+                tableScroller.firstElementChild?.scrollWidth ?? 0,
+                BULK_TABLE_MIN_WIDTH,
+            );
             const maxScroll = Math.max(
-                tableScroller.scrollWidth - tableScroller.clientWidth,
+                contentWidth - tableScroller.clientWidth,
                 0,
             );
             setMaxHorizontalScroll(maxScroll);
@@ -210,6 +217,18 @@ export default function BulkPurchaseOrderUpload() {
         if (tableScrollRef.current) {
             tableScrollRef.current.scrollLeft = value;
         }
+    };
+
+    const shiftHorizontalScroll = (direction: -1 | 1) => {
+        const tableScroller = tableScrollRef.current;
+        if (!tableScroller) return;
+
+        const step = Math.max(Math.round(tableScroller.clientWidth * 0.75), 240);
+        const next = Math.max(
+            0,
+            Math.min(tableScroller.scrollLeft + direction * step, maxHorizontalScroll),
+        );
+        handleHorizontalScrollChange(next);
     };
 
     const hasBlockingMissing = useMemo(
@@ -833,6 +852,15 @@ export default function BulkPurchaseOrderUpload() {
                                                         <span className="shrink-0 text-xs font-medium text-muted-foreground">
                                                             Scroll horizontal
                                                         </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => shiftHorizontalScroll(-1)}
+                                                            disabled={horizontalScroll <= 0}
+                                                            className="inline-flex h-7 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-foreground shadow-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                                                            aria-label="Mover tabla a la izquierda"
+                                                        >
+                                                            ←
+                                                        </button>
                                                         <input
                                                             type="range"
                                                             min={0}
@@ -845,8 +873,17 @@ export default function BulkPurchaseOrderUpload() {
                                                                 )
                                                             }
                                                             aria-label="Desplazamiento horizontal"
-                                                            className="block h-4 min-w-0 flex-1 cursor-ew-resize accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                                            className="block h-5 min-w-0 flex-1 cursor-ew-resize accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                                         />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => shiftHorizontalScroll(1)}
+                                                            disabled={horizontalScroll >= maxHorizontalScroll}
+                                                            className="inline-flex h-7 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-foreground shadow-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                                                            aria-label="Mover tabla a la derecha"
+                                                        >
+                                                            →
+                                                        </button>
                                                     </div>
                                                 </TableHead>
                                             </TableRow>
