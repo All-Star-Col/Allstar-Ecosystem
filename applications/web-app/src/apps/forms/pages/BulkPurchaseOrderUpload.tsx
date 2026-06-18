@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -7,6 +7,9 @@ import {
     CheckCircle2,
     FileSpreadsheet,
     Loader2,
+    RotateCcw,
+    Save,
+    Trash2,
     Upload,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -80,6 +83,63 @@ const BULK_TABLE_WIDTH = BULK_TABLE_COLUMNS.reduce(
     (total, width) => total + width,
     0,
 );
+const BULK_DRAFT_STORAGE_KEY = "allstar.forms.bulkPurchaseOrders.draft.v1";
+const BULK_DRAFT_VERSION = 1;
+
+type BulkDraftInfo = {
+    savedAt: string;
+    fileName: string;
+    rows: number;
+};
+
+type BulkPurchaseOrderDraft = BulkDraftInfo & {
+    version: number;
+    preview: BulkPurchaseOrderPreviewAPI;
+    fieldModes: Record<string, HomologationMode>;
+    finalizedRows: number[];
+};
+
+function readBulkDraft(): BulkPurchaseOrderDraft | null {
+    if (typeof window === "undefined") return null;
+
+    try {
+        const rawDraft = window.localStorage.getItem(BULK_DRAFT_STORAGE_KEY);
+        if (!rawDraft) return null;
+
+        const draft = JSON.parse(rawDraft) as Partial<BulkPurchaseOrderDraft>;
+        if (
+            draft.version !== BULK_DRAFT_VERSION ||
+            !draft.preview ||
+            !Array.isArray(draft.preview.rows)
+        ) {
+            return null;
+        }
+
+        return {
+            version: BULK_DRAFT_VERSION,
+            savedAt: String(draft.savedAt ?? ""),
+            fileName: String(draft.fileName ?? ""),
+            rows: Number(draft.rows ?? draft.preview.rows.length),
+            preview: draft.preview,
+            fieldModes: draft.fieldModes ?? {},
+            finalizedRows: Array.isArray(draft.finalizedRows)
+                ? draft.finalizedRows.map(Number).filter(Number.isFinite)
+                : [],
+        };
+    } catch {
+        return null;
+    }
+}
+
+function formatDraftDate(value: string): string {
+    if (!value) return "";
+    const parsedDate = new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) return "";
+    return parsedDate.toLocaleString("es-CO", {
+        dateStyle: "short",
+        timeStyle: "short",
+    });
+}
 
 function MissingBadges({ isFinalized }: { isFinalized: boolean }) {
     return (
@@ -98,6 +158,14 @@ function MissingBadges({ isFinalized }: { isFinalized: boolean }) {
 
 function cleanProductPart(value: unknown): string {
     return String(value ?? "").trim();
+}
+
+function normalizeSearchText(value: unknown): string {
+    return String(value ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
 }
 
 function hasConfiguredValue(value: unknown): boolean {
@@ -234,11 +302,14 @@ function mergeRevalidatedRow(
 export default function BulkPurchaseOrderUpload() {
     const navigate = useNavigate();
     const [file, setFile] = useState<File | null>(null);
+    const [sourceFileName, setSourceFileName] = useState("");
     const [preview, setPreview] = useState<BulkPurchaseOrderPreviewAPI | null>(null);
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
     const [finalizedRows, setFinalizedRows] = useState<Set<number>>(new Set());
+    const [draftInfo, setDraftInfo] = useState<BulkDraftInfo | null>(null);
+    const [homologationSearches, setHomologationSearches] = useState<Record<string, string>>({});
     const revalidationRunsRef = useRef<Record<number, number>>({});
 
     const isRowFinalized = (row: BulkPurchaseOrderRowAPI) =>
@@ -273,6 +344,104 @@ export default function BulkPurchaseOrderUpload() {
 
     const getFieldKey = (rowNumber: number, field: HomologationField) =>
         `${rowNumber}:${field}`;
+
+    const refreshDraftInfo = () => {
+        const draft = readBulkDraft();
+        setDraftInfo(
+            draft
+                ? {
+                      savedAt: draft.savedAt,
+                      fileName: draft.fileName,
+                      rows: draft.rows,
+                  }
+                : null,
+        );
+    };
+
+    const saveDraft = (options: { showToast?: boolean } = {}) => {
+        if (!preview) {
+            if (options.showToast) {
+                toast.error("No hay avance para guardar");
+            }
+            return;
+        }
+
+        const savedAt = new Date().toISOString();
+        const draft: BulkPurchaseOrderDraft = {
+            version: BULK_DRAFT_VERSION,
+            savedAt,
+            fileName: sourceFileName || file?.name || "",
+            rows: preview.rows.length,
+            preview,
+            fieldModes,
+            finalizedRows: Array.from(finalizedRows),
+        };
+
+        try {
+            window.localStorage.setItem(
+                BULK_DRAFT_STORAGE_KEY,
+                JSON.stringify(draft),
+            );
+            setDraftInfo({
+                savedAt,
+                fileName: draft.fileName,
+                rows: draft.rows,
+            });
+            if (options.showToast) {
+                toast.success("Avance guardado", {
+                    description: draft.fileName || `${draft.rows} filas guardadas`,
+                });
+            }
+        } catch {
+            if (options.showToast) {
+                toast.error("No se pudo guardar el avance en este navegador");
+            }
+        }
+    };
+
+    const restoreDraft = () => {
+        const draft = readBulkDraft();
+        if (!draft) {
+            refreshDraftInfo();
+            toast.error("No hay un avance guardado para cargar");
+            return;
+        }
+
+        setFile(null);
+        setSourceFileName(draft.fileName);
+        setPreview(draft.preview);
+        setFieldModes(draft.fieldModes);
+        setHomologationSearches({});
+        setFinalizedRows(new Set(draft.finalizedRows));
+        setDraftInfo({
+            savedAt: draft.savedAt,
+            fileName: draft.fileName,
+            rows: draft.rows,
+        });
+        toast.success("Avance cargado", {
+            description: `${draft.rows} filas restauradas`,
+        });
+    };
+
+    const clearDraft = () => {
+        window.localStorage.removeItem(BULK_DRAFT_STORAGE_KEY);
+        setDraftInfo(null);
+        toast.success("Borrador descartado");
+    };
+
+    useEffect(() => {
+        refreshDraftInfo();
+    }, []);
+
+    useEffect(() => {
+        if (!preview) return;
+
+        const timeoutId = window.setTimeout(() => {
+            saveDraft();
+        }, 400);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [preview, fieldModes, finalizedRows, sourceFileName]);
 
     const preparePreviewRows = (rows: BulkPurchaseOrderRowAPI[]) => {
         const nextModes: Record<string, HomologationMode> = {};
@@ -349,6 +518,8 @@ export default function BulkPurchaseOrderUpload() {
         try {
             const result = await previewBulkPurchaseOrders(file);
             const rows = preparePreviewRows(result.rows);
+            setSourceFileName(file.name);
+            setHomologationSearches({});
             setPreview({ ...result, rows });
             toast.success("Archivo prevalidado", {
                 description: `${result.summary.total} filas encontradas`,
@@ -560,6 +731,23 @@ export default function BulkPurchaseOrderUpload() {
         const otherOptions = options.filter((option) => !option.suggested);
         const fieldKey = getFieldKey(row.row_number, field);
         const mode = fieldModes[fieldKey] ?? (resolvedValue ? "homologar" : "crear");
+        const searchKey = `${fieldKey}:search`;
+        const searchValue = homologationSearches[searchKey] ?? "";
+        const normalizedSearch = normalizeSearchText(searchValue);
+        const selectedOptionId = resolvedValue ? String(resolvedValue) : "";
+        const filterOption = (option: { id: string | number; label: string }) => {
+            if (selectedOptionId && String(option.id) === selectedOptionId) {
+                return true;
+            }
+            if (!normalizedSearch) {
+                return true;
+            }
+            return normalizeSearchText(option.label).includes(normalizedSearch);
+        };
+        const filteredSuggestedOptions = suggestedOptions.filter(filterOption);
+        const filteredOtherOptions = otherOptions.filter(filterOption);
+        const hasFilteredOptions =
+            filteredSuggestedOptions.length > 0 || filteredOtherOptions.length > 0;
 
         return (
             <div className="flex min-w-56 flex-col gap-2">
@@ -578,38 +766,56 @@ export default function BulkPurchaseOrderUpload() {
                     <option value="crear">Crear con texto</option>
                 </select>
                 {mode === "homologar" ? (
-                    <select
-                        value={resolvedValue ? String(resolvedValue) : ""}
-                        onChange={(event) =>
-                            handleResolvedChange(row, field, event.target.value)
-                        }
-                        className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-                    >
-                        {options.length === 0 && (
-                            <option value="">Sin opciones sugeridas</option>
-                        )}
-                        {options.length > 0 && (
-                            <option value="">Sin seleccionar</option>
-                        )}
-                        {suggestedOptions.length > 0 && (
-                            <optgroup label="Sugeridas">
-                                {suggestedOptions.map((option) => (
-                                    <option key={String(option.id)} value={String(option.id)}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </optgroup>
-                        )}
-                        {otherOptions.length > 0 && (
-                            <optgroup label="Catalogo">
-                                {otherOptions.map((option) => (
-                                    <option key={String(option.id)} value={String(option.id)}>
-                                        {option.label}
-                                    </option>
-                                ))}
-                            </optgroup>
-                        )}
-                    </select>
+                    <div className="grid gap-2">
+                        <input
+                            value={searchValue}
+                            onChange={(event) =>
+                                setHomologationSearches((current) => ({
+                                    ...current,
+                                    [searchKey]: event.target.value,
+                                }))
+                            }
+                            placeholder={`Buscar ${MISSING_LABELS[field].toLowerCase()}...`}
+                            className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                        />
+                        <select
+                            value={resolvedValue ? String(resolvedValue) : ""}
+                            onChange={(event) =>
+                                handleResolvedChange(row, field, event.target.value)
+                            }
+                            className="rounded-md border border-input bg-background px-2 py-1 text-xs"
+                        >
+                            {options.length === 0 && (
+                                <option value="">Sin opciones sugeridas</option>
+                            )}
+                            {options.length > 0 && (
+                                <option value="">Sin seleccionar</option>
+                            )}
+                            {options.length > 0 && !hasFilteredOptions && (
+                                <option value="__no_results" disabled>
+                                    Sin resultados
+                                </option>
+                            )}
+                            {filteredSuggestedOptions.length > 0 && (
+                                <optgroup label="Sugeridas">
+                                    {filteredSuggestedOptions.map((option) => (
+                                        <option key={String(option.id)} value={String(option.id)}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                            {filteredOtherOptions.length > 0 && (
+                                <optgroup label="Catalogo">
+                                    {filteredOtherOptions.map((option) => (
+                                        <option key={String(option.id)} value={String(option.id)}>
+                                            {option.label}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                        </select>
+                    </div>
                 ) : field === "tela" ? (
                     <div className="grid gap-2">
                         <input
@@ -670,7 +876,11 @@ export default function BulkPurchaseOrderUpload() {
             });
             setPreview(null);
             setFile(null);
+            setSourceFileName("");
             setFinalizedRows(new Set());
+            setHomologationSearches({});
+            window.localStorage.removeItem(BULK_DRAFT_STORAGE_KEY);
+            setDraftInfo(null);
         } catch (error) {
             toast.error("No se pudo cargar", {
                 description:
@@ -680,6 +890,8 @@ export default function BulkPurchaseOrderUpload() {
             setIsCommitting(false);
         }
     };
+
+    const draftSavedLabel = draftInfo ? formatDraftDate(draftInfo.savedAt) : "";
 
     return (
         <div className="min-h-screen overflow-x-hidden bg-background">
@@ -723,9 +935,12 @@ export default function BulkPurchaseOrderUpload() {
                                 accept=".xlsx"
                                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                                 onChange={(event) => {
-                                    setFile(event.target.files?.[0] ?? null);
+                                    const selectedFile = event.target.files?.[0] ?? null;
+                                    setFile(selectedFile);
+                                    setSourceFileName(selectedFile?.name ?? "");
                                     setPreview(null);
                                     setFinalizedRows(new Set());
+                                    setHomologationSearches({});
                                 }}
                             />
                             <Button
@@ -743,11 +958,55 @@ export default function BulkPurchaseOrderUpload() {
                             </Button>
                         </div>
 
+                        {draftInfo && !preview && (
+                            <Alert>
+                                <Save className="h-4 w-4" />
+                                <AlertTitle>Avance guardado disponible</AlertTitle>
+                                <AlertDescription>
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                        <span>
+                                            {draftInfo.fileName || "Carga masiva"} -{" "}
+                                            {draftInfo.rows} filas
+                                            {draftSavedLabel
+                                                ? `, guardado ${draftSavedLabel}`
+                                                : ""}
+                                        </span>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={restoreDraft}
+                                            >
+                                                <RotateCcw className="mr-2 h-4 w-4" />
+                                                Cargar avance
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={clearDraft}
+                                            >
+                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                Descartar
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </AlertDescription>
+                            </Alert>
+                        )}
+
                         {preview && (
-                            <div className="grid gap-3 sm:grid-cols-3">
+                            <div className="grid gap-3 sm:grid-cols-4">
                                 <div className="rounded-md border border-border bg-muted/20 p-3">
                                     <div className="text-xs text-muted-foreground">Filas</div>
                                     <div className="text-2xl font-semibold">{previewSummary.total}</div>
+                                </div>
+                                <div className="rounded-md border border-border bg-muted/20 p-3">
+                                    <div className="text-xs text-muted-foreground">Archivo</div>
+                                    <div className="truncate text-sm font-medium">
+                                        {sourceFileName || "Borrador guardado"}
+                                    </div>
                                 </div>
                                 <div className="rounded-md border border-border bg-muted/20 p-3">
                                     <div className="text-xs text-muted-foreground">Finalizadas</div>
@@ -760,6 +1019,36 @@ export default function BulkPurchaseOrderUpload() {
                                     <div className="text-2xl font-semibold text-amber-700">
                                         {previewSummary.pending}
                                     </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {preview && (
+                            <div className="flex flex-col gap-3 rounded-md border border-border bg-muted/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+                                <p className="text-sm text-muted-foreground">
+                                    {draftInfo
+                                        ? `Avance guardado${draftSavedLabel ? ` ${draftSavedLabel}` : ""}.`
+                                        : "El avance se guarda automaticamente en este navegador."}
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => saveDraft({ showToast: true })}
+                                    >
+                                        <Save className="mr-2 h-4 w-4" />
+                                        Guardar avance
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={clearDraft}
+                                    >
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Descartar borrador
+                                    </Button>
                                 </div>
                             </div>
                         )}
@@ -813,8 +1102,15 @@ export default function BulkPurchaseOrderUpload() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {preview.rows.map((row) => (
-                                                <TableRow key={`${row.row_number}-${row.oc_interno}`}>
+                                            {preview.rows.map((row, rowIndex) => (
+                                                <TableRow
+                                                    key={`${row.row_number}-${row.oc_interno}`}
+                                                    className={
+                                                        rowIndex % 2 === 0
+                                                            ? "bg-card"
+                                                            : "bg-muted/20"
+                                                    }
+                                                >
                                                     <TableCell>{row.row_number}</TableCell>
                                                     <TableCell>
                                                         <MissingBadges isFinalized={isRowFinalized(row)} />
