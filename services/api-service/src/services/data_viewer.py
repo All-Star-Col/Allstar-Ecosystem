@@ -660,6 +660,47 @@ def _choose_fk_label_field(
     return value_field
 
 
+def _build_fk_display_expression(
+    *,
+    ref_schema: str,
+    ref_table: str,
+    ref_value: str,
+    source_column: str,
+    label_field: str,
+    referenced_table: str,
+    referenced_columns: list[dict[str, Any]],
+) -> str:
+    columns_by_name = {
+        _normalize_identifier(column["column_name"]).lower()
+        for column in referenced_columns
+    }
+
+    if referenced_table.lower() in {"tela", "telas"} and {
+        "nombre",
+        "referencia",
+    }.issubset(columns_by_name):
+        ref_name = _quote_identifier("nombre")
+        ref_reference = _quote_identifier("referencia")
+        label_expression = (
+            "NULLIF(TRIM(CONCAT_WS(' ', "
+            f"NULLIF(TRIM(ref.{ref_name}::text), ''), "
+            f"NULLIF(TRIM(ref.{ref_reference}::text), '')"
+            ")), '')"
+        )
+    else:
+        ref_label = _quote_identifier(label_field)
+        label_expression = f"NULLIF(TRIM(ref.{ref_label}::text), '')"
+
+    return (
+        "COALESCE(("
+        f"SELECT {label_expression} "
+        f"FROM {ref_schema}.{ref_table} ref "
+        f"WHERE TRIM(ref.{ref_value}::text) = TRIM({source_column}::text) "
+        "LIMIT 1"
+        f"), {source_column}::text)"
+    )
+
+
 def _parse_iso_datetime(value: str) -> datetime:
     normalized_value = value.strip()
     if normalized_value.endswith("Z"):
@@ -1646,15 +1687,15 @@ class DataViewerService:
                         ref_schema = _quote_identifier(fk_info["referenced_schema"])
                         ref_table = _quote_identifier(fk_info["referenced_table"])
                         ref_value = _quote_identifier(fk_info["referenced_column"])
-                        ref_label = _quote_identifier(label_field)
                         source_column = _column_ref(column_name)
-                        display_expression = (
-                            "COALESCE(("
-                            f"SELECT NULLIF(TRIM(ref.{ref_label}::text), '') "
-                            f"FROM {ref_schema}.{ref_table} ref "
-                            f"WHERE TRIM(ref.{ref_value}::text) = TRIM({source_column}::text) "
-                            "LIMIT 1"
-                            f"), {source_column}::text)"
+                        display_expression = _build_fk_display_expression(
+                            ref_schema=ref_schema,
+                            ref_table=ref_table,
+                            ref_value=ref_value,
+                            source_column=source_column,
+                            label_field=label_field,
+                            referenced_table=fk_info["referenced_table"],
+                            referenced_columns=ref_cols,
                         )
                         display_select_sql[column_name] = (
                             f"{display_expression} AS {_quote_identifier(column_name)}"

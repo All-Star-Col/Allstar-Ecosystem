@@ -46,6 +46,15 @@ TEXT_COLUMNS = {
     "char",
 }
 
+FABRIC_UNIT_TABLE_CANDIDATES = (
+    "unidades",
+    "unidadmedida",
+    "unidad_medida",
+    "unidades_medida",
+    "unidad",
+)
+FABRIC_METER_UNIT_LABELS = {"METRO", "METROS", "M"}
+
 
 @dataclass
 class BulkRow:
@@ -290,6 +299,67 @@ async def _get_or_create_fabric_row(
     return created
 
 
+async def _fetch_fabric_units(db: AsyncSession) -> list[dict[str, Any]]:
+    _, units = await _fetch_first_available_lookup(
+        db,
+        FABRIC_UNIT_TABLE_CANDIDATES,
+        label_columns=("nombre", "unidad", "descripcion"),
+    )
+    return units
+
+
+def _select_default_fabric_unit(units: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for unit in units:
+        labels = (
+            unit.get("__label"),
+            unit.get("nombre"),
+            unit.get("unidad"),
+            unit.get("descripcion"),
+        )
+        if any(_normalize_match(label) in FABRIC_METER_UNIT_LABELS for label in labels):
+            return unit
+    return next((unit for unit in units if unit.get("id") is not None), None)
+
+
+async def _get_default_fabric_unit_id(db: AsyncSession) -> Any:
+    default_unit = _select_default_fabric_unit(await _fetch_fabric_units(db))
+    if default_unit and default_unit.get("id") is not None:
+        return default_unit.get("id")
+
+    try:
+        fabrics = await _fetch_lookup(db, "tela", label_columns=("nombre", "referencia"))
+    except Exception:
+        return None
+
+    for fabric in fabrics:
+        unit_id = fabric.get("id_unidad_medida")
+        if unit_id is not None and str(unit_id).strip() != "":
+            return unit_id
+    return None
+
+
+async def _ensure_order_process_allows_pending_without_employee(
+    db: AsyncSession,
+) -> None:
+    columns = await _table_columns_map(db, "ordenproceso")
+    employee_column = columns.get("id_empleado")
+    if not employee_column:
+        return
+    if employee_column.get("is_nullable") == "YES":
+        return
+    if employee_column.get("column_default") is not None:
+        return
+
+    await db.execute(
+        text(
+            f"""
+            ALTER TABLE {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('ordenproceso', field_name='order_process_table')}
+            ALTER COLUMN {_quote_identifier('id_empleado', field_name='employee_column')} DROP NOT NULL
+            """
+        )
+    )
+
+
 async def _get_or_create_product_row(
     db: AsyncSession,
     *,
@@ -302,13 +372,25 @@ async def _get_or_create_product_row(
     product_name: str,
 ) -> dict[str, Any]:
     rows = await _fetch_lookup(db, "producto", label_columns=("nombre", "sku"))
+    has_component_ids = any(
+        value is not None and str(value).strip() != ""
+        for value in (
+            base_id,
+            model_id,
+            reference_1_id,
+            reference_2_id,
+            reference_3_id,
+            fabric_id,
+        )
+    )
     existing = next(
         (
             row
             for row in rows
             if _normalize_match(row.get("nombre")) == _normalize_match(product_name)
             or (
-                str(row.get("id_base") or "") == str(base_id or "")
+                has_component_ids
+                and str(row.get("id_base") or "") == str(base_id or "")
                 and str(row.get("id_modelo") or "") == str(model_id or "")
                 and str(row.get("id_referencia_1") or row.get("id_referencia") or "") == str(reference_1_id or "")
                 and str(row.get("id_referencia_2") or "") == str(reference_2_id or "")
@@ -347,6 +429,9 @@ async def _fetch_lookup(
     label_columns: tuple[str, ...] = ("nombre",),
 ) -> list[dict[str, Any]]:
     columns = await _table_columns_map(db, table_name)
+    if not columns:
+        return []
+
     available_labels = [column for column in label_columns if column in columns]
     if not available_labels:
         available_labels = [
@@ -355,6 +440,8 @@ async def _fetch_lookup(
             if str(meta.get("data_type") or "").lower() in TEXT_COLUMNS
         ][:2]
     if not available_labels:
+        if "id" not in columns:
+            return []
         available_labels = ["id"]
 
     label_sql = ", ".join(
@@ -378,14 +465,14 @@ async def _fetch_first_available_lookup(
     label_columns: tuple[str, ...] = ("nombre",),
 ) -> tuple[str | None, list[dict[str, Any]]]:
     for table_name in table_names:
-        try:
-            return table_name, await _fetch_lookup(
-                db,
-                table_name,
-                label_columns=label_columns,
-            )
-        except Exception:
+        columns = await _table_columns_map(db, table_name)
+        if not columns:
             continue
+        return table_name, await _fetch_lookup(
+            db,
+            table_name,
+            label_columns=label_columns,
+        )
     return None, []
 
 
@@ -922,11 +1009,8 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
     references = await _fetch_lookup(db, "referencia", label_columns=("nombre",))
     fabrics = await _fetch_lookup(db, "tela", label_columns=("nombre", "referencia"))
     products = await _fetch_lookup(db, "producto", label_columns=("nombre", "sku"))
-    unit_table_name, units = await _fetch_first_available_lookup(
-        db,
-        ("unidadmedida", "unidad_medida", "unidades", "unidad"),
-        label_columns=("nombre", "unidad", "descripcion"),
-    )
+    units = await _fetch_fabric_units(db)
+    default_unit = _select_default_fabric_unit(units)
 
     preview_rows: list[dict[str, Any]] = []
     for row in rows:
@@ -939,7 +1023,6 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
         reference_2 = _find_by_label(references, row.referencia_2) if row.referencia_2 else (contained_references[1] if len(contained_references) > 1 else None)
         reference_3 = _find_by_label(references, row.referencia_3) if row.referencia_3 else (contained_references[2] if len(contained_references) > 2 else None)
         fabric = _find_by_label(fabrics, row.tela)
-        default_unit = units[0] if units else None
         fabric_parts = _default_fabric_parts(row.tela)
         product_search_names = _product_search_names(product_name, row, fabric)
 
@@ -978,16 +1061,8 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
             fabric = product_fabric or fabric
 
         missing = []
-        for key, resolved in (
-            ("cliente", client),
-            ("base", base),
-            ("modelo", model),
-            ("tela", fabric),
-        ):
-            if not resolved:
-                missing.append(key)
-        if not product:
-            missing.append("producto")
+        if not client:
+            missing.append("cliente")
 
         preview_rows.append(
             {
@@ -1193,8 +1268,11 @@ async def commit_purchase_order_import(
     created_fabrics = 0
     created_products = 0
     next_item_legado = await _get_next_item_legado(db)
+    default_fabric_unit_id = await _get_default_fabric_unit_id(db)
 
     try:
+        await _ensure_order_process_allows_pending_without_employee(db)
+
         for payload in rows_payload:
             row = BulkRow(
                 row_number=int(payload["row_number"]),
@@ -1237,22 +1315,26 @@ async def commit_purchase_order_import(
                 if not base_id:
                     if not create_missing:
                         raise DBCommunicationError(f"Fila {row.row_number}: falta homologar base")
-                    base = await _get_or_create_named_row(
-                        db,
-                        "base",
-                        suggested.get("base") or row.base,
-                    )
-                    base_id = base.get("id")
+                    base_name = _component_text(suggested.get("base") or row.base)
+                    if base_name:
+                        base = await _get_or_create_named_row(
+                            db,
+                            "base",
+                            base_name,
+                        )
+                        base_id = base.get("id")
 
                 if not model_id:
                     if not create_missing:
                         raise DBCommunicationError(f"Fila {row.row_number}: falta homologar modelo")
-                    model = await _get_or_create_named_row(
-                        db,
-                        "modelo",
-                        suggested.get("modelo") or row.modelo,
-                    )
-                    model_id = model.get("id")
+                    model_name = _component_text(suggested.get("modelo") or row.modelo)
+                    if model_name:
+                        model = await _get_or_create_named_row(
+                            db,
+                            "modelo",
+                            model_name,
+                        )
+                        model_id = model.get("id")
 
                 if not reference_1_id and _component_text(suggested.get("referencia_1") or row.referencia_1):
                     reference_1 = await _get_or_create_named_row(
@@ -1287,19 +1369,26 @@ async def commit_purchase_order_import(
                         fabric_name, fabric_reference = _split_fabric_text(
                             suggested.get("tela") or row.tela
                         )
-                    if not fabric_name:
-                        raise DBCommunicationError(f"Fila {row.row_number}: falta nombre de tela")
-                    if not fabric_reference:
-                        fabric_reference = fabric_name
-                    fabric = await _get_or_create_fabric_row(
-                        db,
-                        name=fabric_name,
-                        reference=fabric_reference,
-                        unit_id=fabric_unit_id,
-                    )
-                    fabric_id = fabric.get("id")
-                    if fabric.get("__was_created"):
-                        created_fabrics += 1
+                    if fabric_name or fabric_reference:
+                        if not fabric_name:
+                            fabric_name = fabric_reference
+                        if not fabric_reference:
+                            fabric_reference = fabric_name
+                        if not fabric_unit_id:
+                            fabric_unit_id = default_fabric_unit_id
+                        if not fabric_unit_id:
+                            raise DBCommunicationError(
+                                f"Fila {row.row_number}: falta unidad METRO para crear la tela {fabric_name} {fabric_reference}"
+                            )
+                        fabric = await _get_or_create_fabric_row(
+                            db,
+                            name=fabric_name,
+                            reference=fabric_reference,
+                            unit_id=fabric_unit_id,
+                        )
+                        fabric_id = fabric.get("id")
+                        if fabric.get("__was_created"):
+                            created_fabrics += 1
 
                 product_name = _build_final_product_name(row, suggested)
                 if not create_missing:

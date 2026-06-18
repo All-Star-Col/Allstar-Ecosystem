@@ -50,12 +50,12 @@ const MISSING_LABELS: Record<string, string> = {
     producto: "Producto",
 };
 
-const BULK_TABLE_WIDTH = 3620;
 const BULK_TABLE_COLUMNS = [
     72,
     130,
     200,
-    380,
+    360,
+    280,
     380,
     280,
     280,
@@ -65,44 +65,24 @@ const BULK_TABLE_COLUMNS = [
     380,
     220,
     140,
-];
+    180,
+] as const;
+const BULK_TABLE_WIDTH = BULK_TABLE_COLUMNS.reduce(
+    (total, width) => total + width,
+    0,
+);
 
-function isRowReadyForCommit(row: BulkPurchaseOrderRowAPI): boolean {
-    if (row.missing.includes("cliente")) {
-        return false;
-    }
-    if (row.resolved?.producto_id) {
-        return true;
-    }
-
-    const hasBaseData = (["base", "modelo"] as HomologationField[]).every(
-        (field) =>
-            Boolean(row.resolved?.[`${field}_id`]) ||
-            String(row.suggested?.[field] ?? "").trim().length > 0,
-    );
-    const hasFabricData =
-        Boolean(row.resolved?.tela_id) ||
-        (
-            String(row.suggested?.tela_nombre ?? "").trim().length > 0 &&
-            Boolean(row.resolved?.tela_unidad_medida_id)
-        );
-
-    return hasBaseData && hasFabricData;
-}
-
-function MissingBadges({ row }: { row: BulkPurchaseOrderRowAPI }) {
-    const isReady = isRowReadyForCommit(row);
-
+function MissingBadges({ isFinalized }: { isFinalized: boolean }) {
     return (
         <Badge
-            variant={isReady ? "secondary" : "outline"}
+            variant={isFinalized ? "secondary" : "outline"}
             className={
-                isReady
+                isFinalized
                     ? "bg-emerald-100 text-emerald-800"
                     : "border-amber-300 text-amber-800"
             }
         >
-            {isReady ? "Finalizada" : "Pendiente"}
+            {isFinalized ? "Finalizada" : "Pendiente"}
         </Badge>
     );
 }
@@ -150,11 +130,11 @@ function ProductHomologationBadge({ row }: { row: BulkPurchaseOrderRowAPI }) {
 
     if (row.resolved?.producto_id) {
         return (
-            <div className="min-w-72 space-y-1">
+            <div className="min-w-0 max-w-full space-y-1 whitespace-normal break-words">
                 <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
                     Homologado
                 </Badge>
-                <div className="text-xs font-medium leading-snug text-foreground">
+                <div className="whitespace-normal break-words text-xs font-medium leading-snug text-foreground">
                     {productLabel || row.product_name}
                 </div>
             </div>
@@ -162,11 +142,11 @@ function ProductHomologationBadge({ row }: { row: BulkPurchaseOrderRowAPI }) {
     }
 
     return (
-        <div className="min-w-64 space-y-1">
+        <div className="min-w-0 max-w-full space-y-1 whitespace-normal break-words">
             <Badge variant="outline" className="border-amber-300 text-amber-800">
                 Se creara producto
             </Badge>
-            <div className="text-xs leading-snug text-muted-foreground">
+            <div className="whitespace-normal break-words text-xs leading-snug text-muted-foreground">
                 {buildProductToCreateLabel(row)}
             </div>
         </div>
@@ -180,33 +160,38 @@ export default function BulkPurchaseOrderUpload() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
+    const [finalizedRows, setFinalizedRows] = useState<Set<number>>(new Set());
     const revalidationRunsRef = useRef<Record<number, number>>({});
+
+    const isRowFinalized = (row: BulkPurchaseOrderRowAPI) =>
+        finalizedRows.has(row.row_number);
 
     const hasBlockingMissing = useMemo(
         () =>
             preview?.rows.some((row) =>
-                row.missing.some((missing) =>
-                    missing === "cliente" ||
-                    (
-                        ["base", "modelo", "tela"].includes(missing) &&
-                        !isRowReadyForCommit(row)
-                    ),
-                ),
+                row.missing.some((missing) => missing === "cliente"),
             ) ?? false,
         [preview],
     );
 
-    const canCommit = Boolean(preview?.rows.length) && !hasBlockingMissing && !isCommitting;
+    const allRowsFinalized =
+        Boolean(preview?.rows.length) &&
+        (preview?.rows ?? []).every((row) => isRowFinalized(row));
+
+    const canCommit =
+        Boolean(preview?.rows.length) &&
+        allRowsFinalized &&
+        !isCommitting;
 
     const previewSummary = useMemo(() => {
         const rows = preview?.rows ?? [];
-        const ready = rows.filter(isRowReadyForCommit).length;
+        const ready = rows.filter((row) => isRowFinalized(row)).length;
         return {
             total: rows.length,
             ready,
             pending: rows.length - ready,
         };
-    }, [preview]);
+    }, [preview, finalizedRows]);
 
     const getFieldKey = (rowNumber: number, field: HomologationField) =>
         `${rowNumber}:${field}`;
@@ -265,10 +250,14 @@ export default function BulkPurchaseOrderUpload() {
                 },
             );
 
-            return nextRow;
+            return {
+                ...nextRow,
+                status: "needs_approval" as const,
+            };
         });
 
         setFieldModes(nextModes);
+        setFinalizedRows(new Set());
         return nextRows;
     };
 
@@ -288,6 +277,7 @@ export default function BulkPurchaseOrderUpload() {
             });
         } catch (error) {
             setPreview(null);
+            setFinalizedRows(new Set());
             toast.error("No se pudo prevalidar", {
                 description:
                     error instanceof Error ? error.message : "Error leyendo el archivo",
@@ -331,13 +321,21 @@ export default function BulkPurchaseOrderUpload() {
         updater: (row: BulkPurchaseOrderRowAPI) => BulkPurchaseOrderRowAPI,
         options: { revalidateProduct?: boolean } = {},
     ) => {
+        setFinalizedRows((current) => {
+            if (!current.has(rowNumber)) return current;
+            const next = new Set(current);
+            next.delete(rowNumber);
+            return next;
+        });
         const sourceRow = preview?.rows.find((row) => row.row_number === rowNumber);
-        const rowToRevalidate = sourceRow ? updater(sourceRow) : null;
+        const rowToRevalidate = sourceRow
+            ? { ...updater(sourceRow), status: "needs_approval" as const }
+            : null;
         setPreview((current) => {
             if (!current) return current;
             const rows = current.rows.map((row) => {
                 if (row.row_number !== rowNumber) return row;
-                return rowToRevalidate ?? updater(row);
+                return rowToRevalidate ?? { ...updater(row), status: "needs_approval" as const };
             });
             return {
                 ...current,
@@ -361,8 +359,7 @@ export default function BulkPurchaseOrderUpload() {
         const selectedOption = row.options?.[field]?.find(
             (option) => String(option.id) === rawValue,
         );
-        const isClearingOptionalReference =
-            field.startsWith("referencia_") && rawValue === "";
+        const isClearingField = rawValue === "";
 
         updateRow(row.row_number, (current) => ({
             ...current,
@@ -373,13 +370,10 @@ export default function BulkPurchaseOrderUpload() {
             },
             suggested: {
                 ...current.suggested,
-                [field]: isClearingOptionalReference
+                [field]: isClearingField
                     ? ""
                     : selectedOption?.label ?? current.suggested?.[field] ?? "",
                 producto: "",
-                ...(field.startsWith("referencia_")
-                    ? { [`${field}_empty`]: isClearingOptionalReference ? "true" : "false" }
-                    : {}),
             },
             missing: Array.from(
                 new Set([
@@ -448,9 +442,6 @@ export default function BulkPurchaseOrderUpload() {
                 ...current.suggested,
                 [field]: value,
                 producto: "",
-                ...(field.startsWith("referencia_")
-                    ? { [`${field}_empty`]: value.trim() ? "false" : current.suggested?.[`${field}_empty`] ?? "false" }
-                    : {}),
             },
             missing: Array.from(
                 new Set([
@@ -465,64 +456,23 @@ export default function BulkPurchaseOrderUpload() {
         }), { revalidateProduct: true });
     };
 
-    const handleFabricUnitChange = (
-        row: BulkPurchaseOrderRowAPI,
-        rawValue: string,
-    ) => {
-        const selectedOption = row.options?.tela_unidad_medida?.find(
-            (option) => String(option.id) === rawValue,
-        );
-        updateRow(row.row_number, (current) => ({
-            ...current,
-            resolved: {
-                ...current.resolved,
-                tela_unidad_medida_id: selectedOption ? selectedOption.id : null,
-                producto_id: null,
-            },
-            suggested: {
-                ...current.suggested,
-                tela_unidad_medida: selectedOption?.label ?? "",
-                producto: "",
-            },
-            missing: Array.from(
-                new Set([
-                    ...current.missing.filter((missing) => missing !== "producto"),
-                    "tela",
-                    "producto",
-                ]),
-            ),
-            status: "needs_approval",
-        }), { revalidateProduct: true });
-    };
-
-    const handleOptionalEmptyChange = (
-        row: BulkPurchaseOrderRowAPI,
-        field: HomologationField,
-        checked: boolean,
-    ) => {
-        if (!field.startsWith("referencia_")) return;
-
-        updateRow(row.row_number, (current) => ({
-            ...current,
-            resolved: {
-                ...current.resolved,
-                [`${field}_id`]: null,
-                producto_id: null,
-            },
-            suggested: {
-                ...current.suggested,
-                [field]: checked ? "" : current.suggested?.[field] ?? "",
-                [`${field}_empty`]: checked ? "true" : "false",
-                producto: "",
-            },
-            missing: Array.from(
-                new Set([
-                    ...current.missing.filter((missing) => missing !== "producto"),
-                    "producto",
-                ]),
-            ),
-            status: "needs_approval",
-        }), { revalidateProduct: true });
+    const handleFinalizeRow = (row: BulkPurchaseOrderRowAPI) => {
+        setPreview((current) => {
+            if (!current) return current;
+            return {
+                ...current,
+                rows: current.rows.map((currentRow) =>
+                    currentRow.row_number === row.row_number
+                        ? { ...currentRow, status: "ready" as const }
+                        : currentRow,
+                ),
+            };
+        });
+        setFinalizedRows((current) => {
+            const next = new Set(current);
+            next.add(row.row_number);
+            return next;
+        });
     };
 
     const renderHomologationControl = (
@@ -532,9 +482,6 @@ export default function BulkPurchaseOrderUpload() {
         const resolvedValue = row.resolved?.[`${field}_id`];
         const options = row.options?.[field] ?? [];
         const suggestedValue = String(row.suggested?.[field] ?? "");
-        const isOptionalReference = field.startsWith("referencia_");
-        const isEmptyConfirmed =
-            isOptionalReference && String(row.suggested?.[`${field}_empty`] ?? "") === "true";
         const suggestedOptions = options.filter((option) => option.suggested);
         const otherOptions = options.filter((option) => !option.suggested);
         const fieldKey = getFieldKey(row.row_number, field);
@@ -567,8 +514,8 @@ export default function BulkPurchaseOrderUpload() {
                         {options.length === 0 && (
                             <option value="">Sin opciones sugeridas</option>
                         )}
-                        {isOptionalReference && (
-                            <option value="">Dejar vacio</option>
+                        {options.length > 0 && (
+                            <option value="">Sin seleccionar</option>
                         )}
                         {suggestedOptions.length > 0 && (
                             <optgroup label="Sugeridas">
@@ -615,50 +562,18 @@ export default function BulkPurchaseOrderUpload() {
                             placeholder="Referencia"
                             className="rounded-md border border-input bg-background px-2 py-1 text-xs"
                         />
-                        <select
-                            value={
-                                row.resolved?.tela_unidad_medida_id
-                                    ? String(row.resolved.tela_unidad_medida_id)
-                                    : ""
-                            }
-                            onChange={(event) =>
-                                handleFabricUnitChange(row, event.target.value)
-                            }
-                            className="rounded-md border border-input bg-background px-2 py-1 text-xs"
-                        >
-                            <option value="">Unidad de medida</option>
-                            {(row.options?.tela_unidad_medida ?? []).map((option) => (
-                                <option key={String(option.id)} value={String(option.id)}>
-                                    {option.label}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="rounded-md border border-input bg-muted px-2 py-1 text-xs text-muted-foreground">
+                            Unidad: {row.suggested?.tela_unidad_medida || "METRO"}
+                        </div>
                     </div>
                 ) : (
                     <div className="space-y-2">
-                        {isOptionalReference && (
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <input
-                                    type="checkbox"
-                                    checked={isEmptyConfirmed}
-                                    onChange={(event) =>
-                                        handleOptionalEmptyChange(
-                                            row,
-                                            field,
-                                            event.target.checked,
-                                        )
-                                    }
-                                />
-                                Dejar vacio
-                            </label>
-                        )}
                         <input
                             value={suggestedValue}
                             onChange={(event) =>
                                 handleSuggestedChange(row.row_number, field, event.target.value)
                             }
                             placeholder={`Crear ${MISSING_LABELS[field]}`}
-                            disabled={isEmptyConfirmed}
                             className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
                         />
                     </div>
@@ -681,6 +596,7 @@ export default function BulkPurchaseOrderUpload() {
             });
             setPreview(null);
             setFile(null);
+            setFinalizedRows(new Set());
         } catch (error) {
             toast.error("No se pudo cargar", {
                 description:
@@ -735,6 +651,7 @@ export default function BulkPurchaseOrderUpload() {
                                 onChange={(event) => {
                                     setFile(event.target.files?.[0] ?? null);
                                     setPreview(null);
+                                    setFinalizedRows(new Set());
                                 }}
                             />
                             <Button
@@ -776,10 +693,10 @@ export default function BulkPurchaseOrderUpload() {
                         {hasBlockingMissing && (
                             <Alert variant="destructive">
                                 <AlertCircle className="h-4 w-4" />
-                                <AlertTitle>Faltan datos base</AlertTitle>
+                                <AlertTitle>Falta cliente</AlertTitle>
                                 <AlertDescription>
-                                    El cliente debe existir. Para Base, Modelo y Tela
-                                    puedes homologar una opcion existente o crear con texto.
+                                    El cliente debe existir para crear la orden de compra.
+                                    Base, modelo, referencias y tela pueden quedar vacios.
                                 </AlertDescription>
                             </Alert>
                         )}
@@ -808,15 +725,17 @@ export default function BulkPurchaseOrderUpload() {
                                                 <TableHead>Estado</TableHead>
                                                 <TableHead>Cliente</TableHead>
                                                 <TableHead>Nombre</TableHead>
+                                                <TableHead>Tela</TableHead>
                                                 <TableHead>Producto homologado</TableHead>
                                                 <TableHead>Base</TableHead>
                                                 <TableHead>Modelo</TableHead>
                                                 <TableHead>Referencia 1</TableHead>
                                                 <TableHead>Referencia 2</TableHead>
                                                 <TableHead>Referencia 3</TableHead>
-                                                <TableHead>Tela</TableHead>
+                                                <TableHead>Tela homologada</TableHead>
                                                 <TableHead className="px-5">OC cliente</TableHead>
                                                 <TableHead className="px-5 text-right">Cantidad</TableHead>
+                                                <TableHead>Accion</TableHead>
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
@@ -824,11 +743,16 @@ export default function BulkPurchaseOrderUpload() {
                                                 <TableRow key={`${row.row_number}-${row.oc_interno}`}>
                                                     <TableCell>{row.row_number}</TableCell>
                                                     <TableCell>
-                                                        <MissingBadges row={row} />
+                                                        <MissingBadges isFinalized={isRowFinalized(row)} />
                                                     </TableCell>
                                                     <TableCell>{row.cliente}</TableCell>
-                                                    <TableCell>{row.product_name}</TableCell>
-                                                    <TableCell>
+                                                    <TableCell className="whitespace-normal break-words align-top leading-snug">
+                                                        {row.product_name}
+                                                    </TableCell>
+                                                    <TableCell className="whitespace-normal break-words align-top leading-snug">
+                                                        {row.tela}
+                                                    </TableCell>
+                                                    <TableCell className="whitespace-normal break-words align-top">
                                                         <ProductHomologationBadge row={row} />
                                                     </TableCell>
                                                     <TableCell>{renderHomologationControl(row, "base")}</TableCell>
@@ -840,6 +764,24 @@ export default function BulkPurchaseOrderUpload() {
                                                     <TableCell className="px-5">{row.oc_cliente}</TableCell>
                                                     <TableCell className="px-5 text-right font-medium">
                                                         {row.cantidad}
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant={isRowFinalized(row) ? "accent" : "outline"}
+                                                            onClick={() => handleFinalizeRow(row)}
+                                                            className="w-full justify-center"
+                                                        >
+                                                            {isRowFinalized(row) ? (
+                                                                <>
+                                                                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                                                                    Finalizada
+                                                                </>
+                                                            ) : (
+                                                                "Finalizar"
+                                                            )}
+                                                        </Button>
                                                     </TableCell>
                                                 </TableRow>
                                             ))}
