@@ -16,15 +16,20 @@ logger = get_logger(__name__)
 
 
 async def get_user(db: AsyncSession, username: str) -> Optional[UserInDB]:
+    identifier = (username or "").strip()
+    if not identifier:
+        return None
+
     q = text(
         """
         SELECT id, username, full_name, password_hash, is_active
         FROM auth.users
-        WHERE username = :username
+        WHERE LOWER(TRIM(username)) = LOWER(:identifier)
+           OR LOWER(TRIM(COALESCE(email, ''))) = LOWER(:identifier)
         LIMIT 1
     """
     )
-    r = await db.execute(q, {"username": username})
+    r = await db.execute(q, {"identifier": identifier})
     row = r.mappings().first()
     if not row:
         return None

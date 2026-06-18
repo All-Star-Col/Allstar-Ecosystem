@@ -25,7 +25,7 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)
 ):
 
-    user = await authenticate_user(db, form_data.username, form_data.password)
+    user = await authenticate_user(db, form_data.username.strip(), form_data.password)
 
     if not user:
         raise HTTPException(
@@ -34,7 +34,7 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    await update_login_time(db, form_data.username)
+    await update_login_time(db, user.username)
 
     access_token = create_access_token(
         data={"sub": user.username},
