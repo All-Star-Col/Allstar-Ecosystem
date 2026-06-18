@@ -164,39 +164,49 @@ export default function BulkPurchaseOrderUpload() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
-    const [tableScrollWidth, setTableScrollWidth] = useState(2020);
+    const [horizontalScroll, setHorizontalScroll] = useState(0);
+    const [maxHorizontalScroll, setMaxHorizontalScroll] = useState(0);
     const tableScrollRef = useRef<HTMLDivElement | null>(null);
-    const topScrollRef = useRef<HTMLDivElement | null>(null);
     const revalidationRunsRef = useRef<Record<number, number>>({});
 
     useEffect(() => {
         const tableScroller = tableScrollRef.current;
         if (!tableScroller) return;
 
-        const updateScrollWidth = () => {
-            setTableScrollWidth(tableScroller.scrollWidth);
+        const updateScrollRange = () => {
+            const maxScroll = Math.max(
+                tableScroller.scrollWidth - tableScroller.clientWidth,
+                0,
+            );
+            setMaxHorizontalScroll(maxScroll);
+            setHorizontalScroll((current) => {
+                const next = Math.min(current, maxScroll);
+                if (tableScroller.scrollLeft !== next) {
+                    tableScroller.scrollLeft = next;
+                }
+                return next;
+            });
         };
-        updateScrollWidth();
+        updateScrollRange();
 
         const resizeObserver =
             typeof ResizeObserver !== "undefined"
-                ? new ResizeObserver(updateScrollWidth)
+                ? new ResizeObserver(updateScrollRange)
                 : null;
         resizeObserver?.observe(tableScroller);
 
-        window.addEventListener("resize", updateScrollWidth);
+        window.addEventListener("resize", updateScrollRange);
         return () => {
             resizeObserver?.disconnect();
-            window.removeEventListener("resize", updateScrollWidth);
+            window.removeEventListener("resize", updateScrollRange);
         };
     }, [preview]);
 
-    const syncHorizontalScroll = (
-        source: HTMLDivElement | null,
-        target: HTMLDivElement | null,
-    ) => {
-        if (!source || !target || target.scrollLeft === source.scrollLeft) return;
-        target.scrollLeft = source.scrollLeft;
+    const handleHorizontalScrollChange = (value: number) => {
+        setHorizontalScroll(value);
+        if (tableScrollRef.current) {
+            tableScrollRef.current.scrollLeft = value;
+        }
     };
 
     const hasBlockingMissing = useMemo(
@@ -803,29 +813,27 @@ export default function BulkPurchaseOrderUpload() {
 
                         {preview && preview.rows.length > 0 && (
                             <div className="space-y-4">
-                                <div
-                                    ref={topScrollRef}
-                                    onScroll={() =>
-                                        syncHorizontalScroll(
-                                            topScrollRef.current,
-                                            tableScrollRef.current,
-                                        )
-                                    }
-                                    className="sticky top-0 z-30 overflow-x-auto overflow-y-hidden rounded-md border border-border bg-card/95 shadow-sm backdrop-blur"
-                                >
-                                    <div
-                                        style={{
-                                            width: tableScrollWidth,
-                                            height: 18,
-                                        }}
+                                <div className="sticky top-0 z-30 rounded-md border border-border bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={maxHorizontalScroll}
+                                        value={horizontalScroll}
+                                        disabled={maxHorizontalScroll === 0}
+                                        onChange={(event) =>
+                                            handleHorizontalScrollChange(
+                                                Number(event.target.value),
+                                            )
+                                        }
+                                        aria-label="Desplazamiento horizontal"
+                                        className="block h-3 w-full cursor-ew-resize accent-primary disabled:cursor-not-allowed disabled:opacity-40"
                                     />
                                 </div>
                                 <div
                                     ref={tableScrollRef}
-                                    onScroll={() =>
-                                        syncHorizontalScroll(
-                                            tableScrollRef.current,
-                                            topScrollRef.current,
+                                    onScroll={(event) =>
+                                        setHorizontalScroll(
+                                            event.currentTarget.scrollLeft,
                                         )
                                     }
                                     className="max-h-[calc(100vh-390px)] overflow-auto rounded-md border border-border"
