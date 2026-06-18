@@ -166,69 +166,54 @@ export default function BulkPurchaseOrderUpload() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
-    const [horizontalScroll, setHorizontalScroll] = useState(0);
-    const [maxHorizontalScroll, setMaxHorizontalScroll] = useState(0);
+    const [tableContentWidth, setTableContentWidth] = useState(BULK_TABLE_MIN_WIDTH);
     const tableScrollRef = useRef<HTMLDivElement | null>(null);
+    const horizontalScrollRef = useRef<HTMLDivElement | null>(null);
     const revalidationRunsRef = useRef<Record<number, number>>({});
 
     useEffect(() => {
         const tableScroller = tableScrollRef.current;
         if (!tableScroller) return;
 
-        const updateScrollRange = () => {
+        const updateScrollWidth = () => {
             const contentWidth = Math.max(
                 tableScroller.scrollWidth,
                 tableScroller.firstElementChild?.scrollWidth ?? 0,
                 BULK_TABLE_MIN_WIDTH,
             );
-            const maxScroll = Math.max(
-                contentWidth - tableScroller.clientWidth,
-                0,
-            );
-            setMaxHorizontalScroll(maxScroll);
-            setHorizontalScroll((current) => {
-                const next = Math.min(current, maxScroll);
-                if (tableScroller.scrollLeft !== next) {
-                    tableScroller.scrollLeft = next;
-                }
-                return next;
-            });
+            setTableContentWidth(contentWidth);
+            if (horizontalScrollRef.current) {
+                horizontalScrollRef.current.scrollLeft = tableScroller.scrollLeft;
+            }
         };
-        updateScrollRange();
-        window.requestAnimationFrame(updateScrollRange);
-        const updateTimer = window.setTimeout(updateScrollRange, 150);
+        updateScrollWidth();
+        window.requestAnimationFrame(updateScrollWidth);
+        const updateTimer = window.setTimeout(updateScrollWidth, 150);
 
         const resizeObserver =
             typeof ResizeObserver !== "undefined"
-                ? new ResizeObserver(updateScrollRange)
+                ? new ResizeObserver(updateScrollWidth)
                 : null;
         resizeObserver?.observe(tableScroller);
 
-        window.addEventListener("resize", updateScrollRange);
+        window.addEventListener("resize", updateScrollWidth);
         return () => {
             window.clearTimeout(updateTimer);
             resizeObserver?.disconnect();
-            window.removeEventListener("resize", updateScrollRange);
+            window.removeEventListener("resize", updateScrollWidth);
         };
     }, [preview]);
 
-    const handleHorizontalScrollChange = (value: number) => {
-        setHorizontalScroll(value);
-        if (tableScrollRef.current) {
-            tableScrollRef.current.scrollLeft = value;
+    const syncTableHorizontalScroll = (scrollLeft: number) => {
+        if (tableScrollRef.current && tableScrollRef.current.scrollLeft !== scrollLeft) {
+            tableScrollRef.current.scrollLeft = scrollLeft;
         }
-    };
-
-    const shiftHorizontalScroll = (direction: -1 | 1) => {
-        const tableScroller = tableScrollRef.current;
-        if (!tableScroller) return;
-
-        const step = Math.max(Math.round(tableScroller.clientWidth * 0.75), 240);
-        const next = Math.max(
-            0,
-            Math.min(tableScroller.scrollLeft + direction * step, maxHorizontalScroll),
-        );
-        handleHorizontalScrollChange(next);
+        if (
+            horizontalScrollRef.current &&
+            horizontalScrollRef.current.scrollLeft !== scrollLeft
+        ) {
+            horizontalScrollRef.current.scrollLeft = scrollLeft;
+        }
     };
 
     const hasBlockingMissing = useMemo(
@@ -838,7 +823,7 @@ export default function BulkPurchaseOrderUpload() {
                                 <div
                                     ref={tableScrollRef}
                                     onScroll={(event) =>
-                                        setHorizontalScroll(
+                                        syncTableHorizontalScroll(
                                             event.currentTarget.scrollLeft,
                                         )
                                     }
@@ -846,47 +831,6 @@ export default function BulkPurchaseOrderUpload() {
                                 >
                                     <Table className="min-w-[2020px]">
                                         <TableHeader className="sticky top-0 z-10 bg-card">
-                                            <TableRow>
-                                                <TableHead colSpan={13} className="bg-card p-3">
-                                                    <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 px-3 py-2 shadow-sm">
-                                                        <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                                                            Scroll horizontal
-                                                        </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => shiftHorizontalScroll(-1)}
-                                                            disabled={horizontalScroll <= 0}
-                                                            className="inline-flex h-7 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-foreground shadow-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                                                            aria-label="Mover tabla a la izquierda"
-                                                        >
-                                                            ←
-                                                        </button>
-                                                        <input
-                                                            type="range"
-                                                            min={0}
-                                                            max={maxHorizontalScroll}
-                                                            value={horizontalScroll}
-                                                            disabled={maxHorizontalScroll === 0}
-                                                            onChange={(event) =>
-                                                                handleHorizontalScrollChange(
-                                                                    Number(event.target.value),
-                                                                )
-                                                            }
-                                                            aria-label="Desplazamiento horizontal"
-                                                            className="block h-5 min-w-0 flex-1 cursor-ew-resize accent-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => shiftHorizontalScroll(1)}
-                                                            disabled={horizontalScroll >= maxHorizontalScroll}
-                                                            className="inline-flex h-7 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-sm font-semibold text-foreground shadow-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                                                            aria-label="Mover tabla a la derecha"
-                                                        >
-                                                            →
-                                                        </button>
-                                                    </div>
-                                                </TableHead>
-                                            </TableRow>
                                             <TableRow>
                                                 <TableHead className="min-w-16">Fila</TableHead>
                                                 <TableHead className="min-w-28">Estado</TableHead>
@@ -929,6 +873,23 @@ export default function BulkPurchaseOrderUpload() {
                                             ))}
                                         </TableBody>
                                     </Table>
+                                    <div
+                                        ref={horizontalScrollRef}
+                                        onScroll={(event) =>
+                                            syncTableHorizontalScroll(
+                                                event.currentTarget.scrollLeft,
+                                            )
+                                        }
+                                        className="sticky bottom-0 z-20 h-5 overflow-x-auto overflow-y-hidden border-t border-border bg-card"
+                                        aria-label="Scroll horizontal de la tabla"
+                                    >
+                                        <div
+                                            style={{
+                                                width: tableContentWidth,
+                                                height: 1,
+                                            }}
+                                        />
+                                    </div>
                                 </div>
 
                                 <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
