@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -50,8 +50,6 @@ const MISSING_LABELS: Record<string, string> = {
     tela: "Tela",
     producto: "Producto",
 };
-
-const BULK_TABLE_MIN_WIDTH = 2020;
 
 function isRowReadyForCommit(row: BulkPurchaseOrderRowAPI): boolean {
     if (row.missing.includes("cliente")) {
@@ -166,55 +164,7 @@ export default function BulkPurchaseOrderUpload() {
     const [isPreviewing, setIsPreviewing] = useState(false);
     const [isCommitting, setIsCommitting] = useState(false);
     const [fieldModes, setFieldModes] = useState<Record<string, HomologationMode>>({});
-    const [tableContentWidth, setTableContentWidth] = useState(BULK_TABLE_MIN_WIDTH);
-    const tableScrollRef = useRef<HTMLDivElement | null>(null);
-    const horizontalScrollRef = useRef<HTMLDivElement | null>(null);
     const revalidationRunsRef = useRef<Record<number, number>>({});
-
-    useEffect(() => {
-        const tableScroller = tableScrollRef.current;
-        if (!tableScroller) return;
-
-        const updateScrollWidth = () => {
-            const contentWidth = Math.max(
-                tableScroller.scrollWidth,
-                tableScroller.firstElementChild?.scrollWidth ?? 0,
-                BULK_TABLE_MIN_WIDTH,
-            );
-            setTableContentWidth(contentWidth);
-            if (horizontalScrollRef.current) {
-                horizontalScrollRef.current.scrollLeft = tableScroller.scrollLeft;
-            }
-        };
-        updateScrollWidth();
-        window.requestAnimationFrame(updateScrollWidth);
-        const updateTimer = window.setTimeout(updateScrollWidth, 150);
-
-        const resizeObserver =
-            typeof ResizeObserver !== "undefined"
-                ? new ResizeObserver(updateScrollWidth)
-                : null;
-        resizeObserver?.observe(tableScroller);
-
-        window.addEventListener("resize", updateScrollWidth);
-        return () => {
-            window.clearTimeout(updateTimer);
-            resizeObserver?.disconnect();
-            window.removeEventListener("resize", updateScrollWidth);
-        };
-    }, [preview]);
-
-    const syncTableHorizontalScroll = (scrollLeft: number) => {
-        if (tableScrollRef.current && tableScrollRef.current.scrollLeft !== scrollLeft) {
-            tableScrollRef.current.scrollLeft = scrollLeft;
-        }
-        if (
-            horizontalScrollRef.current &&
-            horizontalScrollRef.current.scrollLeft !== scrollLeft
-        ) {
-            horizontalScrollRef.current.scrollLeft = scrollLeft;
-        }
-    };
 
     const hasBlockingMissing = useMemo(
         () =>
@@ -820,78 +770,54 @@ export default function BulkPurchaseOrderUpload() {
 
                         {preview && preview.rows.length > 0 && (
                             <div className="space-y-4">
-                                <div className="overflow-hidden rounded-md border border-border">
-                                    <div
-                                        ref={tableScrollRef}
-                                        onScroll={(event) =>
-                                            syncTableHorizontalScroll(
-                                                event.currentTarget.scrollLeft,
-                                            )
-                                        }
-                                        className="max-h-[calc(100vh-410px)] overflow-auto"
-                                    >
-                                        <Table className="min-w-[2020px]">
-                                            <TableHeader className="sticky top-0 z-10 bg-card">
-                                                <TableRow>
-                                                    <TableHead className="min-w-16">Fila</TableHead>
-                                                    <TableHead className="min-w-28">Estado</TableHead>
-                                                    <TableHead className="min-w-44">Cliente</TableHead>
-                                                    <TableHead className="min-w-64">Nombre</TableHead>
-                                                    <TableHead className="min-w-80">Producto homologado</TableHead>
-                                                    <TableHead>Base</TableHead>
-                                                    <TableHead>Modelo</TableHead>
-                                                    <TableHead>Referencia 1</TableHead>
-                                                    <TableHead>Referencia 2</TableHead>
-                                                    <TableHead>Referencia 3</TableHead>
-                                                    <TableHead>Tela</TableHead>
-                                                    <TableHead className="min-w-44 px-5">OC cliente</TableHead>
-                                                    <TableHead className="min-w-28 px-5 text-right">Cantidad</TableHead>
+                                <div
+                                    className="max-h-[calc(100vh-390px)] overflow-auto rounded-md border border-border"
+                                    style={{ scrollbarGutter: "stable both-edges" }}
+                                >
+                                    <Table className="min-w-[2020px]">
+                                        <TableHeader className="sticky top-0 z-10 bg-card">
+                                            <TableRow>
+                                                <TableHead className="min-w-16">Fila</TableHead>
+                                                <TableHead className="min-w-28">Estado</TableHead>
+                                                <TableHead className="min-w-44">Cliente</TableHead>
+                                                <TableHead className="min-w-64">Nombre</TableHead>
+                                                <TableHead className="min-w-80">Producto homologado</TableHead>
+                                                <TableHead>Base</TableHead>
+                                                <TableHead>Modelo</TableHead>
+                                                <TableHead>Referencia 1</TableHead>
+                                                <TableHead>Referencia 2</TableHead>
+                                                <TableHead>Referencia 3</TableHead>
+                                                <TableHead>Tela</TableHead>
+                                                <TableHead className="min-w-44 px-5">OC cliente</TableHead>
+                                                <TableHead className="min-w-28 px-5 text-right">Cantidad</TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {preview.rows.map((row) => (
+                                                <TableRow key={`${row.row_number}-${row.oc_interno}`}>
+                                                    <TableCell>{row.row_number}</TableCell>
+                                                    <TableCell>
+                                                        <MissingBadges row={row} />
+                                                    </TableCell>
+                                                    <TableCell>{row.cliente}</TableCell>
+                                                    <TableCell>{row.product_name}</TableCell>
+                                                    <TableCell>
+                                                        <ProductHomologationBadge row={row} />
+                                                    </TableCell>
+                                                    <TableCell>{renderHomologationControl(row, "base")}</TableCell>
+                                                    <TableCell>{renderHomologationControl(row, "modelo")}</TableCell>
+                                                    <TableCell>{renderHomologationControl(row, "referencia_1")}</TableCell>
+                                                    <TableCell>{renderHomologationControl(row, "referencia_2")}</TableCell>
+                                                    <TableCell>{renderHomologationControl(row, "referencia_3")}</TableCell>
+                                                    <TableCell>{renderHomologationControl(row, "tela")}</TableCell>
+                                                    <TableCell className="px-5">{row.oc_cliente}</TableCell>
+                                                    <TableCell className="px-5 text-right font-medium">
+                                                        {row.cantidad}
+                                                    </TableCell>
                                                 </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {preview.rows.map((row) => (
-                                                    <TableRow key={`${row.row_number}-${row.oc_interno}`}>
-                                                        <TableCell>{row.row_number}</TableCell>
-                                                        <TableCell>
-                                                            <MissingBadges row={row} />
-                                                        </TableCell>
-                                                        <TableCell>{row.cliente}</TableCell>
-                                                        <TableCell>{row.product_name}</TableCell>
-                                                        <TableCell>
-                                                            <ProductHomologationBadge row={row} />
-                                                        </TableCell>
-                                                        <TableCell>{renderHomologationControl(row, "base")}</TableCell>
-                                                        <TableCell>{renderHomologationControl(row, "modelo")}</TableCell>
-                                                        <TableCell>{renderHomologationControl(row, "referencia_1")}</TableCell>
-                                                        <TableCell>{renderHomologationControl(row, "referencia_2")}</TableCell>
-                                                        <TableCell>{renderHomologationControl(row, "referencia_3")}</TableCell>
-                                                        <TableCell>{renderHomologationControl(row, "tela")}</TableCell>
-                                                        <TableCell className="px-5">{row.oc_cliente}</TableCell>
-                                                        <TableCell className="px-5 text-right font-medium">
-                                                            {row.cantidad}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </div>
-                                    <div
-                                        ref={horizontalScrollRef}
-                                        onScroll={(event) =>
-                                            syncTableHorizontalScroll(
-                                                event.currentTarget.scrollLeft,
-                                            )
-                                        }
-                                        className="h-5 overflow-x-auto overflow-y-hidden border-t border-border bg-card"
-                                        aria-label="Scroll horizontal de la tabla"
-                                    >
-                                        <div
-                                            style={{
-                                                width: tableContentWidth,
-                                                height: 1,
-                                            }}
-                                        />
-                                    </div>
+                                            ))}
+                                        </TableBody>
+                                    </Table>
                                 </div>
 
                                 <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
