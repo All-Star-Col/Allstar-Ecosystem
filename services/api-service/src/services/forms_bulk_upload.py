@@ -14,8 +14,10 @@ from src.services.forms import (
     DBCommunicationError,
     FORMS_SCHEMA,
     _add_manual_integer_id_if_needed,
+    _first_existing_column,
     _get_table_columns,
     _quote_identifier,
+    _resolve_initial_employee_value,
 )
 
 
@@ -404,10 +406,12 @@ async def _get_or_create_product_row(
         existing["__was_created"] = False
         return existing
 
+    sku = _build_product_sku(base_id, model_id, reference_1_id, fabric_id)
     created = await _insert_dynamic_row(
         db,
         "producto",
         {
+            "sku": sku,
             "id_base": base_id,
             "id_modelo": model_id,
             "id_referencia_1": reference_1_id,
@@ -1246,13 +1250,45 @@ async def _create_initial_bulk_item_process(
     if item_id is None:
         raise DBCommunicationError("No se pudo crear ordenproceso: item sin id")
 
+    columns = await _table_columns_map(db, "ordenproceso")
+    available_columns = set(columns)
+    process_column = _first_existing_column(
+        available_columns,
+        ("id_proceso", "proceso_id", "id_prtoceso"),
+    )
+    employee_column = _first_existing_column(
+        available_columns,
+        ("id_empleado", "empleado_id", "id_persona", "persona_id"),
+    )
+    item_column = _first_existing_column(
+        available_columns,
+        ("id_item", "item_id", "items_id"),
+    )
+    created_column = _first_existing_column(
+        available_columns,
+        ("fecha_inicio", "fecha_creacion", "created_at", "fecha", "timestamp"),
+    )
+
+    row_data: dict[str, Any] = {}
+    if process_column:
+        row_data[process_column] = 1
+    if employee_column:
+        include_employee, employee_value = await _resolve_initial_employee_value(
+            db,
+            process_table="ordenproceso",
+            employee_column=employee_column,
+        )
+        if include_employee:
+            row_data[employee_column] = employee_value
+    if item_column:
+        row_data[item_column] = item_id
+    if created_column:
+        row_data[created_column] = date.today()
+
     await _insert_dynamic_row(
         db,
         "ordenproceso",
-        {
-            "id_proceso": 1,
-            "id_item": item_id,
-        },
+        row_data,
     )
 
 
@@ -1271,176 +1307,184 @@ async def commit_purchase_order_import(
     default_fabric_unit_id = await _get_default_fabric_unit_id(db)
 
     try:
-        await _ensure_order_process_allows_pending_without_employee(db)
-
         for payload in rows_payload:
-            row = BulkRow(
-                row_number=int(payload["row_number"]),
-                cliente=_clean_cell_text(payload.get("cliente")),
-                product_name=_component_text(payload.get("product_name")),
-                base=_component_text(payload.get("base")),
-                modelo=_component_text(payload.get("modelo")),
-                referencia_1=_component_text(payload.get("referencia_1") or payload.get("referencia")),
-                referencia_2=_component_text(payload.get("referencia_2")),
-                referencia_3=_component_text(payload.get("referencia_3")),
-                tela=_component_text(payload.get("tela")),
-                oc_interno=_clean_cell_text(payload.get("oc_interno")),
-                oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
-                cantidad=_parse_int(payload.get("cantidad")),
-            )
-            resolved = dict(payload.get("resolved") or {})
-
-            client_id = resolved.get("cliente_id")
-            base_id = resolved.get("base_id")
-            model_id = resolved.get("modelo_id")
-            reference_1_id = resolved.get("referencia_1_id") or resolved.get("referencia_id")
-            reference_2_id = resolved.get("referencia_2_id")
-            reference_3_id = resolved.get("referencia_3_id")
-            fabric_id = resolved.get("tela_id")
-            fabric_unit_id = resolved.get("tela_unidad_medida_id")
-            product_id = resolved.get("producto_id")
-            suggested = dict(payload.get("suggested") or {})
-
-            if not client_id:
-                raise DBCommunicationError(
-                    f"Fila {row.row_number}: el cliente debe existir antes de cargar"
+            row_number = payload.get("row_number", "?")
+            try:
+                row = BulkRow(
+                    row_number=int(payload["row_number"]),
+                    cliente=_clean_cell_text(payload.get("cliente")),
+                    product_name=_component_text(payload.get("product_name")),
+                    base=_component_text(payload.get("base")),
+                    modelo=_component_text(payload.get("modelo")),
+                    referencia_1=_component_text(payload.get("referencia_1") or payload.get("referencia")),
+                    referencia_2=_component_text(payload.get("referencia_2")),
+                    referencia_3=_component_text(payload.get("referencia_3")),
+                    tela=_component_text(payload.get("tela")),
+                    oc_interno=_clean_cell_text(payload.get("oc_interno")),
+                    oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
+                    cantidad=_parse_int(payload.get("cantidad")),
                 )
+                resolved = dict(payload.get("resolved") or {})
+                client_id = resolved.get("cliente_id")
+                base_id = resolved.get("base_id")
+                model_id = resolved.get("modelo_id")
+                reference_1_id = resolved.get("referencia_1_id") or resolved.get("referencia_id")
+                reference_2_id = resolved.get("referencia_2_id")
+                reference_3_id = resolved.get("referencia_3_id")
+                fabric_id = resolved.get("tela_id")
+                fabric_unit_id = resolved.get("tela_unidad_medida_id")
+                product_id = resolved.get("producto_id")
+                suggested = dict(payload.get("suggested") or {})
 
-            if product_id:
-                product_name = _component_text(suggested.get("producto")) or _build_final_product_name(
-                    row,
-                    suggested,
-                )
-            else:
-                if not base_id:
-                    if not create_missing:
-                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar base")
-                    base_name = _component_text(suggested.get("base") or row.base)
-                    if base_name:
-                        base = await _get_or_create_named_row(
-                            db,
-                            "base",
-                            base_name,
-                        )
-                        base_id = base.get("id")
-
-                if not model_id:
-                    if not create_missing:
-                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar modelo")
-                    model_name = _component_text(suggested.get("modelo") or row.modelo)
-                    if model_name:
-                        model = await _get_or_create_named_row(
-                            db,
-                            "modelo",
-                            model_name,
-                        )
-                        model_id = model.get("id")
-
-                if not reference_1_id and _component_text(suggested.get("referencia_1") or row.referencia_1):
-                    reference_1 = await _get_or_create_named_row(
-                        db,
-                        "referencia",
-                        suggested.get("referencia_1") or row.referencia_1,
+                if not client_id:
+                    raise DBCommunicationError(
+                        f"Fila {row.row_number}: el cliente debe existir antes de cargar"
                     )
-                    reference_1_id = reference_1.get("id")
 
-                if not reference_2_id and _component_text(suggested.get("referencia_2") or row.referencia_2):
-                    reference_2 = await _get_or_create_named_row(
-                        db,
-                        "referencia",
-                        suggested.get("referencia_2") or row.referencia_2,
+                if product_id:
+                    product_name = _component_text(suggested.get("producto")) or _build_final_product_name(
+                        row,
+                        suggested,
                     )
-                    reference_2_id = reference_2.get("id")
-
-                if not reference_3_id and _component_text(suggested.get("referencia_3") or row.referencia_3):
-                    reference_3 = await _get_or_create_named_row(
-                        db,
-                        "referencia",
-                        suggested.get("referencia_3") or row.referencia_3,
-                    )
-                    reference_3_id = reference_3.get("id")
-
-                if not fabric_id:
-                    if not create_missing:
-                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar tela")
-                    fabric_name = _component_text(suggested.get("tela_nombre"))
-                    fabric_reference = _component_text(suggested.get("tela_referencia"))
-                    if not fabric_name and not fabric_reference:
-                        fabric_name, fabric_reference = _split_fabric_text(
-                            suggested.get("tela") or row.tela
-                        )
-                    if fabric_name or fabric_reference:
-                        if not fabric_name:
-                            fabric_name = fabric_reference
-                        if not fabric_reference:
-                            fabric_reference = fabric_name
-                        if not fabric_unit_id:
-                            fabric_unit_id = default_fabric_unit_id
-                        if not fabric_unit_id:
-                            raise DBCommunicationError(
-                                f"Fila {row.row_number}: falta unidad METRO para crear la tela {fabric_name} {fabric_reference}"
+                else:
+                    if not base_id:
+                        if not create_missing:
+                            raise DBCommunicationError(f"Fila {row.row_number}: falta homologar base")
+                        base_name = _component_text(suggested.get("base") or row.base)
+                        if base_name:
+                            base = await _get_or_create_named_row(
+                                db,
+                                "base",
+                                base_name,
                             )
-                        fabric = await _get_or_create_fabric_row(
+                            base_id = base.get("id")
+
+                    if not model_id:
+                        if not create_missing:
+                            raise DBCommunicationError(f"Fila {row.row_number}: falta homologar modelo")
+                        model_name = _component_text(suggested.get("modelo") or row.modelo)
+                        if model_name:
+                            model = await _get_or_create_named_row(
+                                db,
+                                "modelo",
+                                model_name,
+                            )
+                            model_id = model.get("id")
+
+                    if not reference_1_id and _component_text(suggested.get("referencia_1") or row.referencia_1):
+                        reference_1 = await _get_or_create_named_row(
                             db,
-                            name=fabric_name,
-                            reference=fabric_reference,
-                            unit_id=fabric_unit_id,
+                            "referencia",
+                            suggested.get("referencia_1") or row.referencia_1,
                         )
-                        fabric_id = fabric.get("id")
-                        if fabric.get("__was_created"):
-                            created_fabrics += 1
+                        reference_1_id = reference_1.get("id")
 
-                product_name = _build_final_product_name(row, suggested)
-                if not create_missing:
-                    raise DBCommunicationError(f"Fila {row.row_number}: falta homologar producto")
-                product = await _get_or_create_product_row(
+                    if not reference_2_id and _component_text(suggested.get("referencia_2") or row.referencia_2):
+                        reference_2 = await _get_or_create_named_row(
+                            db,
+                            "referencia",
+                            suggested.get("referencia_2") or row.referencia_2,
+                        )
+                        reference_2_id = reference_2.get("id")
+
+                    if not reference_3_id and _component_text(suggested.get("referencia_3") or row.referencia_3):
+                        reference_3 = await _get_or_create_named_row(
+                            db,
+                            "referencia",
+                            suggested.get("referencia_3") or row.referencia_3,
+                        )
+                        reference_3_id = reference_3.get("id")
+
+                    if not fabric_id:
+                        if not create_missing:
+                            raise DBCommunicationError(f"Fila {row.row_number}: falta homologar tela")
+                        fabric_name = _component_text(suggested.get("tela_nombre"))
+                        fabric_reference = _component_text(suggested.get("tela_referencia"))
+                        if not fabric_name and not fabric_reference:
+                            fabric_name, fabric_reference = _split_fabric_text(
+                                suggested.get("tela") or row.tela
+                            )
+                        if fabric_name or fabric_reference:
+                            if not fabric_name:
+                                fabric_name = fabric_reference
+                            if not fabric_reference:
+                                fabric_reference = fabric_name
+                            if not fabric_unit_id:
+                                fabric_unit_id = default_fabric_unit_id
+                            if not fabric_unit_id:
+                                raise DBCommunicationError(
+                                    f"Fila {row.row_number}: falta unidad METRO para crear la tela {fabric_name} {fabric_reference}"
+                                )
+                            fabric = await _get_or_create_fabric_row(
+                                db,
+                                name=fabric_name,
+                                reference=fabric_reference,
+                                unit_id=fabric_unit_id,
+                            )
+                            fabric_id = fabric.get("id")
+                            if fabric.get("__was_created"):
+                                created_fabrics += 1
+
+                    product_name = _build_final_product_name(row, suggested)
+                    if not create_missing:
+                        raise DBCommunicationError(f"Fila {row.row_number}: falta homologar producto")
+                    product = await _get_or_create_product_row(
+                        db,
+                        base_id=base_id,
+                        model_id=model_id,
+                        reference_1_id=reference_1_id,
+                        reference_2_id=reference_2_id,
+                        reference_3_id=reference_3_id,
+                        fabric_id=fabric_id,
+                        product_name=product_name,
+                    )
+                    product_id = product.get("id")
+                    if product.get("__was_created"):
+                        created_products += 1
+
+                order = await _insert_dynamic_row(
                     db,
-                    base_id=base_id,
-                    model_id=model_id,
-                    reference_1_id=reference_1_id,
-                    reference_2_id=reference_2_id,
-                    reference_3_id=reference_3_id,
-                    fabric_id=fabric_id,
-                    product_name=product_name,
-                )
-                product_id = product.get("id")
-                if product.get("__was_created"):
-                    created_products += 1
-
-            order = await _insert_dynamic_row(
-                db,
-                "ordencompra",
-                {
-                    "id_cliente": client_id,
-                    "id_producto": product_id,
-                    "oc_interno": row.oc_interno,
-                    "oc_cliente": row.oc_cliente,
-                    "cantidad": row.cantidad,
-                    "estado": "pendiente",
-                    "fecha_pedido": date.today(),
-                },
-            )
-            created_orders += 1
-
-            order_id = order.get("id")
-            for _ in range(row.cantidad):
-                item = await _insert_dynamic_row(
-                    db,
-                    "item",
+                    "ordencompra",
                     {
-                        "item_legado": next_item_legado,
-                        "id_orden_compra": order_id,
                         "id_cliente": client_id,
-                        "detalle": product_name,
-                        "fecha_produccion": date.today(),
+                        "id_producto": product_id,
+                        "oc_interno": row.oc_interno,
+                        "oc_cliente": row.oc_cliente,
+                        "cantidad": row.cantidad,
+                        "estado": "pendiente",
+                        "fecha_pedido": date.today(),
                     },
                 )
-                await _create_initial_bulk_item_process(
-                    db,
-                    item_id=item.get("id") or item.get("id_item") or item.get("item_id"),
-                )
-                next_item_legado += 1
-                created_items += 1
+                created_orders += 1
+
+                order_id = order.get("id")
+                for _ in range(row.cantidad):
+                    item = await _insert_dynamic_row(
+                        db,
+                        "item",
+                        {
+                            "item_legado": next_item_legado,
+                            "id_orden_compra": order_id,
+                            "id_cliente": client_id,
+                            "detalle": product_name,
+                            "fecha_produccion": date.today(),
+                        },
+                    )
+                    await _create_initial_bulk_item_process(
+                        db,
+                        item_id=item.get("id") or item.get("id_item") or item.get("item_id"),
+                    )
+                    next_item_legado += 1
+                    created_items += 1
+            except DBCommunicationError as error:
+                detail = str(error)
+                if detail.startswith("Fila "):
+                    raise
+                raise DBCommunicationError(f"Fila {row_number}: {detail}") from error
+            except Exception as error:
+                raise DBCommunicationError(
+                    f"Fila {row_number}: no se pudo cargar ({error})"
+                ) from error
 
         await db.commit()
     except Exception:
