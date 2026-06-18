@@ -188,6 +188,8 @@ export default function BulkPurchaseOrderUpload() {
             });
         };
         updateScrollRange();
+        window.requestAnimationFrame(updateScrollRange);
+        const updateTimer = window.setTimeout(updateScrollRange, 150);
 
         const resizeObserver =
             typeof ResizeObserver !== "undefined"
@@ -197,6 +199,7 @@ export default function BulkPurchaseOrderUpload() {
 
         window.addEventListener("resize", updateScrollRange);
         return () => {
+            window.clearTimeout(updateTimer);
             resizeObserver?.disconnect();
             window.removeEventListener("resize", updateScrollRange);
         };
@@ -813,22 +816,6 @@ export default function BulkPurchaseOrderUpload() {
 
                         {preview && preview.rows.length > 0 && (
                             <div className="space-y-4">
-                                <div className="sticky top-0 z-30 rounded-md border border-border bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
-                                    <input
-                                        type="range"
-                                        min={0}
-                                        max={maxHorizontalScroll}
-                                        value={horizontalScroll}
-                                        disabled={maxHorizontalScroll === 0}
-                                        onChange={(event) =>
-                                            handleHorizontalScrollChange(
-                                                Number(event.target.value),
-                                            )
-                                        }
-                                        aria-label="Desplazamiento horizontal"
-                                        className="block h-3 w-full cursor-ew-resize accent-primary disabled:cursor-not-allowed disabled:opacity-40"
-                                    />
-                                </div>
                                 <div
                                     ref={tableScrollRef}
                                     onScroll={(event) =>
@@ -840,6 +827,29 @@ export default function BulkPurchaseOrderUpload() {
                                 >
                                     <Table className="min-w-[2020px]">
                                         <TableHeader className="sticky top-0 z-10 bg-card">
+                                            <TableRow>
+                                                <TableHead colSpan={13} className="bg-card p-3">
+                                                    <div className="flex items-center gap-3 rounded-md border border-border bg-muted/40 px-3 py-2 shadow-sm">
+                                                        <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                                                            Scroll horizontal
+                                                        </span>
+                                                        <input
+                                                            type="range"
+                                                            min={0}
+                                                            max={maxHorizontalScroll}
+                                                            value={horizontalScroll}
+                                                            disabled={maxHorizontalScroll === 0}
+                                                            onChange={(event) =>
+                                                                handleHorizontalScrollChange(
+                                                                    Number(event.target.value),
+                                                                )
+                                                            }
+                                                            aria-label="Desplazamiento horizontal"
+                                                            className="block h-4 min-w-0 flex-1 cursor-ew-resize accent-primary disabled:cursor-not-allowed disabled:opacity-40"
+                                                        />
+                                                    </div>
+                                                </TableHead>
+                                            </TableRow>
                                             <TableRow>
                                                 <TableHead className="min-w-16">Fila</TableHead>
                                                 <TableHead className="min-w-28">Estado</TableHead>
