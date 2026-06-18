@@ -587,7 +587,7 @@ def _token_groups_match(
     expected_tokens = _expand_compound_measure_tokens(expected_tokens)
     actual_tokens = _expand_compound_measure_tokens(actual_tokens)
 
-    if require_same_size and len(expected_tokens) > len(actual_tokens):
+    if require_same_size and len(expected_tokens) != len(actual_tokens):
         return False
 
     used_indexes: set[int] = set()

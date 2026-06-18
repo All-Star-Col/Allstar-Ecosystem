@@ -39,6 +39,15 @@ type HomologationField =
     | "tela";
 type HomologationMode = "homologar" | "crear";
 
+const HOMOLOGATION_FIELDS: HomologationField[] = [
+    "base",
+    "modelo",
+    "referencia_1",
+    "referencia_2",
+    "referencia_3",
+    "tela",
+];
+
 const MISSING_LABELS: Record<string, string> = {
     cliente: "Cliente",
     base: "Base",
@@ -89,6 +98,10 @@ function MissingBadges({ isFinalized }: { isFinalized: boolean }) {
 
 function cleanProductPart(value: unknown): string {
     return String(value ?? "").trim();
+}
+
+function hasConfiguredValue(value: unknown): boolean {
+    return value !== null && value !== undefined && String(value).trim() !== "";
 }
 
 function uniqueProductParts(parts: string[]): string[] {
@@ -153,6 +166,71 @@ function ProductHomologationBadge({ row }: { row: BulkPurchaseOrderRowAPI }) {
     );
 }
 
+function mergeRevalidatedRow(
+    currentRow: BulkPurchaseOrderRowAPI,
+    requestedRow: BulkPurchaseOrderRowAPI,
+    revalidatedRow: BulkPurchaseOrderRowAPI,
+): BulkPurchaseOrderRowAPI {
+    const nextResolved = { ...(revalidatedRow.resolved ?? {}) };
+    const nextSuggested = { ...(revalidatedRow.suggested ?? {}) };
+    let productConflict = false;
+
+    HOMOLOGATION_FIELDS.forEach((field) => {
+        const resolvedKey = `${field}_id`;
+        const requestedResolved = requestedRow.resolved?.[resolvedKey];
+        const revalidatedResolved = revalidatedRow.resolved?.[resolvedKey];
+        const requestedSuggested = requestedRow.suggested?.[field];
+        const shouldPreserve =
+            hasConfiguredValue(requestedResolved) ||
+            hasConfiguredValue(requestedSuggested);
+
+        if (!shouldPreserve) return;
+
+        if (
+            hasConfiguredValue(requestedResolved) &&
+            hasConfiguredValue(revalidatedResolved) &&
+            String(requestedResolved) !== String(revalidatedResolved)
+        ) {
+            productConflict = true;
+        }
+
+        nextResolved[resolvedKey] = hasConfiguredValue(requestedResolved)
+            ? requestedResolved
+            : null;
+        nextSuggested[field] = hasConfiguredValue(requestedSuggested)
+            ? requestedSuggested
+            : "";
+    });
+
+    (["tela_nombre", "tela_referencia", "tela_unidad_medida"] as const).forEach(
+        (field) => {
+            const requestedValue = requestedRow.suggested?.[field];
+            if (hasConfiguredValue(requestedValue)) {
+                nextSuggested[field] = requestedValue;
+            }
+        },
+    );
+
+    let nextMissing = revalidatedRow.missing;
+    let nextStatus = revalidatedRow.status;
+    if (productConflict) {
+        nextResolved.producto_id = null;
+        nextSuggested.producto = "";
+        nextMissing = Array.from(new Set([...(nextMissing ?? []), "producto"]));
+        nextStatus = "needs_approval";
+    }
+
+    return {
+        ...currentRow,
+        ...revalidatedRow,
+        resolved: nextResolved,
+        suggested: nextSuggested,
+        options: currentRow.options,
+        missing: nextMissing,
+        status: nextStatus,
+    };
+}
+
 export default function BulkPurchaseOrderUpload() {
     const navigate = useNavigate();
     const [file, setFile] = useState<File | null>(null);
@@ -202,7 +280,7 @@ export default function BulkPurchaseOrderUpload() {
             let nextRow = row;
             const hasResolvedProduct = Boolean(row.resolved?.producto_id);
 
-            (["base", "modelo", "referencia_1", "referencia_2", "referencia_3", "tela"] as HomologationField[]).forEach(
+            HOMOLOGATION_FIELDS.forEach(
                 (field) => {
                     const fieldKey = getFieldKey(row.row_number, field);
                     const resolvedValue = nextRow.resolved?.[`${field}_id`];
@@ -302,11 +380,7 @@ export default function BulkPurchaseOrderUpload() {
                     ...current,
                     rows: current.rows.map((currentRow) =>
                         currentRow.row_number === row.row_number
-                            ? {
-                                  ...currentRow,
-                                  ...revalidatedRow,
-                                  options: currentRow.options,
-                              }
+                            ? mergeRevalidatedRow(currentRow, row, revalidatedRow)
                             : currentRow,
                     ),
                 };
