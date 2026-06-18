@@ -2211,6 +2211,7 @@ async def _find_existing_reference_value(
     ref_schema: str,
     ref_table: str,
     ref_column: str,
+    allow_first_fallback: bool = True,
 ) -> Any:
     ref_columns = await _get_table_columns(
         db, schema_name=ref_schema, table_name=ref_table
@@ -2264,6 +2265,9 @@ async def _find_existing_reference_value(
         if value is not None:
             return value
 
+    if not allow_first_fallback:
+        return None
+
     fallback_query = text(
         f"""
         SELECT {q_ref_column} AS value
@@ -2274,6 +2278,23 @@ async def _find_existing_reference_value(
     )
     result = await db.execute(fallback_query)
     return result.scalar_one_or_none()
+
+
+async def _allow_process_without_employee(
+    db: AsyncSession,
+    *,
+    process_table: str,
+    employee_column: str,
+) -> None:
+    async with db.begin_nested():
+        await db.execute(
+            text(
+                f"""
+                ALTER TABLE {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier(process_table, field_name='process_table')}
+                ALTER COLUMN {_quote_identifier(employee_column, field_name='employee_column')} DROP NOT NULL
+                """
+            )
+        )
 
 
 async def _resolve_initial_employee_value(
@@ -2302,6 +2323,19 @@ async def _resolve_initial_employee_value(
     if employee_meta.get("is_nullable") == "YES":
         return True, None
 
+    try:
+        await _allow_process_without_employee(
+            db,
+            process_table=process_table,
+            employee_column=employee_column,
+        )
+        return True, None
+    except Exception as error:
+        logger.warning(
+            "No se pudo permitir ordenproceso sin empleado: %s",
+            error,
+        )
+
     foreign_keys = await _get_foreign_key_metadata(
         db, schema_name=FORMS_SCHEMA, source_tables={process_table}
     )
@@ -2315,6 +2349,7 @@ async def _resolve_initial_employee_value(
             ref_schema=ref_schema,
             ref_table=ref_table,
             ref_column=ref_column,
+            allow_first_fallback=False,
         )
         if value is not None:
             return True, value
@@ -2324,6 +2359,7 @@ async def _resolve_initial_employee_value(
         ref_schema=FORMS_SCHEMA,
         ref_table="empleado",
         ref_column="id",
+        allow_first_fallback=False,
     )
     if employee_table_value is not None:
         return True, employee_table_value
@@ -2331,8 +2367,8 @@ async def _resolve_initial_employee_value(
     raise DBCommunicationError(
         (
             "No se pudo crear ordenproceso: la columna "
-            f"{employee_column} es obligatoria, pero no existe un empleado valido "
-            "para asignar automaticamente"
+            f"{employee_column} es obligatoria y no se pudo permitir NULL. "
+            "Crea un empleado SIN ASIGNAR o permite que la columna acepte valores vacios."
         )
     )
 
