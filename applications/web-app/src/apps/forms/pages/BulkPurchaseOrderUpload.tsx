@@ -768,55 +768,57 @@ export default function BulkPurchaseOrderUpload() {
                         )}
 
                         {preview && preview.rows.length > 0 && (
-                            <div className="space-y-4">
-                                <div
-                                    className="max-h-[calc(100vh-390px)] overflow-auto rounded-md border border-border"
-                                    style={{ scrollbarGutter: "stable both-edges" }}
-                                >
-                                    <table className="w-full min-w-[2020px] caption-bottom text-sm">
-                                        <TableHeader className="sticky top-0 z-10 bg-card">
-                                            <TableRow>
-                                                <TableHead className="min-w-16">Fila</TableHead>
-                                                <TableHead className="min-w-28">Estado</TableHead>
-                                                <TableHead className="min-w-44">Cliente</TableHead>
-                                                <TableHead className="min-w-64">Nombre</TableHead>
-                                                <TableHead className="min-w-80">Producto homologado</TableHead>
-                                                <TableHead>Base</TableHead>
-                                                <TableHead>Modelo</TableHead>
-                                                <TableHead>Referencia 1</TableHead>
-                                                <TableHead>Referencia 2</TableHead>
-                                                <TableHead>Referencia 3</TableHead>
-                                                <TableHead>Tela</TableHead>
-                                                <TableHead className="min-w-44 px-5">OC cliente</TableHead>
-                                                <TableHead className="min-w-28 px-5 text-right">Cantidad</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {preview.rows.map((row) => (
-                                                <TableRow key={`${row.row_number}-${row.oc_interno}`}>
-                                                    <TableCell>{row.row_number}</TableCell>
-                                                    <TableCell>
-                                                        <MissingBadges row={row} />
-                                                    </TableCell>
-                                                    <TableCell>{row.cliente}</TableCell>
-                                                    <TableCell>{row.product_name}</TableCell>
-                                                    <TableCell>
-                                                        <ProductHomologationBadge row={row} />
-                                                    </TableCell>
-                                                    <TableCell>{renderHomologationControl(row, "base")}</TableCell>
-                                                    <TableCell>{renderHomologationControl(row, "modelo")}</TableCell>
-                                                    <TableCell>{renderHomologationControl(row, "referencia_1")}</TableCell>
-                                                    <TableCell>{renderHomologationControl(row, "referencia_2")}</TableCell>
-                                                    <TableCell>{renderHomologationControl(row, "referencia_3")}</TableCell>
-                                                    <TableCell>{renderHomologationControl(row, "tela")}</TableCell>
-                                                    <TableCell className="px-5">{row.oc_cliente}</TableCell>
-                                                    <TableCell className="px-5 text-right font-medium">
-                                                        {row.cantidad}
-                                                    </TableCell>
+                            <div className="min-w-0 space-y-4">
+                                <div className="max-w-full overflow-x-auto rounded-md border border-border">
+                                    <div
+                                        className="max-h-[calc(100vh-390px)] min-w-[2020px] overflow-y-auto"
+                                        style={{ scrollbarGutter: "stable" }}
+                                    >
+                                        <table className="w-full caption-bottom text-sm">
+                                            <TableHeader className="sticky top-0 z-10 bg-card">
+                                                <TableRow>
+                                                    <TableHead className="min-w-16">Fila</TableHead>
+                                                    <TableHead className="min-w-28">Estado</TableHead>
+                                                    <TableHead className="min-w-44">Cliente</TableHead>
+                                                    <TableHead className="min-w-64">Nombre</TableHead>
+                                                    <TableHead className="min-w-80">Producto homologado</TableHead>
+                                                    <TableHead>Base</TableHead>
+                                                    <TableHead>Modelo</TableHead>
+                                                    <TableHead>Referencia 1</TableHead>
+                                                    <TableHead>Referencia 2</TableHead>
+                                                    <TableHead>Referencia 3</TableHead>
+                                                    <TableHead>Tela</TableHead>
+                                                    <TableHead className="min-w-44 px-5">OC cliente</TableHead>
+                                                    <TableHead className="min-w-28 px-5 text-right">Cantidad</TableHead>
                                                 </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </table>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {preview.rows.map((row) => (
+                                                    <TableRow key={`${row.row_number}-${row.oc_interno}`}>
+                                                        <TableCell>{row.row_number}</TableCell>
+                                                        <TableCell>
+                                                            <MissingBadges row={row} />
+                                                        </TableCell>
+                                                        <TableCell>{row.cliente}</TableCell>
+                                                        <TableCell>{row.product_name}</TableCell>
+                                                        <TableCell>
+                                                            <ProductHomologationBadge row={row} />
+                                                        </TableCell>
+                                                        <TableCell>{renderHomologationControl(row, "base")}</TableCell>
+                                                        <TableCell>{renderHomologationControl(row, "modelo")}</TableCell>
+                                                        <TableCell>{renderHomologationControl(row, "referencia_1")}</TableCell>
+                                                        <TableCell>{renderHomologationControl(row, "referencia_2")}</TableCell>
+                                                        <TableCell>{renderHomologationControl(row, "referencia_3")}</TableCell>
+                                                        <TableCell>{renderHomologationControl(row, "tela")}</TableCell>
+                                                        <TableCell className="px-5">{row.oc_cliente}</TableCell>
+                                                        <TableCell className="px-5 text-right font-medium">
+                                                            {row.cantidad}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </table>
+                                    </div>
                                 </div>
 
                                 <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
