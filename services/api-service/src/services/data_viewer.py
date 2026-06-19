@@ -148,6 +148,15 @@ PRODUCT_COMPONENT_COLUMNS = (
     "id_referencia_3",
     "id_tela",
 )
+PRODUCT_COMPONENT_REFERENCE_TABLES = {
+    "id_base": "base",
+    "id_modelo": "modelo",
+    "id_referencia": "referencia",
+    "id_referencia_1": "referencia",
+    "id_referencia_2": "referencia",
+    "id_referencia_3": "referencia",
+    "id_tela": "tela",
+}
 ITEM_REFERENCE_COLUMN_PRIORITY = (
     "id_item",
     "item_id",
@@ -2030,6 +2039,16 @@ class DataViewerService:
                 read_only_reason = "DERIVED_PRODUCT_NAME"
 
             fk_info = foreign_keys.get(normalized_column_name)
+            if not fk_info and is_product_component_column:
+                referenced_table = PRODUCT_COMPONENT_REFERENCE_TABLES.get(
+                    normalized_column_name
+                )
+                if referenced_table:
+                    fk_info = {
+                        "referenced_schema": config.schema_name,
+                        "referenced_table": referenced_table,
+                        "referenced_column": "id",
+                    }
             if not fk_info and normalized_column_name in ITEM_REFERENCE_COLUMN_PRIORITY:
                 table_name_candidates = {
                     config.table_name.lower(),
