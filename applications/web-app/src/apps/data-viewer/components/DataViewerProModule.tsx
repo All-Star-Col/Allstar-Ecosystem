@@ -35,6 +35,7 @@ import { RowEditSheet } from "./RowEditSheet";
 import {
     DataViewerApiError,
     exportDataViewerExcel,
+    fetchProductEditorRow,
     fetchDataViewerTables,
     mergeProductRows,
     queryDataViewer,
@@ -885,20 +886,31 @@ export function DataViewerProModule({
         }
 
         try {
-            const fullRowResponse = await queryDataViewer({
-                table_id: activeTable.table_id,
-                columns: activeTable.columns.map((column) => column.name),
-                filters: Object.entries(rowEditState.pk).map(([column, value]) => ({
-                    column,
-                    operator: "eq",
-                    value,
-                })),
-                limit: 1,
-                offset: 0,
-                include_total: false,
-            });
+            if (
+                isProductTable(activeTable) &&
+                (typeof rowEditState.pk.id === "string" ||
+                    typeof rowEditState.pk.id === "number")
+            ) {
+                const productRowResponse = await fetchProductEditorRow(
+                    rowEditState.pk.id,
+                );
+                setSelectedRow(productRowResponse.row);
+            } else {
+                const fullRowResponse = await queryDataViewer({
+                    table_id: activeTable.table_id,
+                    columns: activeTable.columns.map((column) => column.name),
+                    filters: Object.entries(rowEditState.pk).map(([column, value]) => ({
+                        column,
+                        operator: "eq",
+                        value,
+                    })),
+                    limit: 1,
+                    offset: 0,
+                    include_total: false,
+                });
 
-            setSelectedRow(fullRowResponse.result.rows[0] ?? row);
+                setSelectedRow(fullRowResponse.result.rows[0] ?? row);
+            }
         } catch (error) {
             const normalized = normalizeError(error);
             toast.error("No se pudo cargar la fila completa", {

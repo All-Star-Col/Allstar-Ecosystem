@@ -1344,6 +1344,50 @@ class DataViewerService:
             "updated_orders_count": len(updated_order_ids),
         }
 
+    async def get_product_editor_row(self, *, product_id: int) -> dict[str, Any]:
+        product_columns = await _get_table_columns(
+            self.db,
+            schema_name="data",
+            table_name="producto",
+        )
+        column_names = {
+            _normalize_identifier(column["column_name"]).lower()
+            for column in product_columns
+            if column.get("column_name")
+        }
+        if "id" not in column_names:
+            raise DBCommunicationError("La tabla producto no tiene columna id")
+
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT *
+                FROM {_quote_identifier("data")}.{_quote_identifier("producto")}
+                WHERE "id" = :product_id
+                LIMIT 1
+                """
+            ),
+            {"product_id": product_id},
+        )
+        row = result.mappings().first()
+        if not row:
+            raise RowNotFoundError("producto")
+
+        editor_row = dict(row)
+        for column_name, referenced_table in PRODUCT_COMPONENT_REFERENCE_TABLES.items():
+            if column_name not in column_names:
+                continue
+
+            raw_value = editor_row.get(column_name)
+            editor_row[f"__raw_{column_name}"] = raw_value
+            editor_row[column_name] = await self._lookup_catalog_label(
+                table_name=referenced_table,
+                entity_id=raw_value,
+                include_tela_reference=referenced_table == "tela",
+            )
+
+        return editor_row
+
     async def export_csv(
         self,
         request_data: DataViewerQueryRequest,

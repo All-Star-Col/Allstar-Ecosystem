@@ -3,7 +3,7 @@ import time
 # _____________________________________________________________
 #   Librerias externas
 
-from fastapi import APIRouter, Body, Depends, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,56 @@ def get_data_viewer_service(db: AsyncSession = Depends(get_db)) -> DataViewerSer
         - db: AsyncSession | database session
     """
     return DataViewerService(db)
+
+
+@router.get("/products/{product_id}/editor-row")
+async def get_product_editor_row(
+    request: Request,
+    response: Response,
+    product_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_current_user),
+    data_viewer_service: DataViewerService = Depends(get_data_viewer_service),
+):
+    request_id = resolve_request_id(request)
+    started_at = time.perf_counter()
+
+    try:
+        result = await data_viewer_service.get_product_editor_row(
+            product_id=product_id,
+        )
+        response.headers["X-Request-ID"] = request_id
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id="producto",
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=1,
+            status_code=200,
+        )
+        return result
+    except DataViewerError as error:
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id="producto",
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=error.status_code,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=error.status_code,
+            detail=error.detail,
+            code=error.code,
+        )
+    except Exception as error:
+        logger.exception("Unexpected error in product editor endpoint: %s", error)
+        return build_error_response(
+            request_id=request_id,
+            status_code=500,
+            detail="Internal server error",
+            code="INTERNAL_ERROR",
+        )
 
 
 @router.get("/tables", response_model=list[DataViewerTable] | None)

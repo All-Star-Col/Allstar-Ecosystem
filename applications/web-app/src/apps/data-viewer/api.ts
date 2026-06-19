@@ -5,6 +5,7 @@ import type {
     DataViewerErrorCode,
     DataViewerQueryRequest,
     DataViewerQueryResponse,
+    DataViewerRow,
     DataViewerTable,
     DataViewerUpdateRowRequest,
     DataViewerUpdateRowResponse,
@@ -213,6 +214,26 @@ export async function mergeProductRows(payload: {
 
     return {
         result: (await response.json()) as ProductMergeResponse,
+        requestId: response.headers.get("X-Request-ID") ?? requestId,
+    };
+}
+
+export async function fetchProductEditorRow(
+    productId: string | number,
+): Promise<{ row: DataViewerRow; requestId: string }> {
+    const { headers, requestId } = buildHeaders(undefined);
+
+    const response = await fetch(
+        `${DATA_VIEWER_BASE}/products/${encodeURIComponent(String(productId))}/editor-row`,
+        { method: "GET", headers },
+    );
+
+    if (!response.ok) {
+        throw await toApiError(response, requestId);
+    }
+
+    return {
+        row: (await response.json()) as DataViewerRow,
         requestId: response.headers.get("X-Request-ID") ?? requestId,
     };
 }
