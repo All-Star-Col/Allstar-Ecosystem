@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 600
     CARPENTRY_DB_SCHEMA: str = "carpentry"
     SALES_ASSISTANT_ENABLED: str = "false"
+    AZURE_STORAGE_CONNECTION_STRING: str = ""
+    AZURE_STORAGE_CONTAINER_ACTAS: str = "actas-cliente-instalacion"
+    AZURE_CONTAINER_PLANOS_PROYECTO: str = "planos-proyecto"
 
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:5173",
