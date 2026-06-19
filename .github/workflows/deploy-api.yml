@@ -96,3 +96,25 @@ jobs:
             DOCKERHUB_USERNAME='${{ secrets.DOCKERHUB_USERNAME }}' \
             DOCKERHUB_TOKEN='${{ secrets.DOCKERHUB_TOKEN }}' \
             /opt/allstar-api/deploy.sh"
+
+      - name: Verify API health on VM
+        run: |
+          ssh -i /tmp/id_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
+            "set -e
+            echo 'Container status:'
+            docker ps -a --filter name=allstar-api
+            echo 'Waiting for API health...'
+            for i in \$(seq 1 12); do
+              if curl -fsS http://127.0.0.1:8000/api/v1/public; then
+                echo
+                echo 'API healthcheck passed.'
+                exit 0
+              fi
+              sleep 5
+            done
+            echo 'API did not become healthy. Last container logs:'
+            docker logs --tail 200 allstar-api || true
+            exit 1"
