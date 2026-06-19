@@ -244,12 +244,22 @@ export function RowEditSheet({
             await Promise.all(
                 visibleEditableColumns.map(async (column) => {
                     const part = getProductLookupPart(column.name);
+                    const currentDisplayValue = currentRow[column.name];
                     const currentValue =
                         column.raw_value_column && column.raw_value_column in currentRow
                             ? currentRow[column.raw_value_column]
                             : currentRow[column.name];
                     if (!part || currentValue === null || currentValue === undefined || String(currentValue).trim() === "") {
                         return;
+                    }
+
+                    if (
+                        currentDisplayValue !== null &&
+                        currentDisplayValue !== undefined &&
+                        String(currentDisplayValue).trim() !== "" &&
+                        String(currentDisplayValue) !== String(currentValue)
+                    ) {
+                        nextLabels[column.name] = String(currentDisplayValue);
                     }
 
                     try {
