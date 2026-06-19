@@ -108,7 +108,7 @@ jobs:
             docker ps -a --filter name=allstar-api
             echo 'Waiting for API health...'
             for i in \$(seq 1 12); do
-              if curl -fsS http://127.0.0.1:8000/api/v1/public; then
+              if curl -fsS http://127.0.0.1/api/v1/public; then
                 echo
                 echo 'API healthcheck passed.'
                 exit 0
