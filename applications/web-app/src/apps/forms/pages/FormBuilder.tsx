@@ -10,6 +10,7 @@ import type { SubmitFormAPI } from "../api";
 import { DynamicFormField } from "../components/DynamicFormField";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ProductComposerDialog } from "../components/ProductComposerDialog";
+import { OrderProcessForm } from "../components/OrderProcessForm";
 import { buildSubmitData } from "./formBuilderSubmit";
 import { buildInitialFormData } from "./formDefaults";
 import { deriveProductFields } from "./productDerivation";
@@ -29,6 +30,19 @@ import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import NotFound from "@/shared/components/NotFound";
 import { Skeleton } from "@/shared/ui/skeleton";
+
+function isOrderProcessForm(tableName?: string | null): boolean {
+    const normalized = (tableName ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return [
+        "ordenproceso",
+        "ordenprocesos",
+        "ordenprocesoitem",
+        "ordenprocesositem",
+        "ordenesproceso",
+        "itemprocesos",
+        "itemsprocesos",
+    ].includes(normalized);
+}
 
 export default function FormBuilder() {
     const navigate = useNavigate();
@@ -482,6 +496,8 @@ export default function FormBuilder() {
                                     </div>
                                 ))}
                             </div>
+                        ) : isOrderProcessForm(table?.name) ? (
+                            <OrderProcessForm />
                         ) : (
                             <form onSubmit={handleSubmit} className="space-y-6">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

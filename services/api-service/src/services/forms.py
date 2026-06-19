@@ -56,6 +56,8 @@ FK_LABEL_PRIORITY = (
 DEFAULT_LOOKUP_LIMIT = 20
 MAX_LOOKUP_LIMIT = 200
 TELA_LOOKUP_FIELDS = ("nombre", "referencia")
+SYNTHETIC_PRODUCTION_CATEGORY_ID = 900001
+SYNTHETIC_ORDER_PROCESS_TABLE_ID = 900101
 FINALIZED_STATUS_VALUES = (
     "finalizado",
     "finalizada",
@@ -248,6 +250,51 @@ def _quote_identifier(identifier: str, *, field_name: str) -> str:
 
 def _normalize_table_name_for_match(table_name: str) -> str:
     return _normalize_identifier(table_name).lower()
+
+
+def _normalize_compact_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _normalize_label_for_match(value))
+
+
+def _is_order_process_form_config(row: dict[str, Any]) -> bool:
+    sql_name = _normalize_compact_name(row.get("nombre_tabla_sql"))
+    ui_name = _normalize_compact_name(row.get("nombre_tabla_ui"))
+    candidates = {
+        "ordenproceso",
+        "ordenprocesos",
+        "ordenprocesoitem",
+        "ordenprocesositem",
+        "ordenesproceso",
+        "ordenenproceso",
+        "ordenesenproceso",
+        "ordendeproceso",
+        "ordenesdeproceso",
+        "itemprocesos",
+        "itemsprocesos",
+        "procesositem",
+        "procesositems",
+    }
+    return sql_name in candidates or ui_name in candidates
+
+
+def _normalize_label_for_match(value: Any) -> str:
+    return (
+        str(value or "")
+        .strip()
+        .lower()
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("í", "i")
+        .replace("ó", "o")
+        .replace("ú", "u")
+        .replace("ñ", "n")
+        .replace("Ã¡", "a")
+        .replace("Ã©", "e")
+        .replace("Ã­", "i")
+        .replace("Ã³", "o")
+        .replace("Ãº", "u")
+        .replace("Ã±", "n")
+    )
 
 
 def _is_items_table(table_name: str) -> bool:
@@ -507,11 +554,12 @@ async def _get_visible_table_configs(
             rows = []
 
     if table_name is None:
-        return rows
+        return await _with_order_process_form_config(db, rows)
 
     target_table = _extract_table_name(table_name, field_name="table_name")
+    rows_with_synthetic = await _with_order_process_form_config(db, rows)
     filtered: list[dict[str, Any]] = []
-    for row in rows:
+    for row in rows_with_synthetic:
         current_table = _extract_table_name(
             row["nombre_tabla_sql"],
             field_name="workspace.ui_config_tablas.nombre_tabla_sql",
@@ -519,6 +567,49 @@ async def _get_visible_table_configs(
         if current_table == target_table:
             filtered.append(row)
     return filtered
+
+
+async def _get_production_category_id(db: AsyncSession) -> int:
+    result = await db.execute(
+        text("SELECT id, nombre FROM workspace.ui_categorias_tablas")
+    )
+    rows = [dict(row) for row in result.mappings().all()]
+    for row in rows:
+        normalized = _normalize_label_for_match(row.get("nombre"))
+        if normalized in {"produccion", "production"}:
+            return int(row["id"])
+    return SYNTHETIC_PRODUCTION_CATEGORY_ID
+
+
+async def _with_order_process_form_config(
+    db: AsyncSession,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not await _forms_table_exists(db, "ordenproceso"):
+        return rows
+
+    category_id = await _get_production_category_id(db)
+    order_process_rows = [
+        row
+        for row in rows
+        if _is_order_process_form_config(row)
+    ]
+    rows_without_order_process = [
+        row
+        for row in rows
+        if not _is_order_process_form_config(row)
+    ]
+    base_row = order_process_rows[0] if order_process_rows else {}
+
+    return [
+        *rows_without_order_process,
+        {
+            "id": base_row.get("id", SYNTHETIC_ORDER_PROCESS_TABLE_ID),
+            "nombre_tabla_sql": "ordenproceso",
+            "nombre_tabla_ui": "Orden en proceso",
+            "categoria_id": category_id,
+        },
+    ]
 
 
 async def _get_table_columns(
@@ -970,7 +1061,19 @@ async def get_categories(db: AsyncSession) -> list[dict[str, Any]]:
     try:
         query = text("SELECT id, nombre FROM workspace.ui_categorias_tablas")
         result = await db.execute(query)
-        return [dict(row) for row in result.mappings()]
+        rows = [dict(row) for row in result.mappings()]
+        has_production = any(
+            _normalize_label_for_match(row.get("nombre")) in {"produccion", "production"}
+            for row in rows
+        )
+        if not has_production:
+            rows.append(
+                {
+                    "id": SYNTHETIC_PRODUCTION_CATEGORY_ID,
+                    "nombre": "Producción",
+                }
+            )
+        return rows
     except Exception as error:
         raise DBCommunicationError(f"Error obteniendo categorias: {error}")
 
@@ -1214,9 +1317,11 @@ async def get_product_composer_options(
                     "nombre"::text ILIKE :q
                     OR "referencia"::text ILIKE :q
                     OR CONCAT_WS(' ', "nombre"::text, "referencia"::text) ILIKE :q
+                    OR "id"::text = :q_exact
                 )"""
             )
             params["q"] = f"%{normalized_q}%"
+            params["q_exact"] = normalized_q
     else:
         if "nombre" not in columns:
             raise DBCommunicationError(f"La tabla {table_name} no tiene columna nombre")
@@ -1224,8 +1329,9 @@ async def get_product_composer_options(
         where_clauses = ["NULLIF(TRIM(\"nombre\"::text), '') IS NOT NULL"]
         normalized_q = _normalize_search_term(q)
         if normalized_q:
-            where_clauses.append('"nombre"::text ILIKE :q')
+            where_clauses.append('("nombre"::text ILIKE :q OR "id"::text = :q_exact)')
             params["q"] = f"%{normalized_q}%"
+            params["q_exact"] = normalized_q
 
     query = text(
         f"""
@@ -2205,6 +2311,483 @@ def _first_existing_column(
     return None
 
 
+async def _get_table_columns_by_name(
+    db: AsyncSession,
+    table_name: str,
+) -> dict[str, dict[str, Any]]:
+    columns = await _get_table_columns(
+        db, schema_name=FORMS_SCHEMA, table_name=table_name
+    )
+    return {
+        _normalize_identifier(column["column_name"]).lower(): column
+        for column in columns
+    }
+
+
+async def _forms_table_exists(db: AsyncSession, table_name: str) -> bool:
+    result = await db.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = :schema_name
+              AND table_name = :table_name
+            LIMIT 1
+            """
+        ),
+        {"schema_name": FORMS_SCHEMA, "table_name": table_name},
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _coerce_value_for_column(column_meta: dict[str, Any] | None, raw_value: Any) -> Any:
+    if raw_value is None or (isinstance(raw_value, str) and raw_value.strip() == ""):
+        return None
+
+    if not column_meta:
+        return raw_value
+
+    dtype = (column_meta.get("data_type") or "").lower()
+
+    try:
+        if "int" in dtype or dtype in ("integer", "bigint", "smallint", "serial", "bigserial"):
+            if isinstance(raw_value, bool):
+                return int(raw_value)
+            if isinstance(raw_value, int):
+                return raw_value
+            return int(str(raw_value))
+        if "numeric" in dtype or "decimal" in dtype:
+            return Decimal(str(raw_value))
+        if dtype in ("real", "double precision", "float4", "float8", "float"):
+            return float(raw_value)
+        if dtype in ("boolean", "bool"):
+            if isinstance(raw_value, bool):
+                return raw_value
+            value = str(raw_value).strip().lower()
+            if value in ("1", "true", "t", "yes", "y", "si", "sí"):
+                return True
+            if value in ("0", "false", "f", "no", "n"):
+                return False
+            raise ValueError(f"Invalid boolean value: {raw_value}")
+        if dtype == "date":
+            if isinstance(raw_value, str):
+                return datetime.fromisoformat(raw_value).date()
+            if isinstance(raw_value, datetime):
+                return raw_value.date()
+            return raw_value
+        if "timestamp" in dtype or "time" in dtype:
+            if isinstance(raw_value, str):
+                return datetime.fromisoformat(raw_value)
+            return raw_value
+    except Exception as error:
+        raise DBCommunicationError(
+            f"Invalid value for column: {raw_value} ({error})"
+        )
+
+    return raw_value
+
+
+def _display_process_name(process_id: int, row: dict[str, Any] | None = None) -> str:
+    if row:
+        for key in ("nombre", "name", "descripcion", "description"):
+            value = row.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return f"Proceso {process_id}"
+
+
+async def get_order_process_items(
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    limit: int = DEFAULT_LOOKUP_LIMIT,
+    offset: int = 0,
+) -> dict[str, Any]:
+    _validate_lookup_pagination(limit=limit, offset=offset)
+    item_table = "item"
+    columns: dict[str, dict[str, Any]] = {}
+    for candidate_table in ("item", "items"):
+        if not await _forms_table_exists(db, candidate_table):
+            continue
+        candidate_columns = await _get_table_columns_by_name(db, candidate_table)
+        if "id" in candidate_columns:
+            item_table = candidate_table
+            columns = candidate_columns
+            break
+
+    if "id" not in columns:
+        raise DBCommunicationError("La tabla item/items no tiene columna id")
+
+    q_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    q_table = _quote_identifier(item_table, field_name="item_table")
+    search_columns = [
+        name
+        for name in ("item_legado", "detalle", "nombre", "id")
+        if name in columns
+    ]
+    if "item_legado" in columns:
+        label_expression = 'COALESCE(NULLIF(TRIM("item_legado"::text), \'\'), "id"::text)'
+    else:
+        label_parts = []
+        for name in ("detalle", "nombre"):
+            if name in columns:
+                label_parts.append(
+                    f"NULLIF(TRIM({_quote_identifier(name, field_name='item_label')}::text), '')"
+                )
+        label_expression = (
+            f"COALESCE(NULLIF(TRIM(CONCAT_WS(' - ', {', '.join(label_parts)})), ''), \"id\"::text)"
+            if label_parts
+            else '"id"::text'
+        )
+
+    where_sql = "1 = 1"
+    params: dict[str, Any] = {"limit": limit + 1, "offset": offset}
+    search_term = _normalize_search_term(q)
+    if search_term and search_columns:
+        where_sql = " OR ".join(
+            f"{_quote_identifier(name, field_name='item_search')}::text ILIKE :q"
+            for name in search_columns
+        )
+        where_sql = f"({where_sql})"
+        params["q"] = f"%{search_term}%"
+
+    rows = (
+        await db.execute(
+            text(
+                f"""
+                SELECT "id"::text AS value, {label_expression} AS label
+                FROM {q_schema}.{q_table}
+                WHERE {where_sql}
+                ORDER BY "id" DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            params,
+        )
+    ).mappings().all()
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return {
+        "items": [
+            {
+                "value": str(row["value"]),
+                "label": str(row.get("label") or row["value"]),
+            }
+            for row in rows
+        ],
+        "total": None,
+        "has_more": has_more,
+    }
+
+
+async def get_order_process_options(db: AsyncSession) -> dict[str, Any]:
+    process_rows: dict[int, dict[str, Any]] = {}
+    if await _forms_table_exists(db, "proceso"):
+        rows = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT *
+                    FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('proceso', field_name='process_ref_table')}
+                    WHERE "id" BETWEEN 1 AND 5
+                    ORDER BY "id" ASC
+                    """
+                )
+            )
+        ).mappings().all()
+        process_rows = {
+            int(row["id"]): dict(row)
+            for row in rows
+            if row.get("id") is not None
+        }
+
+    return {
+        "items": [
+            {
+                "value": str(process_id),
+                "label": _display_process_name(
+                    process_id,
+                    process_rows.get(process_id),
+                ),
+            }
+            for process_id in range(1, 6)
+        ]
+    }
+
+
+async def get_order_process_plan(
+    db: AsyncSession,
+    *,
+    item_id: int,
+    up_to_process: int,
+) -> dict[str, Any]:
+    if up_to_process < 1 or up_to_process > 5:
+        raise DBCommunicationError("El proceso debe estar entre 1 y 5")
+
+    process_table = await _find_item_process_table(db)
+    if not process_table:
+        raise DBCommunicationError("No se encontro la tabla ordenproceso")
+
+    table_name, columns = process_table
+    process_column = _first_existing_column(columns, ("id_proceso", "proceso_id", "id_prtoceso"))
+    item_column = _first_existing_column(columns, ("id_item", "item_id", "items_id"))
+    employee_column = _first_existing_column(columns, ("id_empleado", "empleado_id", "id_persona", "persona_id"))
+    start_column = _first_existing_column(columns, ("fecha_inicio", "fecha_iniciado", "fecha_inicio_real"))
+    finish_column = _first_existing_column(columns, ("fecha_finalizado", "fecha_fin", "fecha_finalizacion", "fecha_terminado"))
+    comment_column = _first_existing_column(columns, ("comentarios", "comentario", "notas", "observaciones"))
+    id_column = "id" if "id" in columns else None
+
+    if not process_column or not item_column:
+        raise DBCommunicationError("ordenproceso no tiene columnas de item/proceso")
+
+    item_columns = await _get_table_columns_by_name(db, "item")
+    item_row = (
+        await db.execute(
+            text(
+                f"""
+                SELECT *
+                FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('item', field_name='item_table')}
+                WHERE "id" = :item_id
+                LIMIT 1
+                """
+            ),
+            {"item_id": item_id},
+        )
+    ).mappings().first()
+    if not item_row:
+        raise DBCommunicationError("El item seleccionado no existe")
+
+    order_by = f"ORDER BY {_quote_identifier(id_column, field_name='order_process_id')} DESC" if id_column else ""
+    existing_rows = (
+        await db.execute(
+            text(
+                f"""
+                SELECT *
+                FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier(table_name, field_name='process_table')}
+                WHERE {_quote_identifier(item_column, field_name='item_column')} = :item_id
+                  AND {_quote_identifier(process_column, field_name='process_column')} BETWEEN 1 AND :up_to_process
+                {order_by}
+                """
+            ),
+            {"item_id": item_id, "up_to_process": up_to_process},
+        )
+    ).mappings().all()
+
+    existing_by_process: dict[int, dict[str, Any]] = {}
+    for row in existing_rows:
+        try:
+            process_id = int(row.get(process_column))
+        except Exception:
+            continue
+        if process_id not in existing_by_process:
+            existing_by_process[process_id] = dict(row)
+
+    process_rows: dict[int, dict[str, Any]] = {}
+    if await _forms_table_exists(db, "proceso"):
+        rows = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT *
+                    FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('proceso', field_name='process_ref_table')}
+                    WHERE "id" BETWEEN 1 AND :up_to_process
+                    ORDER BY "id" ASC
+                    """
+                ),
+                {"up_to_process": up_to_process},
+            )
+        ).mappings().all()
+        process_rows = {int(row["id"]): dict(row) for row in rows if row.get("id") is not None}
+
+    pending_processes: list[dict[str, Any]] = []
+    for process_id in range(1, up_to_process + 1):
+        existing = existing_by_process.get(process_id)
+        if existing and finish_column and existing.get(finish_column) is not None:
+            continue
+
+        pending_processes.append(
+            {
+                "process_id": process_id,
+                "process_name": _display_process_name(process_id, process_rows.get(process_id)),
+                "row_id": existing.get(id_column) if existing and id_column else None,
+                "fecha_inicio": existing.get(start_column) if existing and start_column else None,
+                "fecha_finalizado": existing.get(finish_column) if existing and finish_column else None,
+                "comentarios": existing.get(comment_column) if existing and comment_column else None,
+                "empleado_id": existing.get(employee_column) if existing and employee_column else None,
+            }
+        )
+
+    employee_columns = await _get_table_columns_by_name(db, "empleado")
+    employee_label = _first_existing_column(
+        set(employee_columns),
+        ("nombre", "name", "descripcion", "correo", "email", "id"),
+    )
+    employee_options: list[dict[str, str]] = []
+    if "id" in employee_columns and employee_label:
+        employee_options, _ = await _query_foreign_key_lookup(
+            db,
+            schema_name=FORMS_SCHEMA,
+            table_name="empleado",
+            value_field="id",
+            label_field=employee_label,
+            search_q=None,
+            limit=200,
+            offset=0,
+        )
+
+    if "item_legado" in item_columns and item_row.get("item_legado") is not None:
+        item_label = str(item_row.get("item_legado"))
+    else:
+        label_parts = [
+            str(item_row.get(name))
+            for name in ("detalle", "nombre", "id")
+            if name in item_columns and item_row.get(name) is not None
+        ]
+        item_label = " - ".join(label_parts) if label_parts else str(item_id)
+
+    return {
+        "item": {
+            "id": item_id,
+            "label": item_label,
+        },
+        "process_table": table_name,
+        "columns": {
+            "id": id_column,
+            "item": item_column,
+            "process": process_column,
+            "employee": employee_column,
+            "fecha_inicio": start_column,
+            "fecha_finalizado": finish_column,
+            "comentarios": comment_column,
+        },
+        "processes": pending_processes,
+        "employees": employee_options,
+    }
+
+
+async def submit_order_process_form(
+    db: AsyncSession,
+    *,
+    item_id: int,
+    processes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not processes:
+        raise DBCommunicationError("No hay procesos para guardar")
+
+    process_table = await _find_item_process_table(db)
+    if not process_table:
+        raise DBCommunicationError("No se encontro la tabla ordenproceso")
+
+    table_name, columns = process_table
+    columns_by_name = await _get_table_columns_by_name(db, table_name)
+    process_column = _first_existing_column(columns, ("id_proceso", "proceso_id", "id_prtoceso"))
+    item_column = _first_existing_column(columns, ("id_item", "item_id", "items_id"))
+    employee_column = _first_existing_column(columns, ("id_empleado", "empleado_id", "id_persona", "persona_id"))
+    start_column = _first_existing_column(columns, ("fecha_inicio", "fecha_iniciado", "fecha_inicio_real"))
+    finish_column = _first_existing_column(columns, ("fecha_finalizado", "fecha_fin", "fecha_finalizacion", "fecha_terminado"))
+    comment_column = _first_existing_column(columns, ("comentarios", "comentario", "notas", "observaciones"))
+    id_column = "id" if "id" in columns else None
+
+    if not process_column or not item_column:
+        raise DBCommunicationError("ordenproceso no tiene columnas de item/proceso")
+
+    q_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    q_table = _quote_identifier(table_name, field_name="process_table")
+    inserted = 0
+    updated = 0
+
+    for item in processes:
+        process_id = int(item.get("process_id"))
+        if process_id < 1 or process_id > 5:
+            raise DBCommunicationError("Los procesos deben estar entre 1 y 5")
+
+        existing = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT *
+                    FROM {q_schema}.{q_table}
+                    WHERE {_quote_identifier(item_column, field_name='item_column')} = :item_id
+                      AND {_quote_identifier(process_column, field_name='process_column')} = :process_id
+                    {f"ORDER BY {_quote_identifier(id_column, field_name='id_column')} DESC" if id_column else ""}
+                    LIMIT 1
+                    """
+                ),
+                {"item_id": item_id, "process_id": process_id},
+            )
+        ).mappings().first()
+
+        row_data: dict[str, Any] = {
+            item_column: item_id,
+            process_column: process_id,
+        }
+        if employee_column:
+            row_data[employee_column] = _coerce_value_for_column(
+                columns_by_name.get(employee_column),
+                item.get("empleado_id"),
+            )
+        if start_column:
+            row_data[start_column] = _coerce_value_for_column(
+                columns_by_name.get(start_column),
+                item.get("fecha_inicio"),
+            )
+        if finish_column:
+            row_data[finish_column] = _coerce_value_for_column(
+                columns_by_name.get(finish_column),
+                item.get("fecha_finalizado"),
+            )
+        if comment_column:
+            row_data[comment_column] = _coerce_value_for_column(
+                columns_by_name.get(comment_column),
+                item.get("comentarios"),
+            )
+
+        if existing and id_column and existing.get(id_column) is not None:
+            update_data = {
+                key: value
+                for key, value in row_data.items()
+                if key not in {item_column, process_column}
+            }
+            if not update_data:
+                continue
+            update_data["_row_id"] = existing[id_column]
+            set_sql = ", ".join(
+                f"{_quote_identifier(column, field_name='update_column')} = :{column}"
+                for column in update_data
+                if column != "_row_id"
+            )
+            await db.execute(
+                text(
+                    f"""
+                    UPDATE {q_schema}.{q_table}
+                    SET {set_sql}
+                    WHERE {_quote_identifier(id_column, field_name='id_column')} = :_row_id
+                    """
+                ),
+                update_data,
+            )
+            updated += 1
+            continue
+
+        await _add_manual_integer_id_if_needed(db, table_name=table_name, row_data=row_data)
+        columns_sql = ", ".join(_quote_identifier(column, field_name="insert_column") for column in row_data)
+        placeholders = ", ".join(f":{column}" for column in row_data)
+        await db.execute(
+            text(
+                f"""
+                INSERT INTO {q_schema}.{q_table} ({columns_sql})
+                VALUES ({placeholders})
+                """
+            ),
+            row_data,
+        )
+        inserted += 1
+
+    await db.commit()
+    return {"status": "success", "inserted": inserted, "updated": updated}
+
+
 async def _find_existing_reference_value(
     db: AsyncSession,
     *,
@@ -2860,6 +3443,47 @@ class FormsService:
             limit=limit,
             offset=offset,
             sqlserver_conn=sqlserver_conn,
+        )
+
+    async def get_order_process_items(
+        self,
+        *,
+        q: str | None = None,
+        limit: int = DEFAULT_LOOKUP_LIMIT,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return await get_order_process_items(
+            self.db,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def get_order_process_options(self) -> dict[str, Any]:
+        return await get_order_process_options(self.db)
+
+    async def get_order_process_plan(
+        self,
+        *,
+        item_id: int,
+        up_to_process: int,
+    ) -> dict[str, Any]:
+        return await get_order_process_plan(
+            self.db,
+            item_id=item_id,
+            up_to_process=up_to_process,
+        )
+
+    async def submit_order_process_form(
+        self,
+        *,
+        item_id: int,
+        processes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return await submit_order_process_form(
+            self.db,
+            item_id=item_id,
+            processes=processes,
         )
 
     async def get_column_values(

@@ -24,13 +24,6 @@ function normalizeTableText(value: string | undefined | null): string {
         .trim();
 }
 
-function isProcessOrderTable(table: TableSchema): boolean {
-    const haystack = normalizeTableText(
-        `${table.name} ${table.displayName} ${table.description ?? ""}`,
-    );
-    return haystack.includes("orden") && haystack.includes("proceso");
-}
-
 function isMainFormsTable(table: TableSchema): boolean {
     const normalizedName = normalizeTableText(table.name);
     const normalizedDisplay = normalizeTableText(table.displayName);
@@ -84,22 +77,17 @@ export default function TableSelection() {
         };
     }, []);
 
-    const availableTables = useMemo(
-        () => tables.filter((table) => !isProcessOrderTable(table)),
-        [tables],
-    );
-
     const filteredTables = useMemo(() => {
-        if (!searchQuery.trim()) return availableTables;
+        if (!searchQuery.trim()) return tables;
 
         const query = searchQuery.toLowerCase();
-        return availableTables.filter(
+        return tables.filter(
             (table) =>
                 table.displayName.toLowerCase().includes(query) ||
                 table.name.toLowerCase().includes(query) ||
                 table.description?.toLowerCase().includes(query),
         );
-    }, [searchQuery, availableTables]);
+    }, [searchQuery, tables]);
 
     const mainTables = useMemo(
         () => filteredTables.filter(isMainFormsTable),

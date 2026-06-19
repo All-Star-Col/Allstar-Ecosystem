@@ -14,6 +14,7 @@ export interface DataViewerColumn {
     max_length?: number | null;
     enum_values?: string[] | null;
     read_only_reason?: string | null;
+    raw_value_column?: string | null;
 }
 
 export interface DataViewerTable {
@@ -84,6 +85,22 @@ export interface DataViewerUpdateRowResponse {
     request_id?: string;
 }
 
+export interface ProductMergeConflict {
+    source_product_id: number;
+    target_product_id: number;
+    target_product_name: string;
+    recalculated_name: string;
+}
+
+export interface ProductMergeResponse {
+    status: string;
+    deleted_product_id: number;
+    target_product_id: number;
+    target_product_name: string;
+    updated_order_ids: Array<string | number>;
+    updated_orders_count: number;
+}
+
 export type DataViewerErrorCode =
     | "INVALID_IDENTIFIER"
     | "INVALID_FILTER"
@@ -100,6 +117,7 @@ export type DataViewerErrorCode =
     | "PK_REQUIRED"
     | "ROW_NOT_FOUND"
     | "COLUMN_NOT_EDITABLE"
+    | "PRODUCT_MERGE_REQUIRED"
     | "VALIDATION_ERROR"
     | "CONFLICT_VERSION"
     | "CONCURRENCY_NOT_SUPPORTED";
@@ -108,6 +126,7 @@ export interface DataViewerApiErrorBody {
     request_id?: string;
     detail?: string;
     code?: DataViewerErrorCode | string;
+    merge?: ProductMergeConflict;
 }
 
 export interface DataViewerModuleProps {

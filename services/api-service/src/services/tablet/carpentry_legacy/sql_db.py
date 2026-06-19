@@ -428,16 +428,35 @@ def _proceso_to_api(row: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _procesos_order_clause(db: Session) -> str:
+    columns = _get_columns(db, "procesos")
+
+    if "orden_linea" in columns and "id" in columns:
+        return "ORDER BY orden_linea ASC NULLS LAST, id ASC"
+
+    if "orden_linea" in columns:
+        return "ORDER BY orden_linea ASC NULLS LAST"
+
+    if "id" in columns:
+        return "ORDER BY id ASC"
+
+    if "nombre" in columns:
+        return "ORDER BY nombre ASC"
+
+    return ""
+
+
 def get_procesos_seccion(db: Session, seccion: str) -> list[dict[str, Any]]:
     if not _table_exists(db, "procesos"):
         return []
 
+    order_clause = _procesos_order_clause(db)
     rows = _all(
         db,
         f"""
         SELECT *
         FROM {_schema_table("procesos")}
-        ORDER BY COALESCE(orden_linea, id), id
+        {order_clause}
         """,
     )
 
@@ -454,12 +473,13 @@ def get_procesos(db: Session, piso: int | None = None) -> list[dict[str, Any]]:
     if not _table_exists(db, "procesos"):
         return []
 
+    order_clause = _procesos_order_clause(db)
     rows = _all(
         db,
         f"""
         SELECT *
         FROM {_schema_table("procesos")}
-        ORDER BY COALESCE(orden_linea, id), id
+        {order_clause}
         """,
     )
 

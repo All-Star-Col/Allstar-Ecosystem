@@ -26,7 +26,7 @@ const TABLE_GROUPS = [
         title: "Activo",
         order: [
             "ordenes de compra pendientes",
-            "orden proceso en proceso",
+            "orden proceso pendiente",
             "items en proceso",
         ],
     },
@@ -84,7 +84,7 @@ function getTableGroupKey(table: SidebarTableItem): TableGroupKey {
         id === "items_en_proceso" ||
         id === "ordenproceso" ||
         label === "ordenes de compra pendientes" ||
-        label === "orden proceso en proceso" ||
+        label === "orden proceso pendiente" ||
         label === "items en proceso"
     ) {
         return "active";

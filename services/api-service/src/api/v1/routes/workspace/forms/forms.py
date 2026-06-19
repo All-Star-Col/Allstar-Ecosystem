@@ -62,6 +62,19 @@ class ProductComposeRequest(BaseModel):
     precio: Decimal | None = None
 
 
+class OrderProcessEntryRequest(BaseModel):
+    process_id: int
+    empleado_id: int | str | None = None
+    fecha_inicio: str | None = None
+    fecha_finalizado: str | None = None
+    comentarios: str | None = None
+
+
+class OrderProcessSubmitRequest(BaseModel):
+    item_id: int
+    processes: list[OrderProcessEntryRequest]
+
+
 def ensure_sales_assistant_enabled() -> None:
     if not is_sales_assistant_enabled():
         raise HTTPException(
@@ -282,6 +295,66 @@ async def get_unassigned_orders_endpoint(
         raise HTTPException(status_code=422, detail=e.detail)
     except forms.DBCommunicationError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/order-process/items")
+async def get_order_process_items_endpoint(
+    q: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=forms.DEFAULT_LOOKUP_LIMIT, ge=1, le=forms.MAX_LOOKUP_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.get_order_process_items(
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/order-process/processes")
+async def get_order_process_options_endpoint(
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.get_order_process_options()
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/order-process/plan")
+async def get_order_process_plan_endpoint(
+    item_id: int = Query(..., ge=1),
+    up_to_process: int = Query(..., ge=1, le=5),
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.get_order_process_plan(
+            item_id=item_id,
+            up_to_process=up_to_process,
+        )
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/order-process/submit")
+async def submit_order_process_endpoint(
+    payload: OrderProcessSubmitRequest,
+    _current_user: User = Depends(get_current_user),
+    forms_service: forms.FormsService = Depends(get_forms_service),
+):
+    try:
+        return await forms_service.submit_order_process_form(
+            item_id=payload.item_id,
+            processes=[entry.model_dump() for entry in payload.processes],
+        )
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 @router.post("/bulk/purchase-orders/preview")

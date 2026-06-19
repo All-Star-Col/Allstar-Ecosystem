@@ -8,6 +8,8 @@ import type {
     DataViewerTable,
     DataViewerUpdateRowRequest,
     DataViewerUpdateRowResponse,
+    ProductMergeConflict,
+    ProductMergeResponse,
 } from "./types";
 
 const DATA_VIEWER_BASE = `${API_SERVER}/workspace/data-viewer`;
@@ -42,18 +44,21 @@ export class DataViewerApiError extends Error {
     status: number;
     code: DataViewerErrorCode | string;
     requestId: string;
+    merge?: ProductMergeConflict;
 
     constructor(args: {
         status: number;
         code: DataViewerErrorCode | string;
         detail: string;
         requestId: string;
+        merge?: ProductMergeConflict;
     }) {
         super(args.detail);
         this.name = "DataViewerApiError";
         this.status = args.status;
         this.code = args.code;
         this.requestId = args.requestId;
+        this.merge = args.merge;
     }
 }
 
@@ -77,6 +82,7 @@ async function toApiError(
                 body.request_id ??
                 response.headers.get("X-Request-ID") ??
                 fallbackRequestId,
+            merge: body.merge,
         });
     } catch {
         return new DataViewerApiError({
@@ -183,6 +189,30 @@ export async function exportDataViewerExcel(
             response.headers.get("Content-Disposition"),
             fallbackFilename,
         ),
+        requestId: response.headers.get("X-Request-ID") ?? requestId,
+    };
+}
+
+export async function mergeProductRows(payload: {
+    source_product_id: number;
+    target_product_id: number;
+}): Promise<{ result: ProductMergeResponse; requestId: string }> {
+    const { headers, requestId } = buildHeaders(undefined, {
+        contentTypeJson: true,
+    });
+
+    const response = await fetch(`${DATA_VIEWER_BASE}/products/merge`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw await toApiError(response, requestId);
+    }
+
+    return {
+        result: (await response.json()) as ProductMergeResponse,
         requestId: response.headers.get("X-Request-ID") ?? requestId,
     };
 }

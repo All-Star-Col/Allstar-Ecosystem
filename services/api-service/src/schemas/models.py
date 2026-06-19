@@ -279,6 +279,7 @@ class DataViewerColumn(BaseModel):
     max_length: int | None = Field(default=None, ge=1)
     enum_values: List[str] | None = None
     read_only_reason: str | None = None
+    raw_value_column: str | None = None
 
 
 class DataViewerTable(BaseModel):

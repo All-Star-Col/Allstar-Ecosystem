@@ -182,6 +182,43 @@ export interface ComposeProductResponseAPI {
     created: boolean;
 }
 
+export interface OrderProcessLookupOptionAPI {
+    value: string;
+    label: string;
+}
+
+export interface OrderProcessPlanProcessAPI {
+    process_id: number;
+    process_name: string;
+    row_id?: number | string | null;
+    fecha_inicio?: string | null;
+    fecha_finalizado?: string | null;
+    comentarios?: string | null;
+    empleado_id?: number | string | null;
+}
+
+export interface OrderProcessPlanAPI {
+    item: {
+        id: number;
+        label: string;
+    };
+    process_table: string;
+    columns: Record<string, string | null>;
+    processes: OrderProcessPlanProcessAPI[];
+    employees: OrderProcessLookupOptionAPI[];
+}
+
+export interface SubmitOrderProcessPayloadAPI {
+    item_id: number;
+    processes: {
+        process_id: number;
+        empleado_id?: number | string | null;
+        fecha_inicio?: string | null;
+        fecha_finalizado?: string | null;
+        comentarios?: string | null;
+    }[];
+}
+
 export interface ForeignKeyLookupParams {
     tableName: string;
     columnName: string;
@@ -592,6 +629,126 @@ export async function submitFormData(
         console.error("Error submitting form:", error);
         throw error;
     }
+}
+
+export async function fetchOrderProcessItems(params: {
+    query?: string;
+    limit?: number;
+}): Promise<OrderProcessLookupOptionAPI[]> {
+    const token = getToken();
+    const searchParams = new URLSearchParams();
+    if (params.query) searchParams.set("q", params.query);
+    if (params.limit) searchParams.set("limit", String(params.limit));
+
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/order-process/items${
+            searchParams.toString() ? `?${searchParams.toString()}` : ""
+        }`,
+        {
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail ||
+                `No se pudieron cargar items: ${response.statusText}`,
+        );
+    }
+
+    const payload = (await response.json()) as {
+        items?: OrderProcessLookupOptionAPI[];
+    };
+    return payload.items ?? [];
+}
+
+export async function fetchOrderProcessOptions(): Promise<OrderProcessLookupOptionAPI[]> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/order-process/processes`,
+        {
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail ||
+                `No se pudieron cargar procesos: ${response.statusText}`,
+        );
+    }
+
+    const payload = (await response.json()) as {
+        items?: OrderProcessLookupOptionAPI[];
+    };
+    return payload.items ?? [];
+}
+
+export async function fetchOrderProcessPlan(params: {
+    itemId: number | string;
+    upToProcess: number;
+}): Promise<OrderProcessPlanAPI> {
+    const token = getToken();
+    const searchParams = new URLSearchParams({
+        item_id: String(params.itemId),
+        up_to_process: String(params.upToProcess),
+    });
+
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/order-process/plan?${searchParams.toString()}`,
+        {
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail ||
+                `No se pudo preparar orden en proceso: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as OrderProcessPlanAPI;
+}
+
+export async function submitOrderProcess(
+    payload: SubmitOrderProcessPayloadAPI,
+): Promise<{ status: string; inserted: number; updated: number }> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/order-process/submit`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify(payload),
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail ||
+                `No se pudo guardar orden en proceso: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as {
+        status: string;
+        inserted: number;
+        updated: number;
+    };
 }
 
 export async function previewBulkPurchaseOrders(

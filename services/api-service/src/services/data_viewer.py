@@ -139,6 +139,15 @@ PRODUCT_COST_COLUMN_PRIORITY = (
     "precio",
     "valor",
 )
+PRODUCT_COMPONENT_COLUMNS = (
+    "id_base",
+    "id_modelo",
+    "id_referencia",
+    "id_referencia_1",
+    "id_referencia_2",
+    "id_referencia_3",
+    "id_tela",
+)
 ITEM_REFERENCE_COLUMN_PRIORITY = (
     "id_item",
     "item_id",
@@ -312,6 +321,29 @@ class RowNotFoundError(DataViewerError):
         )
 
 
+class ProductMergeConflictError(DataViewerError):
+    def __init__(
+        self,
+        *,
+        current_product_id: int,
+        target_product_id: int,
+        target_product_name: str,
+        recalculated_name: str,
+    ) -> None:
+        self.current_product_id = current_product_id
+        self.target_product_id = target_product_id
+        self.target_product_name = target_product_name
+        self.recalculated_name = recalculated_name
+        super().__init__(
+            detail=(
+                "Ya existe un producto equivalente. Puedes fusionar el producto "
+                f"{current_product_id} con el producto {target_product_id}."
+            ),
+            code="PRODUCT_MERGE_REQUIRED",
+            status_code=409,
+        )
+
+
 @dataclass
 class TableConfig:
     table_id: str
@@ -345,6 +377,7 @@ class TableMetadata:
     default_order_column: str | None
     display_select_sql: dict[str, str]
     column_expression_sql: dict[str, str]
+    raw_value_select_sql: dict[str, str]
 
 
 @dataclass
@@ -636,11 +669,16 @@ def _choose_fk_label_field(
     columns: list[dict[str, Any]],
     *,
     value_field: str,
+    referenced_table: str | None = None,
 ) -> str:
     columns_by_name = {
         _normalize_identifier(column["column_name"]).lower(): column
         for column in columns
     }
+
+    if (referenced_table or "").lower() in ITEM_TABLE_NAME_CANDIDATES:
+        if "item_legado" in columns_by_name:
+            return "item_legado"
 
     for preferred in FK_LABEL_PRIORITY:
         if preferred in columns_by_name and preferred != value_field:
@@ -941,6 +979,13 @@ class DataViewerService:
             request_data.changes, metadata
         )
 
+        normalized_changes = await self._prepare_product_changes(
+            table_config=table_config,
+            metadata=metadata,
+            normalized_pk=normalized_pk,
+            normalized_changes=normalized_changes,
+        )
+
         table_ref = (
             f"{_quote_identifier(table_config.schema_name)}."
             f"{_quote_identifier(table_config.table_name)}"
@@ -991,6 +1036,304 @@ class DataViewerService:
             row=row_payload,
             updated_columns=update_columns,
         )
+
+    def _is_product_table_config(self, table_config: TableConfig) -> bool:
+        candidates = {
+            table_config.table_name.lower(),
+            table_config.full_table_name.lower().split(".")[-1],
+            table_config.table_id.lower(),
+            (table_config.display_name or "").strip().lower(),
+        }
+        return not candidates.isdisjoint(PRODUCT_TABLE_NAME_CANDIDATES)
+
+    async def _fetch_row_by_pk(
+        self,
+        *,
+        table_config: TableConfig,
+        metadata: TableMetadata,
+        normalized_pk: dict[str, Any],
+    ) -> dict[str, Any]:
+        table_ref = (
+            f"{_quote_identifier(table_config.schema_name)}."
+            f"{_quote_identifier(table_config.table_name)}"
+        )
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
+        for index, pk_column in enumerate(metadata.pk_columns):
+            key = f"pk_lookup_{index}"
+            where_clauses.append(f"{_quote_identifier(pk_column)} = :{key}")
+            params[key] = normalized_pk[pk_column]
+
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT {self._build_returning_sql(metadata)}
+                FROM {table_ref}
+                WHERE {" AND ".join(where_clauses)}
+                LIMIT 1
+                """
+            ),
+            params,
+        )
+        row = result.mappings().first()
+        if not row:
+            raise RowNotFoundError(table_config.table_id)
+        return dict(row)
+
+    async def _lookup_catalog_label(
+        self,
+        *,
+        table_name: str,
+        entity_id: Any,
+        include_tela_reference: bool = False,
+    ) -> str:
+        if entity_id is None or str(entity_id).strip() == "":
+            return ""
+
+        if include_tela_reference:
+            result = await self.db.execute(
+                text(
+                    f"""
+                    SELECT TRIM(CONCAT_WS(' ',
+                        NULLIF(TRIM(COALESCE("nombre"::text, '')), ''),
+                        NULLIF(TRIM(COALESCE("referencia"::text, '')), '')
+                    )) AS label
+                    FROM {_quote_identifier("data")}.{_quote_identifier(table_name)}
+                    WHERE "id" = :entity_id
+                    LIMIT 1
+                    """
+                ),
+                {"entity_id": entity_id},
+            )
+        else:
+            result = await self.db.execute(
+                text(
+                    f"""
+                    SELECT NULLIF(TRIM("nombre"::text), '') AS label
+                    FROM {_quote_identifier("data")}.{_quote_identifier(table_name)}
+                    WHERE "id" = :entity_id
+                    LIMIT 1
+                    """
+                ),
+                {"entity_id": entity_id},
+            )
+
+        label = result.scalar_one_or_none()
+        return str(label or "").strip()
+
+    async def _build_product_name_from_components(
+        self,
+        row_values: dict[str, Any],
+    ) -> str:
+        referencia_1_value = row_values.get("id_referencia_1")
+        if referencia_1_value is None and "id_referencia" in row_values:
+            referencia_1_value = row_values.get("id_referencia")
+
+        labels = [
+            await self._lookup_catalog_label(
+                table_name="base",
+                entity_id=row_values.get("id_base"),
+            ),
+            await self._lookup_catalog_label(
+                table_name="modelo",
+                entity_id=row_values.get("id_modelo"),
+            ),
+            await self._lookup_catalog_label(
+                table_name="referencia",
+                entity_id=referencia_1_value,
+            ),
+            await self._lookup_catalog_label(
+                table_name="referencia",
+                entity_id=row_values.get("id_referencia_2"),
+            ),
+            await self._lookup_catalog_label(
+                table_name="referencia",
+                entity_id=row_values.get("id_referencia_3"),
+            ),
+            await self._lookup_catalog_label(
+                table_name="tela",
+                entity_id=row_values.get("id_tela"),
+                include_tela_reference=True,
+            ),
+        ]
+        return " ".join(label for label in labels if label).strip()
+
+    async def _find_equivalent_product(
+        self,
+        *,
+        metadata: TableMetadata,
+        row_values: dict[str, Any],
+        current_product_id: int | None,
+    ) -> dict[str, Any] | None:
+        column_names = {column["name"] for column in metadata.columns}
+        match_columns = [
+            column for column in PRODUCT_COMPONENT_COLUMNS if column in column_names
+        ]
+        if not match_columns:
+            return None
+
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
+        for index, column_name in enumerate(match_columns):
+            key = f"match_value_{index}"
+            where_clauses.append(
+                f"{_quote_identifier(column_name)} IS NOT DISTINCT FROM :{key}"
+            )
+            params[key] = row_values.get(column_name)
+
+        if current_product_id is not None and "id" in column_names:
+            where_clauses.append('"id" <> :current_product_id')
+            params["current_product_id"] = current_product_id
+
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT "id", COALESCE("nombre"::text, '') AS nombre
+                FROM {_quote_identifier("data")}."producto"
+                WHERE {" AND ".join(where_clauses)}
+                ORDER BY "id" ASC
+                LIMIT 1
+                """
+            ),
+            params,
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+    async def _prepare_product_changes(
+        self,
+        *,
+        table_config: TableConfig,
+        metadata: TableMetadata,
+        normalized_pk: dict[str, Any],
+        normalized_changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._is_product_table_config(table_config):
+            return normalized_changes
+
+        changed_component = any(
+            column in normalized_changes for column in PRODUCT_COMPONENT_COLUMNS
+        )
+        if not changed_component:
+            return normalized_changes
+
+        column_names = {column["name"] for column in metadata.columns}
+        if "nombre" not in column_names:
+            return normalized_changes
+
+        current_row = await self._fetch_row_by_pk(
+            table_config=table_config,
+            metadata=metadata,
+            normalized_pk=normalized_pk,
+        )
+        next_row = {**current_row, **normalized_changes}
+        recalculated_name = await self._build_product_name_from_components(next_row)
+        if recalculated_name:
+            normalized_changes["nombre"] = recalculated_name
+        if "fecha_modificacion" in column_names:
+            normalized_changes["fecha_modificacion"] = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        current_product_id = None
+        if current_row.get("id") is not None:
+            current_product_id = int(current_row["id"])
+        duplicate = await self._find_equivalent_product(
+            metadata=metadata,
+            row_values=next_row,
+            current_product_id=current_product_id,
+        )
+        if duplicate and current_product_id is not None:
+            raise ProductMergeConflictError(
+                current_product_id=current_product_id,
+                target_product_id=int(duplicate["id"]),
+                target_product_name=str(duplicate.get("nombre") or recalculated_name),
+                recalculated_name=recalculated_name,
+            )
+
+        return normalized_changes
+
+    async def merge_product_into_existing(
+        self,
+        *,
+        source_product_id: int,
+        target_product_id: int,
+    ) -> dict[str, Any]:
+        if source_product_id == target_product_id:
+            raise IdentifierValidationError(
+                detail="El producto origen y destino no pueden ser iguales",
+                code="VALIDATION_ERROR",
+            )
+
+        order_columns = await _get_table_columns(
+            self.db, schema_name="data", table_name="ordencompra"
+        )
+        order_column_names = {
+            _normalize_identifier(column["column_name"]).lower()
+            for column in order_columns
+        }
+        product_column = next(
+            (
+                column
+                for column in ORDER_PRODUCT_COLUMN_PRIORITY
+                if column in order_column_names
+            ),
+            None,
+        )
+        if not product_column:
+            raise DBCommunicationError(
+                "No se encontro columna de producto en data.ordencompra"
+            )
+
+        source = await self.db.execute(
+            text('SELECT "id", COALESCE("nombre"::text, \'\') AS nombre FROM data."producto" WHERE "id" = :id'),
+            {"id": source_product_id},
+        )
+        source_row = source.mappings().first()
+        target = await self.db.execute(
+            text('SELECT "id", COALESCE("nombre"::text, \'\') AS nombre FROM data."producto" WHERE "id" = :id'),
+            {"id": target_product_id},
+        )
+        target_row = target.mappings().first()
+        if not source_row:
+            raise RowNotFoundError("producto")
+        if not target_row:
+            raise RowNotFoundError("producto")
+
+        try:
+            update_result = await self.db.execute(
+                text(
+                    f"""
+                    UPDATE data."ordencompra"
+                    SET {_quote_identifier(product_column)} = :target_product_id
+                    WHERE {_quote_identifier(product_column)} = :source_product_id
+                    RETURNING "id"
+                    """
+                ),
+                {
+                    "source_product_id": source_product_id,
+                    "target_product_id": target_product_id,
+                },
+            )
+            updated_order_ids = [
+                row["id"] for row in update_result.mappings().all()
+            ]
+
+            await self.db.execute(
+                text('DELETE FROM data."producto" WHERE "id" = :source_product_id'),
+                {"source_product_id": source_product_id},
+            )
+            await self.db.commit()
+        except Exception as error:
+            await self.db.rollback()
+            raise DBCommunicationError(f"Error fusionando producto: {error}")
+
+        return {
+            "status": "success",
+            "deleted_product_id": source_product_id,
+            "target_product_id": target_product_id,
+            "target_product_name": str(target_row["nombre"] or ""),
+            "updated_order_ids": updated_order_ids,
+            "updated_orders_count": len(updated_order_ids),
+        }
 
     async def export_csv(
         self,
@@ -1334,7 +1677,7 @@ class DataViewerService:
                 (
                     "ordenproceso",
                     "pendiente",
-                    "Orden proceso en proceso",
+                    "Orden proceso pendiente",
                 ),
                 (
                     "ordenproceso_finalizados",
@@ -1642,6 +1985,7 @@ class DataViewerService:
         pk_columns_lower = {column.lower() for column in pk_columns}
         display_select_sql: dict[str, str] = {}
         column_expression_sql: dict[str, str] = {}
+        raw_value_select_sql: dict[str, str] = {}
 
         enum_values_by_column: dict[str, list[str]] = {}
         for check in check_rows:
@@ -1660,6 +2004,18 @@ class DataViewerService:
             data_type = row["data_type"]
             is_nullable = row["is_nullable"] == "YES"
             normalized_column_name = column_name.lower()
+            table_name_candidates = {
+                config.table_name.lower(),
+                config.full_table_name.lower().split(".")[-1],
+                config.table_id.lower(),
+                (config.display_name or "").strip().lower(),
+            }
+            is_product_table = not table_name_candidates.isdisjoint(
+                PRODUCT_TABLE_NAME_CANDIDATES
+            )
+            is_product_component_column = (
+                is_product_table and normalized_column_name in PRODUCT_COMPONENT_COLUMNS
+            )
 
             read_only_reason: str | None = None
             editable = True
@@ -1669,12 +2025,31 @@ class DataViewerService:
             elif normalized_column_name in TEMPORARY_READ_ONLY_COLUMNS:
                 editable = False
                 read_only_reason = "SYSTEM_COLUMN"
+            elif is_product_table and normalized_column_name == "nombre":
+                editable = False
+                read_only_reason = "DERIVED_PRODUCT_NAME"
 
             fk_info = foreign_keys.get(normalized_column_name)
+            if not fk_info and normalized_column_name in ITEM_REFERENCE_COLUMN_PRIORITY:
+                table_name_candidates = {
+                    config.table_name.lower(),
+                    config.full_table_name.lower().split(".")[-1],
+                    config.table_id.lower(),
+                    (config.display_name or "").strip().lower(),
+                }
+                if not table_name_candidates.isdisjoint(ORDER_PROCESS_TABLE_NAME_CANDIDATES):
+                    fk_info = await _resolve_reference_from_column(
+                        self.db,
+                        schema_name=config.schema_name,
+                        source_table=config.table_name,
+                        source_column=column_name,
+                        fallback_table_candidates=ITEM_TABLE_NAME_CANDIDATES,
+                        fallback_value_candidates=("id", "id_item", "item_id", "item_legado"),
+                    )
             if fk_info:
                 try:
                     preserve_raw_fk_id = self._should_preserve_raw_fk_id(config, column_name)
-                    if not preserve_raw_fk_id:
+                    if not preserve_raw_fk_id or is_product_component_column:
                         ref_cols = await _get_table_columns(
                             self.db,
                             schema_name=fk_info["referenced_schema"],
@@ -1683,6 +2058,7 @@ class DataViewerService:
                         label_field = _choose_fk_label_field(
                             ref_cols,
                             value_field=fk_info["referenced_column"],
+                            referenced_table=fk_info["referenced_table"],
                         )
                         ref_schema = _quote_identifier(fk_info["referenced_schema"])
                         ref_table = _quote_identifier(fk_info["referenced_table"])
@@ -1702,12 +2078,18 @@ class DataViewerService:
                         )
                         column_expression_sql[column_name] = display_expression
                         text_columns.add(column_name)
-                    editable = False
-                    read_only_reason = read_only_reason or (
-                        "FOREIGN_KEY_ID_VALUE"
-                        if preserve_raw_fk_id
-                        else "FOREIGN_KEY_DISPLAY_VALUE"
-                    )
+                        if is_product_component_column:
+                            raw_value_column = f"__raw_{column_name}"
+                            raw_value_select_sql[column_name] = (
+                                f"{_column_ref(column_name)} AS {_quote_identifier(raw_value_column)}"
+                            )
+                    if not is_product_component_column:
+                        editable = False
+                        read_only_reason = read_only_reason or (
+                            "FOREIGN_KEY_ID_VALUE"
+                            if preserve_raw_fk_id
+                            else "FOREIGN_KEY_DISPLAY_VALUE"
+                        )
                 except Exception:
                     display_select_sql.pop(column_name, None)
 
@@ -1722,6 +2104,9 @@ class DataViewerService:
                     "max_length": row.get("character_maximum_length"),
                     "enum_values": enum_values_by_column.get(normalized_column_name),
                     "read_only_reason": read_only_reason,
+                    "raw_value_column": (
+                        f"__raw_{column_name}" if is_product_component_column else None
+                    ),
                 }
             )
             allowed_columns.add(column_name)
@@ -1799,6 +2184,7 @@ class DataViewerService:
             default_order_column=default_order_column,
             display_select_sql=display_select_sql,
             column_expression_sql=column_expression_sql,
+            raw_value_select_sql=raw_value_select_sql,
         )
 
     async def _build_query_plan(
@@ -1923,6 +2309,9 @@ class DataViewerService:
                     f"{_column_ref(column)} AS {_quote_identifier(column)}",
                 )
             )
+            raw_value_sql = metadata.raw_value_select_sql.get(column)
+            if raw_value_sql:
+                select_parts.append(raw_value_sql)
         return ", ".join(select_parts)
 
     def _query_column_expr(self, metadata: TableMetadata, column: str) -> str:
@@ -2315,10 +2704,19 @@ class DataViewerService:
             config.table_id.lower(),
             (config.display_name or "").strip().lower(),
         }
+        normalized_column = column_name.lower()
+        if (
+            not table_name_candidates.isdisjoint(PRODUCT_TABLE_NAME_CANDIDATES)
+            and normalized_column in PRODUCT_COMPONENT_COLUMNS
+        ):
+            return True
+
         if table_name_candidates.isdisjoint(ORDER_PROCESS_TABLE_NAME_CANDIDATES):
             return False
 
-        normalized_column = column_name.lower()
+        if normalized_column in ITEM_REFERENCE_COLUMN_PRIORITY and normalized_column != "id":
+            return False
+
         return (
             normalized_column == "id"
             or normalized_column.startswith("id_")

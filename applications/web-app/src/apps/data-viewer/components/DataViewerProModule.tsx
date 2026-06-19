@@ -11,6 +11,16 @@ import { Toaster } from "@/shared/ui/sonner";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/shared/ui/alert-dialog";
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -26,6 +36,7 @@ import {
     DataViewerApiError,
     exportDataViewerExcel,
     fetchDataViewerTables,
+    mergeProductRows,
     queryDataViewer,
     updateDataViewerRow,
 } from "../api";
@@ -46,6 +57,7 @@ import type {
     DataViewerRow,
     DataViewerSort,
     DataViewerTable,
+    ProductMergeConflict,
 } from "../types";
 
 const DEFAULT_LIMIT = 100;
@@ -75,6 +87,10 @@ const FILTER_OPERATOR_OPTIONS: {
 interface UiErrorState {
     code?: string;
     detail: string;
+    requestId?: string;
+}
+
+interface PendingProductMergeState extends ProductMergeConflict {
     requestId?: string;
 }
 
@@ -318,6 +334,8 @@ function getCodeMessage(code?: string): string {
             return "La fila que intentas actualizar ya no existe.";
         case "COLUMN_NOT_EDITABLE":
             return "Hay columnas no editables en los cambios enviados.";
+        case "PRODUCT_MERGE_REQUIRED":
+            return "El producto editado queda igual a un producto existente.";
         case "VALIDATION_ERROR":
             return "Hay errores de validacion en los datos del formulario.";
         case "CONFLICT_VERSION":
@@ -460,6 +478,9 @@ export function DataViewerProModule({
     const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
     const [selectedRow, setSelectedRow] = useState<DataViewerRow | null>(null);
     const [isSavingRow, setIsSavingRow] = useState(false);
+    const [isMergingProduct, setIsMergingProduct] = useState(false);
+    const [pendingProductMerge, setPendingProductMerge] =
+        useState<PendingProductMergeState | null>(null);
     const [pendingRetryDraftValues, setPendingRetryDraftValues] =
         useState<Record<string, unknown> | null>(null);
 
@@ -912,6 +933,16 @@ export function DataViewerProModule({
             setRowSaveError(null);
             setRefreshCounter((previous) => previous + 1);
         } catch (error) {
+            if (
+                error instanceof DataViewerApiError &&
+                error.code === "PRODUCT_MERGE_REQUIRED" &&
+                error.merge
+            ) {
+                setPendingProductMerge({
+                    ...error.merge,
+                    requestId: error.requestId,
+                });
+            }
             const normalized = normalizeError(error);
             setRowSaveError(normalized);
             toast.error("No se pudo guardar la fila", {
@@ -930,6 +961,48 @@ export function DataViewerProModule({
         }
 
         void persistRowEdition(pendingRetryDraftValues);
+    };
+
+    const handleConfirmProductMerge = async () => {
+        if (!pendingProductMerge) {
+            return;
+        }
+
+        setIsMergingProduct(true);
+        try {
+            const { result } = await mergeProductRows({
+                source_product_id: pendingProductMerge.source_product_id,
+                target_product_id: pendingProductMerge.target_product_id,
+            });
+
+            const orderPreview = result.updated_order_ids
+                .slice(0, 12)
+                .map((id) => String(id))
+                .join(", ");
+            const hiddenCount = Math.max(result.updated_order_ids.length - 12, 0);
+            toast.success("Producto fusionado", {
+                description:
+                    result.updated_orders_count > 0
+                        ? `Ordenes actualizadas: ${orderPreview}${hiddenCount > 0 ? ` y ${hiddenCount} mas` : ""}.`
+                        : "No habia ordenes de compra asociadas al producto eliminado.",
+            });
+
+            setPendingProductMerge(null);
+            setIsEditSheetOpen(false);
+            setSelectedRow(null);
+            setPendingRetryDraftValues(null);
+            setRowSaveError(null);
+            setRefreshCounter((previous) => previous + 1);
+        } catch (error) {
+            const normalized = normalizeError(error);
+            toast.error("No se pudo fusionar el producto", {
+                description: normalized.requestId
+                    ? `${normalized.detail} (request_id: ${normalized.requestId})`
+                    : normalized.detail,
+            });
+        } finally {
+            setIsMergingProduct(false);
+        }
     };
 
     const handleAddFilter = () => {
@@ -1463,6 +1536,55 @@ export function DataViewerProModule({
                 }}
                 onRetry={handleRetryRowEdition}
             />
+
+            <AlertDialog
+                open={Boolean(pendingProductMerge)}
+                onOpenChange={(open) => {
+                    if (!open && !isMergingProduct) {
+                        setPendingProductMerge(null);
+                    }
+                }}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Fusionar producto duplicado</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Ya existe un producto con la misma configuracion.
+                            Se eliminara el producto{" "}
+                            {pendingProductMerge?.source_product_id} y las ordenes
+                            de compra asociadas se moveran al producto{" "}
+                            {pendingProductMerge?.target_product_id}:{" "}
+                            {pendingProductMerge?.target_product_name}.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+
+                    {pendingProductMerge?.recalculated_name && (
+                        <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
+                            <div className="text-xs text-muted-foreground">
+                                Nombre recalculado
+                            </div>
+                            <div className="font-medium text-foreground">
+                                {pendingProductMerge.recalculated_name}
+                            </div>
+                        </div>
+                    )}
+
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isMergingProduct}>
+                            Cancelar
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={(event) => {
+                                event.preventDefault();
+                                void handleConfirmProductMerge();
+                            }}
+                            disabled={isMergingProduct}
+                        >
+                            {isMergingProduct ? "Fusionando..." : "Fusionar producto"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }

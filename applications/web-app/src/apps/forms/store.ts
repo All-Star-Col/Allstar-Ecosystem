@@ -4,7 +4,7 @@ import { mapAPICategory, mapAPITable, mapAPITableSummary } from "./schema";
 import type { ReactNode } from "react";
 import type { Category, TableSchema } from "./schema";
 
-const FORMS_CACHE_KEY = "forms:tables-cache:v2";
+const FORMS_CACHE_KEY = "forms:tables-cache:v4";
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const TABLE_DETAILS_TTL_MS = 2 * 60 * 1000;
 

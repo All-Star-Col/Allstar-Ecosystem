@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AlertTriangle, RotateCcw, Save } from "lucide-react";
+import { fetchProductComposerOptions } from "@/apps/forms/api";
+import type { ProductComposerOptionAPI } from "@/apps/forms/api";
+import { AsyncForeignKeyCombobox } from "@/apps/forms/components/DynamicFormField";
 import {
     Sheet,
     SheetContent,
@@ -104,6 +107,52 @@ function isProductsTable(tableLabel: string): boolean {
     return normalized === "producto" || normalized === "productos";
 }
 
+type ProductLookupPart = "base" | "modelo" | "referencia" | "tela";
+
+const PRODUCT_EDIT_ORDER = [
+    "id_base",
+    "id_modelo",
+    "id_referencia",
+    "id_referencia_1",
+    "id_referencia_2",
+    "id_referencia_3",
+    "id_tela",
+    "precio",
+];
+
+const PRODUCT_FIELD_LABELS: Record<string, string> = {
+    id_base: "Base",
+    id_modelo: "Modelo",
+    id_referencia: "Referencia 1",
+    id_referencia_1: "Referencia 1",
+    id_referencia_2: "Referencia 2",
+    id_referencia_3: "Referencia 3",
+    id_tela: "Tela",
+    precio: "Precio",
+};
+
+function getProductLookupPart(columnName: string): ProductLookupPart | null {
+    const normalized = normalizeIdentifier(columnName);
+    if (normalized === "id_base") return "base";
+    if (normalized === "id_modelo") return "modelo";
+    if (
+        normalized === "id_referencia" ||
+        normalized === "id_referencia_1" ||
+        normalized === "id_referencia_2" ||
+        normalized === "id_referencia_3"
+    ) {
+        return "referencia";
+    }
+    if (normalized === "id_tela") return "tela";
+    return null;
+}
+
+function productColumnSortIndex(column: DataViewerColumn): number {
+    const normalized = normalizeIdentifier(column.name);
+    const index = PRODUCT_EDIT_ORDER.indexOf(normalized);
+    return index === -1 ? PRODUCT_EDIT_ORDER.length : index;
+}
+
 function formatCurrentLocalTimestamp(): string {
     const now = new Date();
     const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
@@ -124,6 +173,7 @@ export function RowEditSheet({
 }: RowEditSheetProps) {
     const formId = "data-viewer-row-edit-form";
     const [draftValues, setDraftValues] = useState<Record<string, unknown>>({});
+    const [productLabels, setProductLabels] = useState<Record<string, string>>({});
     const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
     useEffect(() => {
@@ -134,6 +184,7 @@ export function RowEditSheet({
         // Reset the edit draft whenever a different row opens in the sheet.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setDraftValues(getInitialDraftValues(row, editableColumns));
+        setProductLabels({});
         setValidationErrors({});
     }, [editableColumns, open, row]);
 
@@ -157,16 +208,79 @@ export function RowEditSheet({
         [editableColumns, productModificationDateColumnName, tableLabel],
     );
     const visibleEditableColumns = useMemo(
-        () =>
-            editableColumns.filter(
+        () => {
+            const filtered = editableColumns.filter(
                 (column) =>
                     !(
                         isProductsTable(tableLabel) &&
                         normalizeIdentifier(column.name) === "fecha_modificacion"
                     ),
-            ),
+            );
+            if (!isProductsTable(tableLabel)) {
+                return filtered;
+            }
+            return filtered
+                .filter((column) =>
+                    PRODUCT_EDIT_ORDER.includes(normalizeIdentifier(column.name)),
+                )
+                .sort(
+                    (left, right) =>
+                        productColumnSortIndex(left) - productColumnSortIndex(right),
+                );
+        },
         [editableColumns, tableLabel],
     );
+
+    useEffect(() => {
+        if (!open || !row || !isProductsTable(tableLabel)) {
+            return;
+        }
+
+        let cancelled = false;
+        const currentRow = row;
+
+        async function loadInitialProductLabels() {
+            const nextLabels: Record<string, string> = {};
+            await Promise.all(
+                visibleEditableColumns.map(async (column) => {
+                    const part = getProductLookupPart(column.name);
+                    const currentValue =
+                        column.raw_value_column && column.raw_value_column in currentRow
+                            ? currentRow[column.raw_value_column]
+                            : currentRow[column.name];
+                    if (!part || currentValue === null || currentValue === undefined || String(currentValue).trim() === "") {
+                        return;
+                    }
+
+                    try {
+                        const options = await fetchProductComposerOptions({
+                            part,
+                            query: String(currentValue),
+                            limit: 10,
+                        });
+                        const match = options.find(
+                            (option) => String(option.value) === String(currentValue),
+                        );
+                        if (match) {
+                            nextLabels[column.name] = match.label;
+                        }
+                    } catch {
+                        // The field can still be edited by searching manually.
+                    }
+                }),
+            );
+
+            if (!cancelled) {
+                setProductLabels(nextLabels);
+            }
+        }
+
+        void loadInitialProductLabels();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open, row, tableLabel, visibleEditableColumns]);
 
     const rowIdentity = useMemo(() => {
         if (!row) {
@@ -213,6 +327,73 @@ export function RowEditSheet({
             return nextValues;
         });
     };
+
+    const handleProductOptionSelect = (
+        columnName: string,
+        option: ProductComposerOptionAPI,
+    ) => {
+        setProductLabels((previous) => ({
+            ...previous,
+            [columnName]: option.label,
+        }));
+        handleDraftValueChange(columnName, option.value);
+    };
+
+    const clearProductLookup = (columnName: string) => {
+        setProductLabels((previous) => {
+            const next = { ...previous };
+            delete next[columnName];
+            return next;
+        });
+        handleDraftValueChange(columnName, "");
+    };
+
+    const productNamePreview = useMemo(() => {
+        if (!isProductsTable(tableLabel)) {
+            return "";
+        }
+
+        const referencia1Column =
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_referencia_1",
+            ) ??
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_referencia",
+            );
+        const orderedColumns = [
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_base",
+            ),
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_modelo",
+            ),
+            referencia1Column,
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_referencia_2",
+            ),
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_referencia_3",
+            ),
+            visibleEditableColumns.find(
+                (column) => normalizeIdentifier(column.name) === "id_tela",
+            ),
+        ].filter(Boolean) as DataViewerColumn[];
+
+        return orderedColumns
+            .map((column) => {
+                const value = draftValues[column.name];
+                if (
+                    value === null ||
+                    value === undefined ||
+                    String(value).trim() === ""
+                ) {
+                    return "";
+                }
+                return productLabels[column.name] || "";
+            })
+            .filter(Boolean)
+            .join(" ");
+    }, [draftValues, productLabels, tableLabel, visibleEditableColumns]);
 
     const closeSheet = () => {
         if (!isSaving) {
@@ -272,6 +453,13 @@ export function RowEditSheet({
                             const isDateTime = column.type === "datetime" || column.type === "timestamp";
                             const hasEnum = Array.isArray(column.enum_values) && column.enum_values.length > 0;
                             const checkedValue = value === true || value === "true";
+                            const productLookupPart =
+                                isProductsTable(tableLabel)
+                                    ? getProductLookupPart(column.name)
+                                    : null;
+                            const productFieldLabel =
+                                PRODUCT_FIELD_LABELS[normalizeIdentifier(column.name)] ??
+                                humanizeColumnName(column.name);
 
                             return (
                                 <div key={column.name} className="space-y-2">
@@ -280,7 +468,7 @@ export function RowEditSheet({
                                             htmlFor={`field-${column.name}`}
                                             className="text-sm font-medium text-foreground"
                                         >
-                                            {humanizeColumnName(column.name)}
+                                            {productFieldLabel}
                                             {column.required ? " *" : ""}
                                         </label>
                                         <Badge variant="secondary">
@@ -288,7 +476,58 @@ export function RowEditSheet({
                                         </Badge>
                                     </div>
 
-                                    {isBoolean ? (
+                                    {productLookupPart ? (
+                                        <div className="flex gap-2">
+                                            <div className="min-w-0 flex-1">
+                                                <AsyncForeignKeyCombobox
+                                                    value={String(getInputValue(value))}
+                                                    options={
+                                                        value && productLabels[column.name]
+                                                            ? [
+                                                                  {
+                                                                      value: String(value),
+                                                                      label: productLabels[column.name],
+                                                                  },
+                                                              ]
+                                                            : []
+                                                    }
+                                                    onChange={(selectedValue) =>
+                                                        handleDraftValueChange(
+                                                            column.name,
+                                                            selectedValue,
+                                                        )
+                                                    }
+                                                    onOptionSelect={(option) =>
+                                                        handleProductOptionSelect(
+                                                            column.name,
+                                                            option as ProductComposerOptionAPI,
+                                                        )
+                                                    }
+                                                    onLookup={(query, limit) =>
+                                                        fetchProductComposerOptions({
+                                                            part: productLookupPart,
+                                                            query,
+                                                            limit,
+                                                        })
+                                                    }
+                                                    limit={20}
+                                                    hasError={Boolean(fieldError)}
+                                                    initialLabel={productLabels[column.name]}
+                                                />
+                                            </div>
+                                            {!column.required && (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                        clearProductLookup(column.name)
+                                                    }
+                                                >
+                                                    Limpiar
+                                                </Button>
+                                            )}
+                                        </div>
+                                    ) : isBoolean ? (
                                         <label className="inline-flex items-center gap-2 text-sm text-foreground">
                                             <Checkbox
                                                 id={`field-${column.name}`}
@@ -371,6 +610,19 @@ export function RowEditSheet({
                                 </div>
                             );
                         })}
+
+                    {!disabledReason &&
+                        isProductsTable(tableLabel) &&
+                        hasEditableColumns && (
+                            <div className="rounded-md border border-border bg-muted/30 p-4">
+                                <div className="text-xs font-medium text-muted-foreground">
+                                    Asi quedara el nombre
+                                </div>
+                                <div className="mt-1 text-sm font-semibold text-foreground">
+                                    {productNamePreview || "Selecciona componentes para ver el nombre."}
+                                </div>
+                            </div>
+                        )}
 
                     {saveError && (
                         <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive space-y-1">

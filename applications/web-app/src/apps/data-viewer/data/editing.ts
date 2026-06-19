@@ -128,7 +128,10 @@ export function getInitialDraftValues(
     editableColumns: DataViewerColumn[],
 ): Record<string, unknown> {
     return editableColumns.reduce<Record<string, unknown>>((draft, column) => {
-        const currentValue = row[column.name];
+        const currentValue =
+            column.raw_value_column && column.raw_value_column in row
+                ? row[column.raw_value_column]
+                : row[column.name];
         draft[column.name] = currentValue ?? "";
         return draft;
     }, {});
@@ -183,7 +186,10 @@ export function buildRowChanges(args: {
 
     for (const column of args.editableColumns) {
         const nextValue = normalizeDraftValue(args.draftValues[column.name], column);
-        const previousValue = args.row[column.name] ?? null;
+        const previousValue =
+            column.raw_value_column && column.raw_value_column in args.row
+                ? args.row[column.raw_value_column] ?? null
+                : args.row[column.name] ?? null;
 
         if (!Object.is(nextValue, previousValue)) {
             changes[column.name] = nextValue;

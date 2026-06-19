@@ -32,6 +32,7 @@ def build_error_response(
     status_code: int,
     detail: str,
     code: str,
+    extra: dict | None = None,
 ) -> JSONResponse:
     """
     build_error_response()
@@ -46,9 +47,13 @@ def build_error_response(
         detail=detail,
         code=code,
     )
+    content = jsonable_encoder(payload)
+    if extra:
+        content.update(jsonable_encoder(extra))
+
     return JSONResponse(
         status_code=status_code,
-        content=jsonable_encoder(payload),
+        content=content,
         headers={"X-Request-ID": request_id},
     )
 

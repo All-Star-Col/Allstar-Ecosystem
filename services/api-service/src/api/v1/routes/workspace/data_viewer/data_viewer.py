@@ -5,7 +5,7 @@ import time
 
 from fastapi import APIRouter, Body, Depends, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # _____________________________________________________________
@@ -29,10 +29,19 @@ from src.schemas.models import (
     DataViewerTable,
     User,
 )
-from src.services.data_viewer import DataViewerError, DataViewerService
+from src.services.data_viewer import (
+    DataViewerError,
+    DataViewerService,
+    ProductMergeConflictError,
+)
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+class ProductMergeRequest(BaseModel):
+    source_product_id: int = Field(..., ge=1)
+    target_product_id: int = Field(..., ge=1)
 
 
 def get_data_viewer_service(db: AsyncSession = Depends(get_db)) -> DataViewerService:
@@ -371,6 +380,18 @@ async def patch_data_viewer_row(
             status_code=error.status_code,
             detail=error.detail,
             code=error.code,
+            extra=(
+                {
+                    "merge": {
+                        "source_product_id": error.current_product_id,
+                        "target_product_id": error.target_product_id,
+                        "target_product_name": error.target_product_name,
+                        "recalculated_name": error.recalculated_name,
+                    }
+                }
+                if isinstance(error, ProductMergeConflictError)
+                else None
+            ),
         )
     except Exception as error:
         logger.exception("Unexpected error in DataViewer patch endpoint: %s", error)
@@ -382,6 +403,57 @@ async def patch_data_viewer_row(
             row_count=0,
             status_code=500,
         )
+        return build_error_response(
+            request_id=request_id,
+            status_code=500,
+            detail="Internal server error",
+            code="INTERNAL_ERROR",
+        )
+
+
+@router.post("/products/merge")
+async def merge_product_row(
+    request: Request,
+    response: Response,
+    payload: ProductMergeRequest,
+    current_user: User = Depends(get_current_user),
+    data_viewer_service: DataViewerService = Depends(get_data_viewer_service),
+):
+    request_id = resolve_request_id(request)
+    started_at = time.perf_counter()
+
+    try:
+        result = await data_viewer_service.merge_product_into_existing(
+            source_product_id=payload.source_product_id,
+            target_product_id=payload.target_product_id,
+        )
+        response.headers["X-Request-ID"] = request_id
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id="producto",
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=int(result.get("updated_orders_count", 0)),
+            status_code=200,
+        )
+        return result
+    except DataViewerError as error:
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id="producto",
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=error.status_code,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=error.status_code,
+            detail=error.detail,
+            code=error.code,
+        )
+    except Exception as error:
+        logger.exception("Unexpected error in product merge endpoint: %s", error)
         return build_error_response(
             request_id=request_id,
             status_code=500,
