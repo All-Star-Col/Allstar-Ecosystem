@@ -867,7 +867,7 @@ export function DataViewerProModule({
         [activeTable],
     );
 
-    const handleEditRow = (row: DataViewerRow) => {
+    const handleEditRow = async (row: DataViewerRow) => {
         const rowEditState = canEditRow(activeTable, row);
         if (!rowEditState.allowed) {
             toast.warning("No se puede editar esta fila", {
@@ -876,7 +876,39 @@ export function DataViewerProModule({
             return;
         }
 
-        setSelectedRow(row);
+        if (!activeTable || !rowEditState.pk) {
+            setSelectedRow(row);
+            setRowSaveError(null);
+            setPendingRetryDraftValues(null);
+            setIsEditSheetOpen(true);
+            return;
+        }
+
+        try {
+            const fullRowResponse = await queryDataViewer({
+                table_id: activeTable.table_id,
+                columns: activeTable.columns.map((column) => column.name),
+                filters: Object.entries(rowEditState.pk).map(([column, value]) => ({
+                    column,
+                    operator: "eq",
+                    value,
+                })),
+                limit: 1,
+                offset: 0,
+                include_total: false,
+            });
+
+            setSelectedRow(fullRowResponse.result.rows[0] ?? row);
+        } catch (error) {
+            const normalized = normalizeError(error);
+            toast.error("No se pudo cargar la fila completa", {
+                description: normalized.requestId
+                    ? `${normalized.detail} (request_id: ${normalized.requestId})`
+                    : normalized.detail,
+            });
+            setSelectedRow(row);
+        }
+
         setRowSaveError(null);
         setPendingRetryDraftValues(null);
         setIsEditSheetOpen(true);
