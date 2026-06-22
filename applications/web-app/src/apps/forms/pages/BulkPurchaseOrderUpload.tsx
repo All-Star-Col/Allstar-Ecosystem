@@ -15,11 +15,19 @@ import {
 import { toast } from "sonner";
 
 import {
+    commitBulkOrderProcess,
     commitBulkPurchaseOrders,
+    previewBulkOrderProcess,
     previewBulkPurchaseOrders,
+    revalidateBulkOrderProcessRow,
     revalidateBulkPurchaseOrderProduct,
 } from "../api";
-import type { BulkPurchaseOrderPreviewAPI, BulkPurchaseOrderRowAPI } from "../api";
+import type {
+    BulkOrderProcessPreviewAPI,
+    BulkOrderProcessRowAPI,
+    BulkPurchaseOrderPreviewAPI,
+    BulkPurchaseOrderRowAPI,
+} from "../api";
 
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Badge } from "@/shared/ui/badge";
@@ -86,6 +94,13 @@ const BULK_TABLE_WIDTH = BULK_TABLE_COLUMNS.reduce(
 );
 const BULK_DRAFT_STORAGE_KEY = "allstar.forms.bulkPurchaseOrders.draft.v1";
 const BULK_DRAFT_VERSION = 1;
+const ORDER_PROCESS_COLUMNS = [72, 130, 150, 140, 180, 180, 220, 320, 180] as const;
+const ORDER_PROCESS_TABLE_WIDTH = ORDER_PROCESS_COLUMNS.reduce(
+    (total, width) => total + width,
+    0,
+);
+
+type BulkSection = "purchase-orders" | "order-process";
 
 type BulkDraftInfo = {
     savedAt: string;
@@ -302,6 +317,7 @@ function mergeRevalidatedRow(
 
 export default function BulkPurchaseOrderUpload() {
     const navigate = useNavigate();
+    const [activeSection, setActiveSection] = useState<BulkSection>("purchase-orders");
     const [file, setFile] = useState<File | null>(null);
     const [sourceFileName, setSourceFileName] = useState("");
     const [preview, setPreview] = useState<BulkPurchaseOrderPreviewAPI | null>(null);
@@ -312,6 +328,12 @@ export default function BulkPurchaseOrderUpload() {
     const [draftInfo, setDraftInfo] = useState<BulkDraftInfo | null>(null);
     const [homologationSearches, setHomologationSearches] = useState<Record<string, string>>({});
     const revalidationRunsRef = useRef<Record<number, number>>({});
+    const [processFile, setProcessFile] = useState<File | null>(null);
+    const [processSourceFileName, setProcessSourceFileName] = useState("");
+    const [processPreview, setProcessPreview] = useState<BulkOrderProcessPreviewAPI | null>(null);
+    const [isProcessPreviewing, setIsProcessPreviewing] = useState(false);
+    const [isProcessCommitting, setIsProcessCommitting] = useState(false);
+    const [processRowsValidating, setProcessRowsValidating] = useState<Set<number>>(new Set());
 
     const isRowFinalized = (row: BulkPurchaseOrderRowAPI) =>
         finalizedRows.has(row.row_number);
@@ -342,6 +364,23 @@ export default function BulkPurchaseOrderUpload() {
             pending: rows.length - ready,
         };
     }, [preview, finalizedRows]);
+
+    const processSummary = useMemo(() => {
+        const rows = processPreview?.rows ?? [];
+        const activeRows = rows.filter((row) => row.status !== "omitted");
+        return {
+            total: rows.length,
+            ready: activeRows.filter((row) => row.status === "ready").length,
+            invalid: activeRows.filter((row) => row.status !== "ready").length,
+            omitted: rows.filter((row) => row.status === "omitted").length,
+        };
+    }, [processPreview]);
+
+    const canCommitProcess =
+        Boolean(processPreview?.rows.length) &&
+        processSummary.invalid === 0 &&
+        processSummary.ready > 0 &&
+        !isProcessCommitting;
 
     const getFieldKey = (rowNumber: number, field: HomologationField) =>
         `${rowNumber}:${field}`;
@@ -863,6 +902,107 @@ export default function BulkPurchaseOrderUpload() {
         );
     };
 
+    const handleProcessPreview = async () => {
+        if (!processFile) {
+            toast.error("Selecciona un archivo Excel de orden proceso");
+            return;
+        }
+
+        setIsProcessPreviewing(true);
+        try {
+            const result = await previewBulkOrderProcess(processFile);
+            setProcessSourceFileName(processFile.name);
+            setProcessPreview(result);
+            toast.success("Archivo de proceso prevalidado", {
+                description: `${result.summary.total} filas encontradas`,
+            });
+        } catch (error) {
+            setProcessPreview(null);
+            toast.error("No se pudo prevalidar", {
+                description:
+                    error instanceof Error ? error.message : "Error leyendo el archivo",
+            });
+        } finally {
+            setIsProcessPreviewing(false);
+        }
+    };
+
+    const updateProcessRow = (
+        rowNumber: number,
+        updater: (row: BulkOrderProcessRowAPI) => BulkOrderProcessRowAPI,
+    ) => {
+        setProcessPreview((current) => {
+            if (!current) return current;
+            return {
+                ...current,
+                rows: current.rows.map((row) =>
+                    row.row_number === rowNumber ? updater(row) : row,
+                ),
+            };
+        });
+    };
+
+    const revalidateProcessRow = async (row: BulkOrderProcessRowAPI) => {
+        setProcessRowsValidating((current) => new Set(current).add(row.row_number));
+        try {
+            const result = await revalidateBulkOrderProcessRow(row);
+            updateProcessRow(row.row_number, () => result);
+        } catch (error) {
+            toast.error("No se pudo validar la fila", {
+                description:
+                    error instanceof Error ? error.message : "Error validando item",
+            });
+        } finally {
+            setProcessRowsValidating((current) => {
+                const next = new Set(current);
+                next.delete(row.row_number);
+                return next;
+            });
+        }
+    };
+
+    const handleProcessItemChange = (row: BulkOrderProcessRowAPI, item: string) => {
+        updateProcessRow(row.row_number, (current) => ({
+            ...current,
+            item,
+            resolved: { ...current.resolved, item_id: null },
+            missing: ["item"],
+            errors: item.trim() ? ["Pendiente validar item"] : ["Falta item"],
+            status: "invalid",
+            omitted: false,
+        }));
+    };
+
+    const toggleProcessRowOmitted = (row: BulkOrderProcessRowAPI) => {
+        updateProcessRow(row.row_number, (current) => ({
+            ...current,
+            omitted: current.status !== "omitted",
+            status: current.status === "omitted" ? (current.missing.length ? "invalid" : "ready") : "omitted",
+        }));
+    };
+
+    const handleProcessCommit = async () => {
+        if (!processPreview) return;
+
+        setIsProcessCommitting(true);
+        try {
+            const result = await commitBulkOrderProcess({ rows: processPreview.rows });
+            toast.success("Orden proceso cargada", {
+                description: `${result.inserted} creadas, ${result.updated} actualizadas, ${result.omitted} omitidas`,
+            });
+            setProcessPreview(null);
+            setProcessFile(null);
+            setProcessSourceFileName("");
+        } catch (error) {
+            toast.error("No se pudo cargar", {
+                description:
+                    error instanceof Error ? error.message : "Error guardando orden proceso",
+            });
+        } finally {
+            setIsProcessCommitting(false);
+        }
+    };
+
     const handleCommit = async () => {
         if (!preview) return;
 
@@ -914,7 +1054,7 @@ export default function BulkPurchaseOrderUpload() {
                                 Carga masiva
                             </h1>
                             <p className="text-sm text-muted-foreground">
-                                Ordenes de compra e items desde Excel
+                                Ordenes de compra y orden proceso desde Excel
                             </p>
                         </div>
                     </div>
@@ -922,6 +1062,24 @@ export default function BulkPurchaseOrderUpload() {
             </header>
 
             <main className="container mx-auto max-w-6xl min-w-0 overflow-x-hidden px-4 py-8">
+                <div className="mb-4 flex flex-wrap gap-2">
+                    <Button
+                        type="button"
+                        variant={activeSection === "purchase-orders" ? "default" : "outline"}
+                        onClick={() => setActiveSection("purchase-orders")}
+                    >
+                        Orden de compra
+                    </Button>
+                    <Button
+                        type="button"
+                        variant={activeSection === "order-process" ? "default" : "outline"}
+                        onClick={() => setActiveSection("order-process")}
+                    >
+                        Orden proceso
+                    </Button>
+                </div>
+
+                {activeSection === "purchase-orders" && (
                 <Card className="min-w-0 overflow-hidden border border-border/80 bg-card shadow-sm">
                     <CardHeader className="border-b bg-muted/20">
                         <CardTitle className="flex items-center gap-2 text-xl font-semibold">
@@ -1199,6 +1357,227 @@ export default function BulkPurchaseOrderUpload() {
                         )}
                     </CardContent>
                 </Card>
+                )}
+
+                {activeSection === "order-process" && (
+                    <Card className="min-w-0 overflow-hidden border border-border/80 bg-card shadow-sm">
+                        <CardHeader className="border-b bg-muted/20">
+                            <CardTitle className="flex items-center gap-2 text-xl font-semibold">
+                                <FileSpreadsheet className="h-5 w-5" />
+                                Archivo de orden proceso
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="min-w-0 space-y-5 pt-6">
+                            <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                                Formato recomendado para fechas: <strong>YYYY-MM-DD</strong> o{" "}
+                                <strong>YYYY-MM-DD HH:mm</strong>. Tambien se aceptan fechas de Excel
+                                y formato <strong>DD/MM/YYYY</strong>.
+                            </div>
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                                <input
+                                    type="file"
+                                    accept=".xlsx"
+                                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    onChange={(event) => {
+                                        const selectedFile = event.target.files?.[0] ?? null;
+                                        setProcessFile(selectedFile);
+                                        setProcessSourceFileName(selectedFile?.name ?? "");
+                                        setProcessPreview(null);
+                                    }}
+                                />
+                                <Button
+                                    type="button"
+                                    onClick={handleProcessPreview}
+                                    disabled={!processFile || isProcessPreviewing}
+                                    className="sm:w-auto"
+                                >
+                                    {isProcessPreviewing ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Upload className="mr-2 h-4 w-4" />
+                                    )}
+                                    Prevalidar
+                                </Button>
+                            </div>
+
+                            {processPreview && (
+                                <div className="grid gap-3 sm:grid-cols-5">
+                                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                                        <div className="text-xs text-muted-foreground">Filas</div>
+                                        <div className="text-2xl font-semibold">{processSummary.total}</div>
+                                    </div>
+                                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                                        <div className="text-xs text-muted-foreground">Archivo</div>
+                                        <div className="truncate text-sm font-medium">
+                                            {processSourceFileName || "Archivo de proceso"}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                                        <div className="text-xs text-muted-foreground">Listas</div>
+                                        <div className="text-2xl font-semibold text-emerald-700">
+                                            {processSummary.ready}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                                        <div className="text-xs text-muted-foreground">Con error</div>
+                                        <div className="text-2xl font-semibold text-red-700">
+                                            {processSummary.invalid}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-md border border-border bg-muted/20 p-3">
+                                        <div className="text-xs text-muted-foreground">Omitidas</div>
+                                        <div className="text-2xl font-semibold text-muted-foreground">
+                                            {processSummary.omitted}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {processPreview && processSummary.invalid > 0 && (
+                                <Alert variant="destructive">
+                                    <AlertCircle className="h-4 w-4" />
+                                    <AlertTitle>Hay filas pendientes</AlertTitle>
+                                    <AlertDescription>
+                                        Corrige el item legado o omite la fila. La carga se habilita
+                                        cuando todas las filas activas tengan item valido.
+                                    </AlertDescription>
+                                </Alert>
+                            )}
+
+                            {processPreview && processPreview.rows.length > 0 && (
+                                <div className="min-w-0 space-y-4">
+                                    <div
+                                        className="max-h-[calc(100vh-390px)] overflow-auto rounded-md border border-border"
+                                        style={{ scrollbarGutter: "stable" }}
+                                    >
+                                        <table
+                                            className="caption-bottom text-sm"
+                                            style={{
+                                                width: ORDER_PROCESS_TABLE_WIDTH,
+                                                tableLayout: "fixed",
+                                            }}
+                                        >
+                                            <colgroup>
+                                                {ORDER_PROCESS_COLUMNS.map((width, index) => (
+                                                    <col key={`${width}-${index}`} style={{ width }} />
+                                                ))}
+                                            </colgroup>
+                                            <TableHeader className="sticky top-0 z-10 bg-card">
+                                                <TableRow>
+                                                    <TableHead>Fila</TableHead>
+                                                    <TableHead>Estado</TableHead>
+                                                    <TableHead>Item</TableHead>
+                                                    <TableHead>ID Proceso</TableHead>
+                                                    <TableHead>Fecha inicio</TableHead>
+                                                    <TableHead>Fecha finalizacion</TableHead>
+                                                    <TableHead>ID empleado</TableHead>
+                                                    <TableHead>Comentario</TableHead>
+                                                    <TableHead>Accion</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {processPreview.rows.map((row, rowIndex) => {
+                                                    const isValidating = processRowsValidating.has(row.row_number);
+                                                    return (
+                                                        <TableRow
+                                                            key={`${row.row_number}-${row.item}-${row.id_proceso}`}
+                                                            className={rowIndex % 2 === 0 ? "bg-card" : "bg-muted/20"}
+                                                        >
+                                                            <TableCell>{row.row_number}</TableCell>
+                                                            <TableCell>
+                                                                <Badge
+                                                                    variant={row.status === "invalid" ? "destructive" : "outline"}
+                                                                    className={
+                                                                        row.status === "ready"
+                                                                            ? "border-emerald-300 bg-emerald-100 text-emerald-800"
+                                                                            : row.status === "omitted"
+                                                                              ? "border-muted bg-muted text-muted-foreground"
+                                                                              : undefined
+                                                                    }
+                                                                >
+                                                                    {row.status === "ready"
+                                                                        ? "Lista"
+                                                                        : row.status === "omitted"
+                                                                          ? "Omitida"
+                                                                          : "Revisar"}
+                                                                </Badge>
+                                                                {row.errors.length > 0 && row.status !== "omitted" && (
+                                                                    <div className="mt-1 text-xs text-red-700">
+                                                                        {row.errors.join(", ")}
+                                                                    </div>
+                                                                )}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <input
+                                                                    value={row.item}
+                                                                    onChange={(event) =>
+                                                                        handleProcessItemChange(row, event.target.value)
+                                                                    }
+                                                                    className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+                                                                />
+                                                            </TableCell>
+                                                            <TableCell>{row.id_proceso}</TableCell>
+                                                            <TableCell>{row.fecha_inicio}</TableCell>
+                                                            <TableCell>{row.fecha_finalizado}</TableCell>
+                                                            <TableCell>{row.id_empleado ?? ""}</TableCell>
+                                                            <TableCell className="whitespace-normal break-words text-xs">
+                                                                {row.comentarios}
+                                                            </TableCell>
+                                                            <TableCell>
+                                                                <div className="flex flex-col gap-2">
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        onClick={() => revalidateProcessRow(row)}
+                                                                        disabled={isValidating}
+                                                                    >
+                                                                        {isValidating && (
+                                                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                                        )}
+                                                                        Validar
+                                                                    </Button>
+                                                                    <Button
+                                                                        type="button"
+                                                                        size="sm"
+                                                                        variant={row.status === "omitted" ? "outline" : "ghost"}
+                                                                        onClick={() => toggleProcessRowOmitted(row)}
+                                                                    >
+                                                                        {row.status === "omitted" ? "Incluir" : "Omitir"}
+                                                                    </Button>
+                                                                </div>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    );
+                                                })}
+                                            </TableBody>
+                                        </table>
+                                    </div>
+
+                                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                                        <p className="text-sm text-muted-foreground">
+                                            Al cargar, si ya existe una fila con el mismo item y proceso
+                                            se actualiza; si no existe, se crea.
+                                        </p>
+                                        <Button
+                                            type="button"
+                                            onClick={handleProcessCommit}
+                                            disabled={!canCommitProcess}
+                                            className="sm:w-auto"
+                                        >
+                                            {isProcessCommitting ? (
+                                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <CheckCircle2 className="mr-2 h-4 w-4" />
+                                            )}
+                                            Cargar ordenes de proceso
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
             </main>
         </div>
     );

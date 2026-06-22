@@ -1,13 +1,13 @@
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Any
 from zipfile import ZipFile
 from xml.etree import ElementTree as ET
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.forms import (
@@ -75,6 +75,17 @@ class BulkRow:
     cantidad: int
 
 
+@dataclass
+class BulkOrderProcessRow:
+    row_number: int
+    item_legado: str
+    id_proceso: int | None
+    id_empleado: int | None
+    fecha_inicio: datetime | None
+    fecha_finalizado: datetime | None
+    comentarios: str
+
+
 def _normalize_key(value: Any) -> str:
     raw = str(value or "").strip().lower()
     raw = (
@@ -124,6 +135,50 @@ def _parse_int(value: Any) -> int:
     if parsed < 1:
         raise ValueError("Cantidad debe ser mayor a cero")
     return parsed
+
+
+def _parse_optional_int(value: Any) -> int | None:
+    if value is None or str(value).strip() == "":
+        return None
+    return int(float(str(value).strip().replace(",", ".")))
+
+
+def _parse_optional_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, date):
+        return datetime.combine(value, time.min)
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    numeric_raw = raw.replace(",", ".")
+    if re.fullmatch(r"\d+(\.\d+)?", numeric_raw):
+        serial = float(numeric_raw)
+        if serial > 59:
+            return datetime(1899, 12, 30) + timedelta(days=serial)
+
+    normalized = raw.replace("T", " ")
+    formats = (
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%d-%m-%Y %H:%M:%S",
+        "%d-%m-%Y %H:%M",
+        "%d-%m-%Y",
+    )
+    for fmt in formats:
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            continue
+    return datetime.fromisoformat(normalized).replace(tzinfo=None)
 
 
 def _coerce_column_value(value: Any, column_meta: dict[str, Any]) -> Any:
@@ -1005,6 +1060,290 @@ def _bulk_row_from_payload(payload: dict[str, Any]) -> BulkRow:
         oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
         cantidad=_parse_int(payload.get("cantidad") or 1),
     )
+
+
+def _bulk_order_process_row_from_raw(raw: dict[str, Any]) -> BulkOrderProcessRow:
+    return BulkOrderProcessRow(
+        row_number=int(raw.get("_row_number") or raw.get("row_number") or 0),
+        item_legado=_clean_cell_text(raw.get("item") or raw.get("item_legado")),
+        id_proceso=_parse_optional_int(
+            raw.get("id_proceso") or raw.get("proceso") or raw.get("proceso_id")
+        ),
+        id_empleado=_parse_optional_int(
+            raw.get("id_empleado") or raw.get("empleado") or raw.get("empleado_id")
+        ),
+        fecha_inicio=_parse_optional_datetime(raw.get("fecha_inicio")),
+        fecha_finalizado=_parse_optional_datetime(
+            raw.get("fecha_finalizacion")
+            or raw.get("fecha_finalizado")
+            or raw.get("fecha_fin")
+        ),
+        comentarios=_clean_cell_text(
+            raw.get("comentario") or raw.get("comentarios") or raw.get("observaciones")
+        ),
+    )
+
+
+def _bulk_order_process_row_from_payload(
+    payload: dict[str, Any],
+) -> BulkOrderProcessRow:
+    return BulkOrderProcessRow(
+        row_number=int(payload.get("row_number") or 0),
+        item_legado=_clean_cell_text(payload.get("item") or payload.get("item_legado")),
+        id_proceso=_parse_optional_int(payload.get("id_proceso")),
+        id_empleado=_parse_optional_int(payload.get("id_empleado")),
+        fecha_inicio=_parse_optional_datetime(payload.get("fecha_inicio")),
+        fecha_finalizado=_parse_optional_datetime(payload.get("fecha_finalizado")),
+        comentarios=_clean_cell_text(payload.get("comentarios")),
+    )
+
+
+def _serialize_datetime(value: datetime | None) -> str:
+    return value.isoformat(timespec="minutes") if value else ""
+
+
+def parse_order_process_excel(content: bytes) -> list[BulkOrderProcessRow]:
+    parsed_rows = _read_xlsx_rows(content)
+    rows: list[BulkOrderProcessRow] = []
+    for raw in parsed_rows:
+        try:
+            rows.append(_bulk_order_process_row_from_raw(raw))
+        except Exception as error:
+            raise DBCommunicationError(
+                f"Fila {raw.get('_row_number')}: no se pudo leer la fila ({error})"
+            )
+    return rows
+
+
+async def _fetch_items_by_legacy(
+    db: AsyncSession,
+    item_legacy_values: list[str],
+) -> dict[str, dict[str, Any]]:
+    clean_values = [
+        value for value in {_clean_cell_text(item) for item in item_legacy_values} if value
+    ]
+    if not clean_values:
+        return {}
+
+    query = text(
+        """
+        SELECT *
+        FROM data.item
+        WHERE TRIM(item_legado::text) IN :items
+        """
+    ).bindparams(bindparam("items", expanding=True))
+    result = await db.execute(query, {"items": clean_values})
+    return {
+        _clean_cell_text(row.get("item_legado")): dict(row)
+        for row in result.mappings().all()
+    }
+
+
+async def _preview_order_process_row(
+    db: AsyncSession,
+    row: BulkOrderProcessRow,
+    items_by_legacy: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    items = items_by_legacy
+    if items is None:
+        items = await _fetch_items_by_legacy(db, [row.item_legado])
+
+    item = items.get(row.item_legado)
+    missing: list[str] = []
+    errors: list[str] = []
+
+    if not row.item_legado:
+        missing.append("item")
+        errors.append("Falta item")
+    elif not item:
+        missing.append("item")
+        errors.append("El item no existe")
+    if row.id_proceso is None:
+        missing.append("id_proceso")
+        errors.append("Falta ID proceso")
+
+    return {
+        "row_number": row.row_number,
+        "item": row.item_legado,
+        "id_proceso": row.id_proceso,
+        "id_empleado": row.id_empleado,
+        "fecha_inicio": _serialize_datetime(row.fecha_inicio),
+        "fecha_finalizado": _serialize_datetime(row.fecha_finalizado),
+        "comentarios": row.comentarios,
+        "resolved": {
+            "item_id": item.get("id") if item else None,
+        },
+        "missing": missing,
+        "errors": errors,
+        "omitted": False,
+        "status": "ready" if not missing else "invalid",
+    }
+
+
+async def preview_order_process_import(
+    db: AsyncSession,
+    content: bytes,
+) -> dict[str, Any]:
+    rows = parse_order_process_excel(content)
+    items_by_legacy = await _fetch_items_by_legacy(
+        db,
+        [row.item_legado for row in rows],
+    )
+    preview_rows = [
+        await _preview_order_process_row(db, row, items_by_legacy) for row in rows
+    ]
+    return {
+        "rows": preview_rows,
+        "summary": {
+            "total": len(preview_rows),
+            "ready": sum(1 for row in preview_rows if row["status"] == "ready"),
+            "invalid": sum(1 for row in preview_rows if row["status"] != "ready"),
+            "omitted": 0,
+        },
+    }
+
+
+async def revalidate_order_process_row(
+    db: AsyncSession,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    row = _bulk_order_process_row_from_payload(payload)
+    next_row = await _preview_order_process_row(db, row)
+    next_row["omitted"] = bool(payload.get("omitted"))
+    if next_row["omitted"]:
+        next_row["status"] = "omitted"
+    return next_row
+
+
+async def commit_order_process_import(
+    db: AsyncSession,
+    rows_payload: list[dict[str, Any]],
+) -> dict[str, Any]:
+    columns = await _table_columns_map(db, "ordenproceso")
+    available_columns = set(columns)
+    process_column = _first_existing_column(
+        available_columns,
+        ("id_proceso", "proceso_id", "id_prtoceso"),
+    )
+    employee_column = _first_existing_column(
+        available_columns,
+        ("id_empleado", "empleado_id", "id_persona", "persona_id"),
+    )
+    item_column = _first_existing_column(
+        available_columns,
+        ("id_item", "item_id", "items_id"),
+    )
+    start_column = _first_existing_column(
+        available_columns,
+        ("fecha_inicio", "fecha_iniciado", "fecha"),
+    )
+    finished_column = _first_existing_column(
+        available_columns,
+        ("fecha_finalizado", "fecha_finalizacion", "fecha_fin"),
+    )
+    comment_column = _first_existing_column(
+        available_columns,
+        ("comentarios", "comentario", "observaciones"),
+    )
+
+    if not item_column or not process_column:
+        raise DBCommunicationError("ordenproceso no tiene columnas de item/proceso")
+
+    active_payloads = [
+        payload for payload in rows_payload if not bool(payload.get("omitted"))
+    ]
+    rows = [_bulk_order_process_row_from_payload(payload) for payload in active_payloads]
+    items_by_legacy = await _fetch_items_by_legacy(db, [row.item_legado for row in rows])
+
+    inserted = 0
+    updated = 0
+    omitted = len(rows_payload) - len(active_payloads)
+
+    try:
+        for row in rows:
+            row_number = row.row_number or "?"
+            item = items_by_legacy.get(row.item_legado)
+            if not item:
+                raise DBCommunicationError(f"Fila {row_number}: el item no existe")
+            if row.id_proceso is None:
+                raise DBCommunicationError(f"Fila {row_number}: falta ID proceso")
+
+            item_id = item.get("id")
+            result = await db.execute(
+                text(
+                    f"""
+                    SELECT *
+                    FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('ordenproceso', field_name='order_process_table')}
+                    WHERE {_quote_identifier(item_column, field_name='item_column')} = :item_id
+                      AND {_quote_identifier(process_column, field_name='process_column')} = :process_id
+                    LIMIT 1
+                    """
+                ),
+                {"item_id": item_id, "process_id": row.id_proceso},
+            )
+            existing = dict(result.mappings().first() or {})
+
+            row_data: dict[str, Any] = {
+                item_column: item_id,
+                process_column: row.id_proceso,
+            }
+            if employee_column:
+                row_data[employee_column] = row.id_empleado
+            if start_column:
+                row_data[start_column] = row.fecha_inicio
+            if finished_column:
+                row_data[finished_column] = row.fecha_finalizado
+            if comment_column:
+                row_data[comment_column] = row.comentarios
+
+            if existing:
+                primary_key = _first_existing_column(
+                    set(existing),
+                    ("id", "id_ordenproceso", "ordenproceso_id"),
+                )
+                if not primary_key:
+                    raise DBCommunicationError(
+                        f"Fila {row_number}: no se pudo identificar la fila existente"
+                    )
+                filtered = {
+                    key: _coerce_column_value(value, columns[key])
+                    for key, value in row_data.items()
+                    if key in columns
+                }
+                assignments = ", ".join(
+                    f"{_quote_identifier(column, field_name='bulk_column')} = :{column}"
+                    for column in filtered
+                )
+                params = {
+                    **filtered,
+                    "__existing_id": existing.get(primary_key),
+                }
+                await db.execute(
+                    text(
+                        f"""
+                        UPDATE {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('ordenproceso', field_name='order_process_table')}
+                        SET {assignments}
+                        WHERE {_quote_identifier(primary_key, field_name='primary_key')} = :__existing_id
+                        """
+                    ),
+                    params,
+                )
+                updated += 1
+            else:
+                await _insert_dynamic_row(db, "ordenproceso", row_data)
+                inserted += 1
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    return {
+        "status": "success",
+        "inserted": inserted,
+        "updated": updated,
+        "omitted": omitted,
+    }
 
 
 async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dict[str, Any]:

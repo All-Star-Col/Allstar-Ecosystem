@@ -15,8 +15,11 @@ from src.schemas.models import (
 )
 from src.services import forms
 from src.services.forms_bulk_upload import (
+    commit_order_process_import,
     commit_purchase_order_import,
+    preview_order_process_import,
     preview_purchase_order_import,
+    revalidate_order_process_row,
     revalidate_purchase_order_product,
 )
 from src.services.shared import build_etag_response
@@ -35,6 +38,14 @@ class BulkPurchaseOrderCommitRequest(BaseModel):
 
 
 class BulkPurchaseOrderRowRequest(BaseModel):
+    row: dict[str, Any]
+
+
+class BulkOrderProcessCommitRequest(BaseModel):
+    rows: list[dict[str, Any]]
+
+
+class BulkOrderProcessRowRequest(BaseModel):
     row: dict[str, Any]
 
 
@@ -407,6 +418,55 @@ async def revalidate_bulk_purchase_order_product_endpoint(
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("Error revalidating bulk purchase order product: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/bulk/order-process/preview")
+async def preview_bulk_order_process_endpoint(
+    file: UploadFile = File(...),
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not (file.filename or "").lower().endswith(".xlsx"):
+        raise HTTPException(status_code=422, detail="El archivo debe ser .xlsx")
+
+    try:
+        content = await file.read()
+        return await preview_order_process_import(db, content)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error previewing bulk order process: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/bulk/order-process/revalidate-row")
+async def revalidate_bulk_order_process_row_endpoint(
+    payload: BulkOrderProcessRowRequest,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await revalidate_order_process_row(db, payload.row)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error revalidating bulk order process row: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post("/bulk/order-process/commit")
+async def commit_bulk_order_process_endpoint(
+    payload: BulkOrderProcessCommitRequest,
+    _current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await commit_order_process_import(db, payload.rows)
+    except forms.DBCommunicationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error committing bulk order process: %s", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 

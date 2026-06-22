@@ -177,6 +177,8 @@ ORDER_PROCESS_TABLE_NAME_CANDIDATES = {
     "proceso_items",
     "procesos_items",
 }
+PROCESS_TABLE_NAME_CANDIDATES = {"proceso", "procesos"}
+EMPLOYEE_TABLE_NAME_CANDIDATES = {"empleado", "empleados"}
 UPHOLSTERY_HISTORY_TABLES = (
     ("historialconsumotela", "Historial consumo tela"),
     ("historialconsumomaterial", "Historial consumo material"),
@@ -2109,6 +2111,30 @@ class DataViewerService:
                         fallback_table_candidates=ITEM_TABLE_NAME_CANDIDATES,
                         fallback_value_candidates=("id", "id_item", "item_id", "item_legado"),
                     )
+            if not fk_info and not table_name_candidates.isdisjoint(ORDER_PROCESS_TABLE_NAME_CANDIDATES):
+                if normalized_column_name in {"id_proceso", "proceso_id", "id_prtoceso"}:
+                    fk_info = await _resolve_reference_from_column(
+                        self.db,
+                        schema_name=config.schema_name,
+                        source_table=config.table_name,
+                        source_column=column_name,
+                        fallback_table_candidates=PROCESS_TABLE_NAME_CANDIDATES,
+                        fallback_value_candidates=("id", "id_proceso", "proceso_id"),
+                    )
+                elif normalized_column_name in {
+                    "id_empleado",
+                    "empleado_id",
+                    "id_persona",
+                    "persona_id",
+                }:
+                    fk_info = await _resolve_reference_from_column(
+                        self.db,
+                        schema_name=config.schema_name,
+                        source_table=config.table_name,
+                        source_column=column_name,
+                        fallback_table_candidates=EMPLOYEE_TABLE_NAME_CANDIDATES,
+                        fallback_value_candidates=("id", "id_empleado", "empleado_id"),
+                    )
             if fk_info:
                 try:
                     preserve_raw_fk_id = self._should_preserve_raw_fk_id(config, column_name)
@@ -2195,6 +2221,100 @@ class DataViewerService:
             allowed_columns.add("costo")
             display_select_sql["costo"] = f"{item_cost_expression} AS {_quote_identifier('costo')}"
             column_expression_sql["costo"] = item_cost_expression
+
+        item_order_expressions = await self._build_item_order_related_expressions(
+            config,
+            allowed_columns,
+        )
+        item_product_expression = item_order_expressions.get("producto")
+        if item_product_expression and "producto" not in allowed_columns:
+            product_column = {
+                "name": "producto",
+                "type": "text",
+                "nullable": True,
+                "visible": True,
+                "editable": False,
+                "required": False,
+                "max_length": None,
+                "enum_values": None,
+                "read_only_reason": "DERIVED_ORDER_PRODUCT",
+                "raw_value_column": None,
+            }
+            detail_index = next(
+                (
+                    index
+                    for index, column in enumerate(columns)
+                    if str(column.get("name") or "").lower() == "detalle"
+                ),
+                len(columns),
+            )
+            columns.insert(detail_index, product_column)
+            allowed_columns.add("producto")
+            text_columns.add("producto")
+            display_select_sql["producto"] = (
+                f"{item_product_expression} AS {_quote_identifier('producto')}"
+            )
+            column_expression_sql["producto"] = item_product_expression
+
+        if item_product_expression and "producto" in allowed_columns:
+            display_select_sql["producto"] = (
+                f"{item_product_expression} AS {_quote_identifier('producto')}"
+            )
+            column_expression_sql["producto"] = item_product_expression
+            text_columns.add("producto")
+            editable_columns.discard("producto")
+            for column in columns:
+                if str(column.get("name") or "").lower() == "producto":
+                    column["editable"] = False
+                    column["read_only_reason"] = (
+                        column.get("read_only_reason") or "DERIVED_ORDER_PRODUCT"
+                    )
+            product_index = next(
+                (
+                    index
+                    for index, column in enumerate(columns)
+                    if str(column.get("name") or "").lower() == "producto"
+                ),
+                None,
+            )
+            detail_index = next(
+                (
+                    index
+                    for index, column in enumerate(columns)
+                    if str(column.get("name") or "").lower() == "detalle"
+                ),
+                None,
+            )
+            if (
+                product_index is not None
+                and detail_index is not None
+                and product_index > detail_index
+            ):
+                product_column = columns.pop(product_index)
+                detail_index = next(
+                    (
+                        index
+                        for index, column in enumerate(columns)
+                        if str(column.get("name") or "").lower() == "detalle"
+                    ),
+                    len(columns),
+                )
+                columns.insert(detail_index, product_column)
+
+        item_detail_expression = item_order_expressions.get("detalle")
+        if item_detail_expression and "detalle" in allowed_columns:
+            display_select_sql["detalle"] = (
+                f"{item_detail_expression} AS {_quote_identifier('detalle')}"
+            )
+            column_expression_sql["detalle"] = item_detail_expression
+            text_columns.add("detalle")
+            editable_columns.discard("detalle")
+            for column in columns:
+                if str(column.get("name") or "").lower() == "detalle":
+                    column["editable"] = False
+                    column["read_only_reason"] = (
+                        column.get("read_only_reason") or "DERIVED_ORDER_DETAIL"
+                    )
 
         has_pk = bool(pk_columns)
 
@@ -2759,6 +2879,135 @@ class DataViewerService:
             "), NULL)"
         )
 
+    async def _build_item_order_related_expressions(
+        self,
+        config: TableConfig,
+        allowed_columns: set[str],
+    ) -> dict[str, str]:
+        table_name_candidates = {
+            config.table_name.lower(),
+            config.full_table_name.lower().split(".")[-1],
+            config.table_id.lower(),
+            (config.display_name or "").strip().lower(),
+        }
+        if table_name_candidates.isdisjoint(ITEM_TABLE_NAME_CANDIDATES):
+            return {}
+
+        lowered_allowed = {column.lower(): column for column in allowed_columns}
+        item_order_column = next(
+            (
+                lowered_allowed[column]
+                for column in ITEM_ORDER_COLUMN_PRIORITY
+                if column in lowered_allowed
+            ),
+            None,
+        )
+        if not item_order_column:
+            return {}
+
+        order_ref = await _resolve_reference_from_column(
+            self.db,
+            schema_name=config.schema_name,
+            source_table=config.table_name,
+            source_column=item_order_column,
+            fallback_table_candidates=ORDER_TABLE_NAME_CANDIDATES,
+            fallback_value_candidates=(
+                item_order_column.lower(),
+                "id",
+                "id_orden_compra",
+                "orden_compra_id",
+                "ordencompra_id",
+                "oc",
+            ),
+        )
+        if not order_ref:
+            return {}
+
+        order_columns = await _get_table_columns(
+            self.db,
+            schema_name=order_ref["referenced_schema"],
+            table_name=order_ref["referenced_table"],
+        )
+        order_schema = _quote_identifier(order_ref["referenced_schema"])
+        order_table = _quote_identifier(order_ref["referenced_table"])
+        order_value = _quote_identifier(order_ref["referenced_column"])
+        item_order_ref = _column_ref(item_order_column)
+
+        expressions: dict[str, str] = {}
+        order_detail_column = _choose_existing_column(
+            order_columns,
+            ("detalle", "descripcion", "observaciones"),
+        )
+        if order_detail_column:
+            order_detail = _quote_identifier(order_detail_column)
+            expressions["detalle"] = (
+                "COALESCE(("
+                f"SELECT NULLIF(TRIM(order_ref.{order_detail}::text), '') "
+                f"FROM {order_schema}.{order_table} order_ref "
+                f"WHERE TRIM(order_ref.{order_value}::text) = TRIM({item_order_ref}::text) "
+                "LIMIT 1"
+                "), NULL)"
+            )
+
+        order_product_column = _choose_existing_column(
+            order_columns,
+            ORDER_PRODUCT_COLUMN_PRIORITY,
+        )
+        if not order_product_column:
+            return expressions
+
+        order_product = _quote_identifier(order_product_column)
+        raw_order_product_expression = (
+            "COALESCE(("
+            f"SELECT NULLIF(TRIM(order_ref.{order_product}::text), '') "
+            f"FROM {order_schema}.{order_table} order_ref "
+            f"WHERE TRIM(order_ref.{order_value}::text) = TRIM({item_order_ref}::text) "
+            "LIMIT 1"
+            "), NULL)"
+        )
+
+        product_ref = await _resolve_reference_from_column(
+            self.db,
+            schema_name=order_ref["referenced_schema"],
+            source_table=order_ref["referenced_table"],
+            source_column=order_product_column,
+            fallback_table_candidates=PRODUCT_TABLE_NAME_CANDIDATES,
+            fallback_value_candidates=PRODUCT_VALUE_COLUMN_PRIORITY,
+        )
+        if not product_ref:
+            expressions["producto"] = raw_order_product_expression
+            return expressions
+
+        product_columns = await _get_table_columns(
+            self.db,
+            schema_name=product_ref["referenced_schema"],
+            table_name=product_ref["referenced_table"],
+        )
+        product_label_column = _choose_existing_column(
+            product_columns,
+            ("nombre", "producto", "descripcion", "sku", "referencia"),
+        )
+        if not product_label_column:
+            expressions["producto"] = raw_order_product_expression
+            return expressions
+
+        product_schema = _quote_identifier(product_ref["referenced_schema"])
+        product_table = _quote_identifier(product_ref["referenced_table"])
+        product_value = _quote_identifier(product_ref["referenced_column"])
+        product_label = _quote_identifier(product_label_column)
+
+        expressions["producto"] = (
+            "COALESCE(("
+            f"SELECT NULLIF(TRIM(product_ref.{product_label}::text), '') "
+            f"FROM {order_schema}.{order_table} order_ref "
+            f"JOIN {product_schema}.{product_table} product_ref "
+            f"ON TRIM(product_ref.{product_value}::text) = TRIM(order_ref.{order_product}::text) "
+            f"WHERE TRIM(order_ref.{order_value}::text) = TRIM({item_order_ref}::text) "
+            "LIMIT 1"
+            f"), {raw_order_product_expression})"
+        )
+        return expressions
+
     @staticmethod
     def _should_preserve_raw_fk_id(config: TableConfig, column_name: str) -> bool:
         table_name_candidates = {
@@ -2780,11 +3029,7 @@ class DataViewerService:
         if normalized_column in ITEM_REFERENCE_COLUMN_PRIORITY and normalized_column != "id":
             return False
 
-        return (
-            normalized_column == "id"
-            or normalized_column.startswith("id_")
-            or normalized_column.endswith("_id")
-        )
+        return normalized_column == "id"
 
     def _build_where_clause(
         self,

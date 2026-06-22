@@ -80,6 +80,38 @@ export interface BulkPurchaseOrderCommitAPI {
     created_products: number;
 }
 
+export interface BulkOrderProcessRowAPI {
+    row_number: number;
+    item: string;
+    id_proceso: number | null;
+    id_empleado: number | null;
+    fecha_inicio: string;
+    fecha_finalizado: string;
+    comentarios: string;
+    resolved: Record<string, string | number | null | undefined>;
+    missing: string[];
+    errors: string[];
+    omitted?: boolean;
+    status: "ready" | "invalid" | "omitted";
+}
+
+export interface BulkOrderProcessPreviewAPI {
+    rows: BulkOrderProcessRowAPI[];
+    summary: {
+        total: number;
+        ready: number;
+        invalid: number;
+        omitted: number;
+    };
+}
+
+export interface BulkOrderProcessCommitAPI {
+    status: string;
+    inserted: number;
+    updated: number;
+    omitted: number;
+}
+
 export interface SalesAssistantPreorderAPI {
     id: number;
     correo_id?: string | null;
@@ -834,6 +866,86 @@ export async function revalidateBulkPurchaseOrderProduct(
     }
 
     return (await response.json()) as BulkPurchaseOrderRowAPI;
+}
+
+export async function previewBulkOrderProcess(
+    file: File,
+): Promise<BulkOrderProcessPreviewAPI> {
+    const token = getToken();
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/bulk/order-process/preview`,
+        {
+            method: "POST",
+            headers: {
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: formData,
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo prevalidar el archivo: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as BulkOrderProcessPreviewAPI;
+}
+
+export async function revalidateBulkOrderProcessRow(
+    row: BulkOrderProcessRowAPI,
+): Promise<BulkOrderProcessRowAPI> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/bulk/order-process/revalidate-row`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ row }),
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo validar la fila: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as BulkOrderProcessRowAPI;
+}
+
+export async function commitBulkOrderProcess(params: {
+    rows: BulkOrderProcessRowAPI[];
+}): Promise<BulkOrderProcessCommitAPI> {
+    const token = getToken();
+    const response = await fetch(
+        `${API_SERVER}/workspace/forms/bulk/order-process/commit`,
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ rows: params.rows }),
+        },
+    );
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(
+            errorData?.detail || `No se pudo cargar orden proceso: ${response.statusText}`,
+        );
+    }
+
+    return (await response.json()) as BulkOrderProcessCommitAPI;
 }
 
 export async function fetchSalesAssistantPreorders(
