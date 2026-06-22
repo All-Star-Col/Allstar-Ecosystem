@@ -332,6 +332,15 @@ class RowNotFoundError(DataViewerError):
         )
 
 
+class InvalidOrderProcessReleaseError(DataViewerError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            detail=detail,
+            code="VALIDATION_ERROR",
+            status_code=422,
+        )
+
+
 class ProductMergeConflictError(DataViewerError):
     def __init__(
         self,
@@ -367,6 +376,7 @@ class TableConfig:
     can_update: bool | None
     can_insert: bool | None
     can_delete: bool | None
+    can_release_order_process: bool | None = None
     view_order_status: str | None = None
     view_row_status: str | None = None
     view_item_order_status: str | None = None
@@ -384,6 +394,7 @@ class TableMetadata:
     can_update: bool
     can_insert: bool
     can_delete: bool
+    can_release_order_process: bool
     stable_order_column: str | None
     default_order_column: str | None
     display_select_sql: dict[str, str]
@@ -893,6 +904,7 @@ class DataViewerService:
                     can_update=metadata.can_update,
                     can_insert=metadata.can_insert,
                     can_delete=metadata.can_delete,
+                    can_release_order_process=metadata.can_release_order_process,
                     pk_columns=metadata.pk_columns,
                     columns=filtered_columns,
                 )
@@ -938,10 +950,17 @@ class DataViewerService:
             raise DBCommunicationError(f"Error running DataViewer query: {error}")
 
         has_more = len(raw_rows) > request_data.limit
-        rows = [
-            {column: row.get(column) for column in plan.selected_columns}
-            for row in raw_rows[: request_data.limit]
-        ]
+        rows = []
+        for row in raw_rows[: request_data.limit]:
+            row_payload = {column: row.get(column) for column in plan.selected_columns}
+            row_payload.update(
+                {
+                    column: value
+                    for column, value in row.items()
+                    if str(column).startswith("__raw_")
+                }
+            )
+            rows.append(row_payload)
 
         total_count: int | None = None
         if request_data.include_total:
@@ -1047,6 +1066,153 @@ class DataViewerService:
             row=row_payload,
             updated_columns=update_columns,
         )
+
+    async def release_order_process(
+        self,
+        *,
+        table_id: str,
+        pk: dict[str, Any],
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        allowlist = await self._get_allowlist_map(user_id=user_id)
+        table_config = allowlist.get(table_id)
+        if not table_config:
+            raise TableNotConfiguredError(table_id)
+
+        metadata = await self._get_table_metadata(table_config)
+        if not metadata.has_pk:
+            raise NoPkDefinedError(table_id)
+        if not metadata.can_release_order_process:
+            raise InvalidOrderProcessReleaseError(
+                "El rol no tiene permiso para liberar ordenes de proceso"
+            )
+
+        table_candidates = {
+            table_config.table_id.lower(),
+            table_config.table_name.lower(),
+            table_config.full_table_name.lower().split(".")[-1],
+        }
+        if table_candidates.isdisjoint(ORDER_PROCESS_TABLE_NAME_CANDIDATES):
+            raise InvalidOrderProcessReleaseError(
+                "La accion liberar solo aplica para orden proceso pendiente"
+            )
+
+        columns_by_lower = {
+            column["name"].lower(): column
+            for column in metadata.columns
+            if column.get("name")
+        }
+        process_column = self._first_metadata_column(
+            columns_by_lower,
+            ("id_proceso", "proceso_id", "id_prtoceso"),
+        )
+        item_column = self._first_metadata_column(
+            columns_by_lower,
+            ("id_item", "item_id", "items_id", "item", "item_legado"),
+        )
+        started_column = self._first_metadata_column(
+            columns_by_lower,
+            ("fecha_inicio", "fecha_iniciado", "fecha", "fecha_creacion", "created_at"),
+        )
+        finished_column = self._first_metadata_column(
+            columns_by_lower,
+            ("fecha_finalizado", "fecha_finalizacion", "fecha_fin"),
+        )
+        if not process_column or not item_column or not started_column or not finished_column:
+            raise InvalidOrderProcessReleaseError(
+                "ordenproceso debe tener columnas de item, proceso, fecha_inicio y fecha_finalizado"
+            )
+
+        normalized_pk = self._validate_pk_payload(pk, metadata)
+        table_ref = (
+            f"{_quote_identifier(table_config.schema_name)}."
+            f"{_quote_identifier(table_config.table_name)}"
+        )
+        where_clauses: list[str] = []
+        query_params: dict[str, Any] = {}
+        for index, pk_column in enumerate(metadata.pk_columns):
+            pk_key = f"pk_value_{index}"
+            where_clauses.append(f"{_quote_identifier(pk_column)} = :{pk_key}")
+            query_params[pk_key] = normalized_pk[pk_column]
+        where_sql = " AND ".join(where_clauses)
+
+        selected_columns = [
+            process_column,
+            item_column,
+            finished_column,
+            *metadata.pk_columns,
+        ]
+        selected_sql = ", ".join(
+            _quote_identifier(column) for column in dict.fromkeys(selected_columns)
+        )
+        current_time_sql = self._current_temporal_sql(columns_by_lower[started_column.lower()])
+        finished_time_sql = self._current_temporal_sql(columns_by_lower[finished_column.lower()])
+
+        try:
+            current_result = await self.db.execute(
+                text(
+                    f"""
+                    SELECT {selected_sql}
+                    FROM {table_ref}
+                    WHERE {where_sql}
+                    FOR UPDATE
+                    """
+                ),
+                query_params,
+            )
+            current_row = current_result.mappings().first()
+            if not current_row:
+                raise RowNotFoundError(table_id)
+
+            if int(current_row[process_column]) != 6:
+                raise InvalidOrderProcessReleaseError(
+                    "Solo se pueden liberar filas que esten en proceso 6"
+                )
+            if current_row[finished_column] is not None:
+                raise InvalidOrderProcessReleaseError(
+                    "La fila ya tiene fecha de finalizado"
+                )
+
+            await self.db.execute(
+                text(
+                    f"""
+                    UPDATE {table_ref}
+                    SET {_quote_identifier(finished_column)} = {finished_time_sql}
+                    WHERE {where_sql}
+                    """
+                ),
+                query_params,
+            )
+
+            await self._sync_integer_id_sequence(
+                table_config=table_config,
+                metadata=metadata,
+            )
+            insert_sql = (
+                f"INSERT INTO {table_ref} "
+                f"({_quote_identifier(process_column)}, {_quote_identifier(item_column)}, {_quote_identifier(started_column)}) "
+                f"VALUES (:next_process, :item_value, {current_time_sql}) "
+                "RETURNING *"
+            )
+            insert_result = await self.db.execute(
+                text(insert_sql),
+                {"next_process": 2, "item_value": current_row[item_column]},
+            )
+            inserted_row = dict(insert_result.mappings().first() or {})
+            await self.db.commit()
+        except DataViewerError:
+            await self.db.rollback()
+            raise
+        except Exception as error:
+            await self.db.rollback()
+            raise DBCommunicationError(f"Error liberando ordenproceso: {error}")
+
+        return {
+            "status": "success",
+            "released_pk": normalized_pk,
+            "next_process": 2,
+            "inserted_row": inserted_row,
+        }
 
     def _is_product_table_config(self, table_config: TableConfig) -> bool:
         candidates = {
@@ -1490,7 +1656,7 @@ class DataViewerService:
                 f"Error loading DataViewer allowlist from workspace.ui_config_tablas: {error}"
             )
 
-        role_permissions_by_table: dict[str, tuple[bool, bool]] = {}
+        role_permissions_by_table: dict[str, dict[str, bool]] = {}
         if user_id:
             try:
                 role_id = await _get_user_role_id(self.db, user_id=user_id)
@@ -1514,10 +1680,11 @@ class DataViewerService:
                         {"role_id": role_id},
                     )
                     role_permissions_by_table = {
-                        str(row["table_id"]).strip(): (
-                            bool(row["is_visible"]),
-                            bool(row["can_edit"]),
-                        )
+                        str(row["table_id"]).strip(): {
+                            "visible": bool(row["is_visible"]),
+                            "can_edit": bool(row["can_edit"]),
+                            "can_release_order_process": False,
+                        }
                         for row in role_permissions_result.mappings().all()
                         if row.get("table_id") is not None
                     }
@@ -1535,12 +1702,32 @@ class DataViewerService:
                         )
                     )
                     if data_viewer_permissions_available.scalar_one_or_none() is not None:
+                        data_viewer_columns_result = await self.db.execute(
+                            text(
+                                """
+                                SELECT column_name
+                                FROM information_schema.columns
+                                WHERE table_schema = 'workspace'
+                                  AND table_name = 'role_data_viewer_tables'
+                                """
+                            )
+                        )
+                        data_viewer_columns = {
+                            str(row["column_name"])
+                            for row in data_viewer_columns_result.mappings().all()
+                        }
+                        release_select = (
+                            "COALESCE(can_release_order_process, false) AS can_release_order_process"
+                            if "can_release_order_process" in data_viewer_columns
+                            else "false AS can_release_order_process"
+                        )
                         data_viewer_permissions_query = text(
-                            """
+                            f"""
                             SELECT
                                 CAST(table_id AS TEXT) AS table_id,
                                 COALESCE(visible, false) AS is_visible,
-                                COALESCE(can_edit, false) AS can_edit
+                                COALESCE(can_edit, false) AS can_edit,
+                                {release_select}
                             FROM workspace.role_data_viewer_tables
                             WHERE role_id = :role_id
                             """
@@ -1551,10 +1738,13 @@ class DataViewerService:
                         )
                         role_permissions_by_table.update(
                             {
-                                str(row["table_id"]).strip(): (
-                                    bool(row["is_visible"]),
-                                    bool(row["can_edit"]),
-                                )
+                                str(row["table_id"]).strip(): {
+                                    "visible": bool(row["is_visible"]),
+                                    "can_edit": bool(row["can_edit"]),
+                                    "can_release_order_process": bool(
+                                        row["can_release_order_process"]
+                                    ),
+                                }
                                 for row in data_viewer_permissions_result.mappings().all()
                                 if row.get("table_id") is not None
                             }
@@ -1575,7 +1765,7 @@ class DataViewerService:
                 table_id,
                 role_permissions_by_table.get(ui_config_id),
             )
-            if role_permissions is not None and not role_permissions[0]:
+            if role_permissions is not None and not role_permissions["visible"]:
                 continue
 
             full_table_name = (row.get("nombre_tabla_sql") or "").strip()
@@ -1613,11 +1803,16 @@ class DataViewerService:
                 default_order_column=default_order_column,
                 can_update=(
                     False
-                    if role_permissions is not None and not role_permissions[1]
+                    if role_permissions is not None and not role_permissions["can_edit"]
                     else _to_optional_bool(row.get("can_update"))
                 ),
                 can_insert=_to_optional_bool(row.get("can_insert")),
                 can_delete=_to_optional_bool(row.get("can_delete")),
+                can_release_order_process=(
+                    role_permissions.get("can_release_order_process", False)
+                    if role_permissions is not None
+                    else False
+                ),
             )
 
         has_order_config = any(
@@ -1643,6 +1838,7 @@ class DataViewerService:
                     can_update=True,
                     can_insert=False,
                     can_delete=False,
+                    can_release_order_process=False,
                 )
 
         expanded_allowlist = dict(allowlist)
@@ -1676,6 +1872,7 @@ class DataViewerService:
                     can_update=table_config.can_update,
                     can_insert=table_config.can_insert,
                     can_delete=table_config.can_delete,
+                    can_release_order_process=table_config.can_release_order_process,
                     view_order_status=status_value,
                 )
             expanded_allowlist.pop(table_config.table_id, None)
@@ -1714,6 +1911,7 @@ class DataViewerService:
                     can_update=table_config.can_update,
                     can_insert=table_config.can_insert,
                     can_delete=table_config.can_delete,
+                    can_release_order_process=table_config.can_release_order_process,
                     view_row_status=row_status,
                 )
 
@@ -1752,6 +1950,7 @@ class DataViewerService:
                     can_update=table_config.can_update,
                     can_insert=table_config.can_insert,
                     can_delete=table_config.can_delete,
+                    can_release_order_process=table_config.can_release_order_process,
                     view_item_order_status=item_order_status,
                 )
 
@@ -1771,6 +1970,7 @@ class DataViewerService:
                 can_update=False,
                 can_insert=False,
                 can_delete=False,
+                can_release_order_process=False,
             )
 
         await self._sync_purchase_order_statuses(expanded_allowlist)
@@ -1780,11 +1980,15 @@ class DataViewerService:
                 role_permissions = role_permissions_by_table.get(table_id)
                 if role_permissions is None:
                     continue
-                if not role_permissions[0]:
+                if not role_permissions["visible"]:
                     expanded_allowlist.pop(table_id, None)
                     continue
-                if not role_permissions[1]:
+                if not role_permissions["can_edit"]:
                     table_config.can_update = False
+                table_config.can_release_order_process = role_permissions.get(
+                    "can_release_order_process",
+                    False,
+                )
 
         return expanded_allowlist
 
@@ -2167,7 +2371,7 @@ class DataViewerService:
                         )
                         column_expression_sql[column_name] = display_expression
                         text_columns.add(column_name)
-                        if is_product_component_column:
+                        if is_product_component_column or not preserve_raw_fk_id:
                             raw_value_column = f"__raw_{column_name}"
                             raw_value_select_sql[column_name] = (
                                 f"{_column_ref(column_name)} AS {_quote_identifier(raw_value_column)}"
@@ -2194,7 +2398,15 @@ class DataViewerService:
                     "enum_values": enum_values_by_column.get(normalized_column_name),
                     "read_only_reason": read_only_reason,
                     "raw_value_column": (
-                        f"__raw_{column_name}" if is_product_component_column else None
+                        f"__raw_{column_name}"
+                        if (
+                            is_product_component_column
+                            or (
+                                fk_info
+                                and not self._should_preserve_raw_fk_id(config, column_name)
+                            )
+                        )
+                        else None
                     ),
                 }
             )
@@ -2342,6 +2554,11 @@ class DataViewerService:
 
         can_insert = config.can_insert if config.can_insert is not None else False
         can_delete = config.can_delete if config.can_delete is not None else False
+        can_release_order_process = (
+            config.can_release_order_process
+            if config.can_release_order_process is not None
+            else False
+        )
 
         if not can_update:
             editable_columns = set()
@@ -2363,6 +2580,7 @@ class DataViewerService:
             can_update=can_update,
             can_insert=can_insert,
             can_delete=can_delete,
+            can_release_order_process=can_release_order_process,
             stable_order_column=stable_order_column,
             default_order_column=default_order_column,
             display_select_sql=display_select_sql,
@@ -3294,6 +3512,82 @@ class DataViewerService:
             )
 
         return normalized_changes
+
+    @staticmethod
+    def _first_metadata_column(
+        columns_by_lower: dict[str, dict[str, Any]],
+        candidates: tuple[str, ...],
+    ) -> str | None:
+        for candidate in candidates:
+            column = columns_by_lower.get(candidate)
+            if column and column.get("name"):
+                return str(column["name"])
+        return None
+
+    @staticmethod
+    def _current_temporal_sql(column: dict[str, Any]) -> str:
+        data_type = str(column.get("type") or "").lower()
+        if data_type == "date":
+            return "CURRENT_DATE"
+        return "CURRENT_TIMESTAMP"
+
+    async def _sync_integer_id_sequence(
+        self,
+        *,
+        table_config: TableConfig,
+        metadata: TableMetadata,
+    ) -> None:
+        id_column = next(
+            (
+                column
+                for column in metadata.columns
+                if column["name"].lower() == "id" and "int" in str(column.get("type") or "").lower()
+            ),
+            None,
+        )
+        if not id_column:
+            return
+
+        await self.db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {
+                "lock_key": (
+                    f"{table_config.schema_name}.{table_config.table_name}."
+                    f"{id_column['name']}.sequence"
+                )
+            },
+        )
+        table_ref = (
+            f"{_quote_identifier(table_config.schema_name)}."
+            f"{_quote_identifier(table_config.table_name)}"
+        )
+        column_ref = _quote_identifier(str(id_column["name"]))
+        await self.db.execute(
+            text(
+                f"""
+                WITH sequence_info AS (
+                    SELECT pg_get_serial_sequence(:qualified_table, :column_name) AS sequence_name
+                ),
+                table_state AS (
+                    SELECT MAX({column_ref}) AS max_id
+                    FROM {table_ref}
+                )
+                SELECT CASE
+                    WHEN sequence_info.sequence_name IS NULL THEN NULL
+                    ELSE setval(
+                        sequence_info.sequence_name::regclass,
+                        GREATEST(COALESCE(table_state.max_id, 0), 1),
+                        table_state.max_id IS NOT NULL
+                    )
+                END
+                FROM sequence_info, table_state
+                """
+            ),
+            {
+                "qualified_table": f"{table_config.schema_name}.{table_config.table_name}",
+                "column_name": str(id_column["name"]),
+            },
+        )
 
     def _build_returning_sql(self, metadata: TableMetadata) -> str:
         table_columns = [

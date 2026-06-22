@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.concurrency import run_in_threadpool
 
@@ -58,6 +58,7 @@ MAX_LOOKUP_LIMIT = 200
 TELA_LOOKUP_FIELDS = ("nombre", "referencia")
 SYNTHETIC_PRODUCTION_CATEGORY_ID = 900001
 SYNTHETIC_ORDER_PROCESS_TABLE_ID = 900101
+ORDER_PROCESS_SEQUENCE = (1, 6, 2, 3, 4, 5)
 FINALIZED_STATUS_VALUES = (
     "finalizado",
     "finalizada",
@@ -2396,6 +2397,13 @@ def _display_process_name(process_id: int, row: dict[str, Any] | None = None) ->
     return f"Proceso {process_id}"
 
 
+def _order_process_ids_through(up_to_process: int) -> list[int]:
+    if up_to_process not in ORDER_PROCESS_SEQUENCE:
+        allowed = ", ".join(str(value) for value in ORDER_PROCESS_SEQUENCE)
+        raise DBCommunicationError(f"El proceso debe ser uno de: {allowed}")
+    return list(ORDER_PROCESS_SEQUENCE[: ORDER_PROCESS_SEQUENCE.index(up_to_process) + 1])
+
+
 async def get_order_process_items(
     db: AsyncSession,
     *,
@@ -2490,10 +2498,10 @@ async def get_order_process_options(db: AsyncSession) -> dict[str, Any]:
                     f"""
                     SELECT *
                     FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('proceso', field_name='process_ref_table')}
-                    WHERE "id" BETWEEN 1 AND 5
-                    ORDER BY "id" ASC
+                    WHERE "id" IN :process_ids
                     """
-                )
+                ).bindparams(bindparam("process_ids", expanding=True)),
+                {"process_ids": list(ORDER_PROCESS_SEQUENCE)},
             )
         ).mappings().all()
         process_rows = {
@@ -2511,7 +2519,7 @@ async def get_order_process_options(db: AsyncSession) -> dict[str, Any]:
                     process_rows.get(process_id),
                 ),
             }
-            for process_id in range(1, 6)
+            for process_id in ORDER_PROCESS_SEQUENCE
         ]
     }
 
@@ -2522,8 +2530,7 @@ async def get_order_process_plan(
     item_id: int,
     up_to_process: int,
 ) -> dict[str, Any]:
-    if up_to_process < 1 or up_to_process > 5:
-        raise DBCommunicationError("El proceso debe estar entre 1 y 5")
+    selected_process_ids = _order_process_ids_through(up_to_process)
 
     process_table = await _find_item_process_table(db)
     if not process_table:
@@ -2566,11 +2573,11 @@ async def get_order_process_plan(
                 SELECT *
                 FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier(table_name, field_name='process_table')}
                 WHERE {_quote_identifier(item_column, field_name='item_column')} = :item_id
-                  AND {_quote_identifier(process_column, field_name='process_column')} BETWEEN 1 AND :up_to_process
+                  AND {_quote_identifier(process_column, field_name='process_column')} IN :process_ids
                 {order_by}
                 """
-            ),
-            {"item_id": item_id, "up_to_process": up_to_process},
+            ).bindparams(bindparam("process_ids", expanding=True)),
+            {"item_id": item_id, "process_ids": selected_process_ids},
         )
     ).mappings().all()
 
@@ -2591,17 +2598,16 @@ async def get_order_process_plan(
                     f"""
                     SELECT *
                     FROM {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier('proceso', field_name='process_ref_table')}
-                    WHERE "id" BETWEEN 1 AND :up_to_process
-                    ORDER BY "id" ASC
+                    WHERE "id" IN :process_ids
                     """
-                ),
-                {"up_to_process": up_to_process},
+                ).bindparams(bindparam("process_ids", expanding=True)),
+                {"process_ids": selected_process_ids},
             )
         ).mappings().all()
         process_rows = {int(row["id"]): dict(row) for row in rows if row.get("id") is not None}
 
     pending_processes: list[dict[str, Any]] = []
-    for process_id in range(1, up_to_process + 1):
+    for process_id in selected_process_ids:
         existing = existing_by_process.get(process_id)
         if existing and finish_column and existing.get(finish_column) is not None:
             continue
@@ -2699,8 +2705,9 @@ async def submit_order_process_form(
 
     for item in processes:
         process_id = int(item.get("process_id"))
-        if process_id < 1 or process_id > 5:
-            raise DBCommunicationError("Los procesos deben estar entre 1 y 5")
+        if process_id not in ORDER_PROCESS_SEQUENCE:
+            allowed = ", ".join(str(value) for value in ORDER_PROCESS_SEQUENCE)
+            raise DBCommunicationError(f"Los procesos deben ser uno de: {allowed}")
 
         existing = (
             await db.execute(
@@ -2983,7 +2990,18 @@ async def _add_manual_integer_id_if_needed(
     has_default = id_meta.get("column_default") is not None
     is_identity = id_meta.get("is_identity") == "YES"
     is_required = id_meta.get("is_nullable") != "YES"
-    if is_identity or has_default or not is_required or "int" not in data_type:
+    if "int" not in data_type:
+        return
+
+    if is_identity or has_default:
+        await _sync_integer_id_sequence(
+            db,
+            table_name=table_name,
+            column_name=str(id_meta.get("column_name") or "id"),
+        )
+        return
+
+    if not is_required:
         return
 
     lock_query = text(
@@ -3002,6 +3020,48 @@ async def _add_manual_integer_id_if_needed(
     )
     next_id = (await db.execute(next_id_query)).scalar_one()
     row_data["id"] = int(next_id)
+
+
+async def _sync_integer_id_sequence(
+    db: AsyncSession,
+    *,
+    table_name: str,
+    column_name: str = "id",
+) -> None:
+    lock_key = f"{FORMS_SCHEMA}.{table_name}.{column_name}.sequence"
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": lock_key},
+    )
+
+    qualified_table = f"{FORMS_SCHEMA}.{table_name}"
+    quoted_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    quoted_table = _quote_identifier(table_name, field_name="sequence_table")
+    quoted_column = _quote_identifier(column_name, field_name="sequence_column")
+    sync_query = text(
+        f"""
+        WITH sequence_info AS (
+            SELECT pg_get_serial_sequence(:qualified_table, :column_name) AS sequence_name
+        ),
+        table_state AS (
+            SELECT MAX({quoted_column}) AS max_id
+            FROM {quoted_schema}.{quoted_table}
+        )
+        SELECT CASE
+            WHEN sequence_info.sequence_name IS NULL THEN NULL
+            ELSE setval(
+                sequence_info.sequence_name::regclass,
+                GREATEST(COALESCE(table_state.max_id, 0), 1),
+                table_state.max_id IS NOT NULL
+            )
+        END
+        FROM sequence_info, table_state
+        """
+    )
+    await db.execute(
+        sync_query,
+        {"qualified_table": qualified_table, "column_name": column_name},
+    )
 
 
 async def _find_item_process_table(

@@ -218,6 +218,30 @@ export async function mergeProductRows(payload: {
     };
 }
 
+export async function releaseOrderProcess(payload: {
+    table_id: string;
+    pk: Record<string, string | number | boolean>;
+}): Promise<{ result: { status: string; next_process: number }; requestId: string }> {
+    const { headers, requestId } = buildHeaders(undefined, {
+        contentTypeJson: true,
+    });
+
+    const response = await fetch(`${DATA_VIEWER_BASE}/order-process/release`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw await toApiError(response, requestId);
+    }
+
+    return {
+        result: (await response.json()) as { status: string; next_process: number },
+        requestId: response.headers.get("X-Request-ID") ?? requestId,
+    };
+}
+
 export async function fetchProductEditorRow(
     productId: string | number,
 ): Promise<{ row: DataViewerRow; requestId: string }> {

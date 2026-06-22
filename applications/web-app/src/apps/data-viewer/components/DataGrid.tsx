@@ -23,6 +23,14 @@ interface DataGridProps {
         enabled: boolean;
         reason?: string;
     };
+    getRowActions?: (row: DataViewerRow) => DataGridRowAction[];
+}
+
+export interface DataGridRowAction {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    title?: string;
 }
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-CO", {
@@ -176,6 +184,33 @@ function EditCell({
     );
 }
 
+function ActionsCell({
+    actions,
+}: {
+    actions: DataGridRowAction[];
+}) {
+    return (
+        <TableCell className="px-4 py-3 text-foreground align-middle">
+            <div className="flex items-center justify-center gap-2">
+                {actions.map((action) => (
+                    <Button
+                        key={action.label}
+                        type="button"
+                        variant="accent"
+                        size="sm"
+                        onClick={action.onClick}
+                        disabled={action.disabled}
+                        title={action.title}
+                        className="h-8"
+                    >
+                        {action.label}
+                    </Button>
+                ))}
+            </div>
+        </TableCell>
+    );
+}
+
 export function DataGrid({
     rows,
     tableLabel,
@@ -184,8 +219,12 @@ export function DataGrid({
     onSortChange,
     onEditRow,
     getRowEditState,
+    getRowActions,
 }: DataGridProps) {
     const showEditColumn = typeof onEditRow === "function";
+    const showActionsColumn =
+        typeof getRowActions === "function" &&
+        rows.some((row) => getRowActions(row).length > 0);
 
     const handleSortToggle = useCallback((column: string) => {
         if (!sort || sort.column !== column) {
@@ -251,37 +290,52 @@ export function DataGrid({
                                     Editar
                                 </TableHead>
                             )}
+                            {showActionsColumn && (
+                                <TableHead className="text-foreground px-4 py-3 text-center">
+                                    Acciones
+                                </TableHead>
+                            )}
                         </tr>
                     </TableHeader>
 
                     <TableBody>
-                        {rows.map((row, rowIndex) => (
-                            <TableRow
-                                key={getStableRowKey(row, rowIndex, tableLabel)}
-                                className="hover:bg-accent/20"
-                            >
-                                {visibleColumnKeys.map((columnKey) => (
-                                    <TableCell
-                                        key={`${rowIndex}-${columnKey}`}
-                                        className="px-4 py-3 text-[13px] text-foreground align-middle"
-                                    >
-                                        <div className="flex items-center justify-center w-full">
-                                            <CellRenderer
-                                                value={row[columnKey]}
-                                                columnKey={columnKey}
-                                            />
-                                        </div>
-                                    </TableCell>
-                                ))}
-                                {showEditColumn && (
-                                    <EditCell
-                                        row={row}
-                                        onEditRow={onEditRow}
-                                        getRowEditState={getRowEditState}
-                                    />
-                                )}
-                            </TableRow>
-                        ))}
+                        {rows.map((row, rowIndex) => {
+                            const actions = getRowActions?.(row) ?? [];
+                            return (
+                                <TableRow
+                                    key={getStableRowKey(row, rowIndex, tableLabel)}
+                                    className="hover:bg-accent/20"
+                                >
+                                    {visibleColumnKeys.map((columnKey) => (
+                                        <TableCell
+                                            key={`${rowIndex}-${columnKey}`}
+                                            className="px-4 py-3 text-[13px] text-foreground align-middle"
+                                        >
+                                            <div className="flex items-center justify-center w-full">
+                                                <CellRenderer
+                                                    value={row[columnKey]}
+                                                    columnKey={columnKey}
+                                                />
+                                            </div>
+                                        </TableCell>
+                                    ))}
+                                    {showEditColumn && (
+                                        <EditCell
+                                            row={row}
+                                            onEditRow={onEditRow}
+                                            getRowEditState={getRowEditState}
+                                        />
+                                    )}
+                                    {showActionsColumn && (
+                                        actions.length > 0 ? (
+                                            <ActionsCell actions={actions} />
+                                        ) : (
+                                            <TableCell />
+                                        )
+                                    )}
+                                </TableRow>
+                            );
+                        })}
                     </TableBody>
                 </table>
             </div>

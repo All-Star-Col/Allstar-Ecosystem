@@ -78,7 +78,7 @@ export function OrderProcessForm() {
 
     const fallbackProcessOptions = useMemo(
         () =>
-            [1, 2, 3, 4, 5].map((value) => ({
+            [1, 6, 2, 3, 4, 5].map((value) => ({
                 value: String(value),
                 label: `Proceso ${value}`,
             })),

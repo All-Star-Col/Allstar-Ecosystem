@@ -97,6 +97,16 @@ jobs:
             DOCKERHUB_TOKEN='${{ secrets.DOCKERHUB_TOKEN }}' \
             /opt/allstar-api/deploy.sh"
 
+      - name: Enforce container restart policy
+        run: |
+          ssh -i /tmp/id_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
+            "set -e
+            docker update --restart unless-stopped allstar-api
+            docker inspect --format='RestartPolicy={{.HostConfig.RestartPolicy.Name}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} State={{.State.Status}}' allstar-api"
+
       - name: Verify API health on VM
         run: |
           ssh -i /tmp/id_key \
@@ -115,6 +125,18 @@ jobs:
               fi
               sleep 5
             done
-            echo 'API did not become healthy. Last container logs:'
+            echo 'API did not become healthy on first pass. Restarting container once...'
+            docker restart allstar-api
+            for i in \$(seq 1 12); do
+              if curl -fsS http://127.0.0.1/api/v1/public; then
+                echo
+                echo 'API healthcheck passed after restart.'
+                exit 0
+              fi
+              sleep 5
+            done
+            echo 'API did not become healthy. Container inspect:'
+            docker inspect --format='State={{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' allstar-api || true
+            echo 'Last container logs:'
             docker logs --tail 200 allstar-api || true
             exit 1"

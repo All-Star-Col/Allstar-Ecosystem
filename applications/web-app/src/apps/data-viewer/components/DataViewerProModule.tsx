@@ -39,6 +39,7 @@ import {
     fetchDataViewerTables,
     mergeProductRows,
     queryDataViewer,
+    releaseOrderProcess,
     updateDataViewerRow,
 } from "../api";
 import { humanizeColumnName } from "../data/columnUtils";
@@ -46,6 +47,7 @@ import {
     buildRowChanges,
     canEditRow,
     getEditableColumns,
+    extractRowPk,
     getQueryColumnKeys,
     getTableEditDisabledReason,
 } from "../data/editing";
@@ -53,6 +55,7 @@ import type {
     DataViewerFilter,
     DataViewerFilterOperator,
     DataViewerModuleProps,
+    DataViewerPk,
     DataViewerQueryRequest,
     DataViewerQueryResponse,
     DataViewerRow,
@@ -64,6 +67,28 @@ import type {
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 200;
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+const ORDER_PROCESS_TABLE_ID = "ordenproceso";
+const ORDER_PROCESS_RAW_COLUMNS = [
+    "__raw_id_proceso",
+    "__raw_proceso_id",
+    "__raw_id_prtoceso",
+    "id_proceso",
+    "proceso_id",
+    "id_prtoceso",
+];
+const ORDER_PROCESS_FINISHED_COLUMNS = [
+    "fecha_finalizado",
+    "fecha_finalizacion",
+    "fecha_fin",
+];
+const ORDER_PROCESS_RELEASE_COLUMN_CANDIDATES = [
+    "id_proceso",
+    "proceso_id",
+    "id_prtoceso",
+    "fecha_finalizado",
+    "fecha_finalizacion",
+    "fecha_fin",
+];
 const FILTER_OPERATOR_LABELS: Record<DataViewerFilterOperator, string> = {
     eq: "igual a",
     contains: "contiene",
@@ -437,6 +462,71 @@ function buildQueryPayload(args: {
     };
 }
 
+function valueToNumber(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === "string" && value.trim()) {
+        const parsed = Number(value.trim());
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+
+function isEmptyValue(value: unknown): boolean {
+    if (value === null || value === undefined) {
+        return true;
+    }
+    const normalized = String(value).trim().toLowerCase();
+    return normalized === "" || normalized === "null";
+}
+
+function isOrderProcessReleaseCandidate(
+    table: DataViewerTable | undefined,
+    row: DataViewerRow,
+): boolean {
+    if (table?.table_id !== ORDER_PROCESS_TABLE_ID) {
+        return false;
+    }
+    if (table.can_release_order_process !== true) {
+        return false;
+    }
+
+    const processId = ORDER_PROCESS_RAW_COLUMNS
+        .map((column) => valueToNumber(row[column]))
+        .find((value): value is number => value !== null);
+    if (processId !== 6) {
+        return false;
+    }
+
+    const finishedColumn = ORDER_PROCESS_FINISHED_COLUMNS.find(
+        (column) => column in row,
+    );
+    return !finishedColumn || isEmptyValue(row[finishedColumn]);
+}
+
+function pkToStableKey(pk: DataViewerPk): string {
+    return Object.entries(pk)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${key}:${String(value)}`)
+        .join("|");
+}
+
+function getExistingTableColumn(
+    table: DataViewerTable | undefined,
+    candidates: string[],
+): string[] {
+    if (!table) {
+        return [];
+    }
+    const columnsByLower = new Map(
+        table.columns.map((column) => [column.name.toLowerCase(), column.name]),
+    );
+    return candidates
+        .map((candidate) => columnsByLower.get(candidate))
+        .filter((column): column is string => Boolean(column));
+}
+
 export function DataViewerProModule({
     initialTableId,
     title = "Data Viewer Pro",
@@ -480,6 +570,7 @@ export function DataViewerProModule({
     const [selectedRow, setSelectedRow] = useState<DataViewerRow | null>(null);
     const [isSavingRow, setIsSavingRow] = useState(false);
     const [isMergingProduct, setIsMergingProduct] = useState(false);
+    const [releasingRowKey, setReleasingRowKey] = useState<string | null>(null);
     const [pendingProductMerge, setPendingProductMerge] =
         useState<PendingProductMergeState | null>(null);
     const [pendingRetryDraftValues, setPendingRetryDraftValues] =
@@ -578,6 +669,12 @@ export function DataViewerProModule({
             ...baseColumns,
             sortColumn,
             defaultOrderColumn,
+            ...(activeTable?.table_id === ORDER_PROCESS_TABLE_ID
+                ? getExistingTableColumn(
+                      activeTable,
+                      ORDER_PROCESS_RELEASE_COLUMN_CANDIDATES,
+                  )
+                : []),
         ].filter((columnName): columnName is string => Boolean(columnName));
 
         return [...new Set(mergedColumns)];
@@ -866,6 +963,69 @@ export function DataViewerProModule({
             };
         },
         [activeTable],
+    );
+
+    const handleReleaseOrderProcess = useCallback(
+        async (row: DataViewerRow) => {
+            if (!activeTable) {
+                return;
+            }
+
+            const pk = extractRowPk(row, activeTable.pk_columns);
+            if (!pk) {
+                toast.error("No se pudo liberar", {
+                    description: "No se pudo identificar la fila seleccionada.",
+                });
+                return;
+            }
+
+            const rowKey = pkToStableKey(pk);
+            setReleasingRowKey(rowKey);
+            try {
+                const { requestId } = await releaseOrderProcess({
+                    table_id: activeTable.table_id,
+                    pk,
+                });
+                toast.success("Orden proceso liberada", {
+                    description: `Se creo el proceso 2 para el mismo item. request_id: ${requestId}`,
+                });
+                setRefreshCounter((previous) => previous + 1);
+            } catch (error) {
+                const normalized = normalizeError(error);
+                toast.error("No se pudo liberar", {
+                    description: normalized.requestId
+                        ? `${normalized.detail} (request_id: ${normalized.requestId})`
+                        : normalized.detail,
+                });
+            } finally {
+                setReleasingRowKey(null);
+            }
+        },
+        [activeTable],
+    );
+
+    const getGridRowActions = useCallback(
+        (row: DataViewerRow) => {
+            if (!activeTable || !isOrderProcessReleaseCandidate(activeTable, row)) {
+                return [];
+            }
+
+            const pk = extractRowPk(row, activeTable.pk_columns);
+            if (!pk) {
+                return [];
+            }
+
+            const rowKey = pkToStableKey(pk);
+            return [
+                {
+                    label: releasingRowKey === rowKey ? "Liberando..." : "Liberar",
+                    onClick: () => void handleReleaseOrderProcess(row),
+                    disabled: releasingRowKey !== null,
+                    title: "Finaliza el proceso 6 y crea el proceso 2 para el item",
+                },
+            ];
+        },
+        [activeTable, handleReleaseOrderProcess, releasingRowKey],
     );
 
     const handleEditRow = async (row: DataViewerRow) => {
@@ -1497,6 +1657,7 @@ export function DataViewerProModule({
                                             ? undefined
                                             : getGridRowEditState
                                     }
+                                    getRowActions={getGridRowActions}
                                 />
                             </div>
 

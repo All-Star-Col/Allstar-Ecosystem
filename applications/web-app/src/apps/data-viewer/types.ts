@@ -28,6 +28,7 @@ export interface DataViewerTable {
     can_update?: boolean;
     can_insert?: boolean;
     can_delete?: boolean;
+    can_release_order_process?: boolean;
     pk_columns?: string[] | null;
     columns: DataViewerColumn[];
 }

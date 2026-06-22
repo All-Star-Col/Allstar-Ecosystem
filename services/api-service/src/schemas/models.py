@@ -123,6 +123,7 @@ class RoleTablePermission(BaseModel):
     visible: bool = True
     can_edit: bool = False
     can_create: bool = False
+    can_release_order_process: bool = False
 
 
 class RoleFormPermission(BaseModel):
@@ -303,6 +304,7 @@ class DataViewerTable(BaseModel):
     can_update: bool = False
     can_insert: bool = False
     can_delete: bool = False
+    can_release_order_process: bool = False
     pk_columns: List[str] = Field(default_factory=list)
     columns: List[DataViewerColumn]
 

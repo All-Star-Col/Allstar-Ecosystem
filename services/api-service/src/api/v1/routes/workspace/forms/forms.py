@@ -340,7 +340,7 @@ async def get_order_process_options_endpoint(
 @router.get("/order-process/plan")
 async def get_order_process_plan_endpoint(
     item_id: int = Query(..., ge=1),
-    up_to_process: int = Query(..., ge=1, le=5),
+    up_to_process: int = Query(..., ge=1, le=6),
     _current_user: User = Depends(get_current_user),
     forms_service: forms.FormsService = Depends(get_forms_service),
 ):

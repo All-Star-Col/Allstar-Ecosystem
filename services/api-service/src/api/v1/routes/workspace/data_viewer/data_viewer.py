@@ -44,6 +44,11 @@ class ProductMergeRequest(BaseModel):
     target_product_id: int = Field(..., ge=1)
 
 
+class OrderProcessReleaseRequest(BaseModel):
+    table_id: str = Field(default="ordenproceso", min_length=1)
+    pk: dict[str, str | int | bool]
+
+
 def get_data_viewer_service(db: AsyncSession = Depends(get_db)) -> DataViewerService:
     """
     get_data_viewer_service()
@@ -453,6 +458,58 @@ async def patch_data_viewer_row(
             row_count=0,
             status_code=500,
         )
+        return build_error_response(
+            request_id=request_id,
+            status_code=500,
+            detail="Internal server error",
+            code="INTERNAL_ERROR",
+        )
+
+
+@router.post("/order-process/release")
+async def release_order_process(
+    request: Request,
+    response: Response,
+    payload: OrderProcessReleaseRequest,
+    current_user: User = Depends(get_current_user),
+    data_viewer_service: DataViewerService = Depends(get_data_viewer_service),
+):
+    request_id = resolve_request_id(request)
+    started_at = time.perf_counter()
+
+    try:
+        result = await data_viewer_service.release_order_process(
+            table_id=payload.table_id,
+            pk=dict(payload.pk),
+            user_id=str(current_user.id),
+        )
+        response.headers["X-Request-ID"] = request_id
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=payload.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=1,
+            status_code=200,
+        )
+        return result
+    except DataViewerError as error:
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=payload.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=error.status_code,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=error.status_code,
+            detail=error.detail,
+            code=error.code,
+        )
+    except Exception as error:
+        logger.exception("Unexpected error in order process release endpoint: %s", error)
         return build_error_response(
             request_id=request_id,
             status_code=500,

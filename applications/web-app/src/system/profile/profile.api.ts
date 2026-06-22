@@ -63,6 +63,7 @@ export interface RoleTablePermission {
     can_view: boolean;
     can_edit: boolean;
     can_create: boolean;
+    can_release_order_process: boolean;
 }
 
 export interface RoleFormPermission {
@@ -398,6 +399,13 @@ const normalizeRoleTablesPayload = (payload: unknown): RoleTablePermission[] => 
                     item.can_create ?? item.create ?? item.canCreate,
                     false,
                 ),
+                can_release_order_process: readBoolean(
+                    item.can_release_order_process ??
+                        item.canReleaseOrderProcess ??
+                        item.can_release ??
+                        item.canRelease,
+                    false,
+                ),
             } satisfies RoleTablePermission;
         })
         .filter((item) => item !== null) as RoleTablePermission[];
@@ -725,6 +733,7 @@ export async function saveRoleTablesPermissions(
         visible: permission.can_view,
         can_edit: permission.can_edit,
         can_create: permission.can_create,
+        can_release_order_process: permission.can_release_order_process,
     }));
 
     const combinedBody = JSON.stringify({

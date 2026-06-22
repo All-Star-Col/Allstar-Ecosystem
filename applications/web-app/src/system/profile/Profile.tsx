@@ -1243,13 +1243,16 @@ export default function Profile() {
                                                         <TableHead className="text-right">
                                                             Editar
                                                         </TableHead>
+                                                        <TableHead className="text-right">
+                                                            Liberar
+                                                        </TableHead>
                                                     </TableRow>
                                                 </TableHeader>
                                                 <TableBody>
                                                     {roleTablePermissions.length === 0 ? (
                                                         <TableRow>
                                                             <TableCell
-                                                                colSpan={3}
+                                                                colSpan={4}
                                                                 className="text-center text-sm text-muted-foreground"
                                                             >
                                                                 No hay tablas configuradas para
@@ -1333,6 +1336,42 @@ export default function Profile() {
                                                                                                     ? {
                                                                                                           ...item,
                                                                                                           can_edit:
+                                                                                                              checked,
+                                                                                                      }
+                                                                                                    : item,
+                                                                                        ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="inline-flex items-center justify-end">
+                                                                        <Switch
+                                                                            checked={
+                                                                                permission.can_release_order_process
+                                                                            }
+                                                                            disabled={
+                                                                                permission.table_id !==
+                                                                                    "ordenproceso" ||
+                                                                                isSavingRoleTables ||
+                                                                                isSavingRoleApps ||
+                                                                                isSavingRoleForms
+                                                                            }
+                                                                            onCheckedChange={(
+                                                                                checked,
+                                                                            ) => {
+                                                                                setRoleTablePermissions(
+                                                                                    (prev) =>
+                                                                                        prev.map(
+                                                                                            (
+                                                                                                item,
+                                                                                            ) =>
+                                                                                                item.table_id ===
+                                                                                                permission.table_id
+                                                                                                    ? {
+                                                                                                          ...item,
+                                                                                                          can_release_order_process:
                                                                                                               checked,
                                                                                                       }
                                                                                                     : item,
