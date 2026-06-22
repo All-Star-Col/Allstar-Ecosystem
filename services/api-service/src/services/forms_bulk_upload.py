@@ -69,6 +69,7 @@ class BulkRow:
     referencia_2: str
     referencia_3: str
     tela: str
+    detalle: str
     oc_interno: str
     oc_cliente: str
     cantidad: int
@@ -975,6 +976,7 @@ def parse_purchase_order_excel(content: bytes) -> list[BulkRow]:
                     referencia_2=_component_text(raw.get("referencia_2")),
                     referencia_3=_component_text(raw.get("referencia_3")),
                     tela=_component_text(raw.get("tela")),
+                    detalle=_clean_cell_text(raw.get("detalle")),
                     oc_interno=_clean_cell_text(raw.get("oc_interno")),
                     oc_cliente=_clean_cell_text(raw.get("oc_cliente")),
                     cantidad=_parse_int(raw.get("cantidad")),
@@ -998,6 +1000,7 @@ def _bulk_row_from_payload(payload: dict[str, Any]) -> BulkRow:
         referencia_2=_component_text(payload.get("referencia_2")),
         referencia_3=_component_text(payload.get("referencia_3")),
         tela=_component_text(payload.get("tela")),
+        detalle=_clean_cell_text(payload.get("detalle")),
         oc_interno=_clean_cell_text(payload.get("oc_interno")),
         oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
         cantidad=_parse_int(payload.get("cantidad") or 1),
@@ -1078,6 +1081,7 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
                 "referencia_2": row.referencia_2,
                 "referencia_3": row.referencia_3,
                 "tela": row.tela,
+                "detalle": row.detalle,
                 "oc_interno": row.oc_interno,
                 "oc_cliente": row.oc_cliente,
                 "cantidad": row.cantidad,
@@ -1320,6 +1324,7 @@ async def commit_purchase_order_import(
                     referencia_2=_component_text(payload.get("referencia_2")),
                     referencia_3=_component_text(payload.get("referencia_3")),
                     tela=_component_text(payload.get("tela")),
+                    detalle=_clean_cell_text(payload.get("detalle")),
                     oc_interno=_clean_cell_text(payload.get("oc_interno")),
                     oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
                     cantidad=_parse_int(payload.get("cantidad")),
@@ -1451,6 +1456,7 @@ async def commit_purchase_order_import(
                         "oc_interno": row.oc_interno,
                         "oc_cliente": row.oc_cliente,
                         "cantidad": row.cantidad,
+                        "detalle": row.detalle,
                         "estado": "pendiente",
                         "fecha_pedido": date.today(),
                     },

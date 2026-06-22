@@ -50,6 +50,7 @@ export interface BulkPurchaseOrderRowAPI {
     referencia_2?: string;
     referencia_3?: string;
     tela: string;
+    detalle?: string;
     oc_interno: string;
     oc_cliente: string;
     cantidad: number;

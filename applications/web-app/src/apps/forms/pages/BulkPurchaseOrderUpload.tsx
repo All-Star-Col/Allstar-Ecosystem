@@ -75,6 +75,7 @@ const BULK_TABLE_COLUMNS = [
     280,
     280,
     380,
+    280,
     220,
     140,
     180,
@@ -1096,6 +1097,7 @@ export default function BulkPurchaseOrderUpload() {
                                                 <TableHead>Referencia 2</TableHead>
                                                 <TableHead>Referencia 3</TableHead>
                                                 <TableHead>Tela homologada</TableHead>
+                                                <TableHead>Detalle</TableHead>
                                                 <TableHead className="px-5">OC cliente</TableHead>
                                                 <TableHead className="px-5 text-right">Cantidad</TableHead>
                                                 <TableHead>Accion</TableHead>
@@ -1131,6 +1133,20 @@ export default function BulkPurchaseOrderUpload() {
                                                     <TableCell>{renderHomologationControl(row, "referencia_2")}</TableCell>
                                                     <TableCell>{renderHomologationControl(row, "referencia_3")}</TableCell>
                                                     <TableCell>{renderHomologationControl(row, "tela")}</TableCell>
+                                                    <TableCell className="align-top">
+                                                        <textarea
+                                                            value={row.detalle ?? ""}
+                                                            onChange={(event) =>
+                                                                updateRow(row.row_number, (current) => ({
+                                                                    ...current,
+                                                                    detalle: event.target.value,
+                                                                }))
+                                                            }
+                                                            placeholder="Escribir detalle..."
+                                                            rows={3}
+                                                            className="min-h-20 w-full resize-y rounded-md border border-input bg-background px-2 py-1 text-xs leading-snug text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                                        />
+                                                    </TableCell>
                                                     <TableCell className="px-5">{row.oc_cliente}</TableCell>
                                                     <TableCell className="px-5 text-right font-medium">
                                                         {row.cantidad}
