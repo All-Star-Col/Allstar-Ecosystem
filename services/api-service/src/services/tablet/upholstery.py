@@ -257,6 +257,26 @@ async def finalizar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[s
         )
         siguiente_row = siguiente_result.mappings().first()
 
+    if row["id_proceso"] == 5:
+        await db.execute(
+            text(
+                """
+                UPDATE data.ordencompra AS oc
+                SET estado = 'finalizado'
+                WHERE COALESCE(LOWER(TRIM(oc.estado::text)), '') <> 'finalizado'
+                  AND COALESCE(NULLIF(TRIM(oc.cantidad::text), ''), '0')::numeric > 0
+                  AND (
+                    SELECT COUNT(DISTINCT i.id)::numeric
+                    FROM data.item i
+                    JOIN data.ordenproceso op ON op.id_item = i.id
+                    WHERE TRIM(i.id_orden_compra::text) = TRIM(oc.id::text)
+                      AND op.id_proceso = 5
+                      AND op.fecha_finalizado IS NOT NULL
+                  ) >= COALESCE(NULLIF(TRIM(oc.cantidad::text), ''), '0')::numeric
+                """
+            )
+        )
+
     await db.commit()
     return {
         "message": "Proceso finalizado correctamente.",

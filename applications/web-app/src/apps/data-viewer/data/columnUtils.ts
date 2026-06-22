@@ -28,6 +28,7 @@ const columnNameMappings: Record<string, string> = {
     reorder_threshold: "Umbral Reorden",
     last_restocked: "Última Reposición",
     supplier_id: "ID Proveedor",
+    orden_compra_id: "Orden compra ID",
     brand: "Marca",
     sku: "SKU",
     retail_price: "Precio Venta",

@@ -91,6 +91,14 @@ ORDER_REQUEST_DATE_COLUMN_PRIORITY = (
     "fecha",
     "created_at",
 )
+ORDER_QUANTITY_COLUMN_PRIORITY = (
+    "cantidad",
+    "quantity",
+    "qty",
+    "unidades",
+    "cantidad_items",
+    "cantidad_producto",
+)
 ITEM_ORDER_COLUMN_PRIORITY = (
     "id_orden_compra",
     "orden_compra_id",
@@ -178,6 +186,18 @@ ORDER_PROCESS_TABLE_NAME_CANDIDATES = {
     "procesos_items",
 }
 PROCESS_TABLE_NAME_CANDIDATES = {"proceso", "procesos"}
+ORDER_PROCESS_PROCESS_COLUMN_PRIORITY = (
+    "id_proceso",
+    "proceso_id",
+    "id_prtoceso",
+    "proceso",
+)
+ORDER_PROCESS_FINISHED_COLUMN_PRIORITY = (
+    "fecha_finalizado",
+    "fecha_finalizacion",
+    "fecha_fin",
+    "fecha_terminado",
+)
 EMPLOYEE_TABLE_NAME_CANDIDATES = {"empleado", "empleados"}
 UPHOLSTERY_HISTORY_TABLES = (
     ("historialconsumotela", "Historial consumo tela"),
@@ -2039,6 +2059,19 @@ class DataViewerService:
                 schema_name=item_config.schema_name,
                 table_name=item_config.table_name,
             )
+            order_process_config = self._find_table_config(
+                table_configs.values(),
+                ORDER_PROCESS_TABLE_NAME_CANDIDATES,
+            )
+            order_process_columns = (
+                await _get_table_columns(
+                    self.db,
+                    schema_name=order_process_config.schema_name,
+                    table_name=order_process_config.table_name,
+                )
+                if order_process_config
+                else []
+            )
 
             order_status_column = _choose_existing_column(
                 order_columns,
@@ -2061,6 +2094,10 @@ class DataViewerService:
             item_order_column = _choose_existing_column(
                 item_columns,
                 ITEM_ORDER_COLUMN_PRIORITY,
+            )
+            order_quantity_column = _choose_existing_column(
+                order_columns,
+                ORDER_QUANTITY_COLUMN_PRIORITY,
             )
             if not (
                 order_status_column
@@ -2136,6 +2173,57 @@ class DataViewerService:
                 "delayed_status": "retrasado",
                 "in_process_status": "en proceso",
             }
+
+            if order_process_config and order_quantity_column:
+                order_process_item_column = _choose_existing_column(
+                    order_process_columns,
+                    ITEM_REFERENCE_COLUMN_PRIORITY,
+                )
+                order_process_process_column = _choose_existing_column(
+                    order_process_columns,
+                    ORDER_PROCESS_PROCESS_COLUMN_PRIORITY,
+                )
+                order_process_finished_column = _choose_existing_column(
+                    order_process_columns,
+                    ORDER_PROCESS_FINISHED_COLUMN_PRIORITY,
+                )
+                item_value_column = _choose_existing_column(
+                    item_columns,
+                    ("id", "id_item", "item_id", "item_legado"),
+                )
+                if (
+                    order_process_item_column
+                    and order_process_process_column
+                    and order_process_finished_column
+                    and item_value_column
+                ):
+                    order_quantity_ref = f"order_ref.{_quote_identifier(order_quantity_column)}"
+                    order_process_table_ref = (
+                        f"{_quote_identifier(order_process_config.schema_name)}."
+                        f"{_quote_identifier(order_process_config.table_name)}"
+                    )
+                    finalized_by_process_sql = text(
+                        f"""
+                        UPDATE {order_table_ref} AS order_ref
+                        SET {_quote_identifier(order_status_column)} = :finalized_status
+                        WHERE {not_finalized_order_clause}
+                          AND COALESCE(NULLIF(TRIM({order_quantity_ref}::text), ''), '0')::numeric > 0
+                          AND (
+                            SELECT COUNT(DISTINCT item_ref.{_quote_identifier(item_value_column)}::text)::numeric
+                            FROM {item_table_ref} item_ref
+                            JOIN {order_process_table_ref} process_ref
+                              ON TRIM(process_ref.{_quote_identifier(order_process_item_column)}::text) =
+                                 TRIM(item_ref.{_quote_identifier(item_value_column)}::text)
+                            WHERE TRIM({item_order_ref}::text) = TRIM({order_value_ref}::text)
+                              AND process_ref.{_quote_identifier(order_process_process_column)}::integer = 5
+                              AND process_ref.{_quote_identifier(order_process_finished_column)} IS NOT NULL
+                          ) >= COALESCE(NULLIF(TRIM({order_quantity_ref}::text), ''), '0')::numeric
+                        """
+                    )
+                    await self.db.execute(
+                        finalized_by_process_sql,
+                        {**params, "finalized_status": "finalizado"},
+                    )
 
             await self.db.execute(delayed_sql, params)
             await self.db.execute(in_process_sql, params)
@@ -2438,6 +2526,36 @@ class DataViewerService:
             config,
             allowed_columns,
         )
+        item_order_id_expression = item_order_expressions.get("orden_compra_id")
+        if item_order_id_expression and "orden_compra_id" not in allowed_columns:
+            order_id_column = {
+                "name": "orden_compra_id",
+                "type": "text",
+                "nullable": True,
+                "visible": True,
+                "editable": False,
+                "required": False,
+                "max_length": None,
+                "enum_values": None,
+                "read_only_reason": "DERIVED_ORDER_ID",
+                "raw_value_column": None,
+            }
+            product_index = next(
+                (
+                    index
+                    for index, column in enumerate(columns)
+                    if str(column.get("name") or "").lower() == "producto"
+                ),
+                len(columns),
+            )
+            columns.insert(product_index, order_id_column)
+            allowed_columns.add("orden_compra_id")
+            text_columns.add("orden_compra_id")
+            display_select_sql["orden_compra_id"] = (
+                f"{item_order_id_expression} AS {_quote_identifier('orden_compra_id')}"
+            )
+            column_expression_sql["orden_compra_id"] = item_order_id_expression
+
         item_product_expression = item_order_expressions.get("producto")
         if item_product_expression and "producto" not in allowed_columns:
             product_column = {
@@ -2512,6 +2630,38 @@ class DataViewerService:
                     len(columns),
                 )
                 columns.insert(detail_index, product_column)
+
+        order_id_index = next(
+            (
+                index
+                for index, column in enumerate(columns)
+                if str(column.get("name") or "").lower() == "orden_compra_id"
+            ),
+            None,
+        )
+        product_index = next(
+            (
+                index
+                for index, column in enumerate(columns)
+                if str(column.get("name") or "").lower() == "producto"
+            ),
+            None,
+        )
+        if (
+            order_id_index is not None
+            and product_index is not None
+            and order_id_index > product_index
+        ):
+            order_id_column = columns.pop(order_id_index)
+            product_index = next(
+                (
+                    index
+                    for index, column in enumerate(columns)
+                    if str(column.get("name") or "").lower() == "producto"
+                ),
+                len(columns),
+            )
+            columns.insert(product_index, order_id_column)
 
         item_detail_expression = item_order_expressions.get("detalle")
         if item_detail_expression and "detalle" in allowed_columns:
@@ -3151,7 +3301,11 @@ class DataViewerService:
         order_value = _quote_identifier(order_ref["referenced_column"])
         item_order_ref = _column_ref(item_order_column)
 
-        expressions: dict[str, str] = {}
+        expressions: dict[str, str] = {
+            "orden_compra_id": (
+                f"NULLIF(TRIM({item_order_ref}::text), '')"
+            )
+        }
         order_detail_column = _choose_existing_column(
             order_columns,
             ("detalle", "descripcion", "observaciones"),
