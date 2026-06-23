@@ -18,7 +18,7 @@ concurrency:
 env:
   IMAGE_NAME: starbotdocker/allstar-fastapi-repository
   ENVIRONMENT: prod
-  PUBLIC_API_HEALTH_URL: https://api-vm.tail6cef8e.ts.net/api/v1/public
+  PUBLIC_API_HEALTH_URL: https://api-vm.tail6cef8e.ts.net/api/v1/health/live
 
 jobs:
   build_and_push:
@@ -119,7 +119,7 @@ jobs:
             docker ps -a --filter name=allstar-api
             echo 'Waiting for API health...'
             for i in \$(seq 1 12); do
-              if curl -fsS http://127.0.0.1/api/v1/public; then
+              if curl -fsS http://127.0.0.1/api/v1/health/ready; then
                 echo
                 echo 'API healthcheck passed.'
                 exit 0
@@ -129,7 +129,7 @@ jobs:
             echo 'API did not become healthy on first pass. Restarting container once...'
             docker restart allstar-api
             for i in \$(seq 1 12); do
-              if curl -fsS http://127.0.0.1/api/v1/public; then
+              if curl -fsS http://127.0.0.1/api/v1/health/ready; then
                 echo
                 echo 'API healthcheck passed after restart.'
                 exit 0
@@ -150,7 +150,7 @@ jobs:
             "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
             "set -e
             PROXY_TARGET='http://127.0.0.1:80'
-            if ! curl -fsS --connect-timeout 2 --max-time 5 \"\${PROXY_TARGET}/api/v1/public\" >/dev/null; then
+            if ! curl -fsS --connect-timeout 2 --max-time 5 \"\${PROXY_TARGET}/api/v1/health/live\" >/dev/null; then
               PROXY_TARGET='http://${{ secrets.VM_TAILSCALE_IP }}:80'
             fi
             echo \"Configuring Tailscale Serve to proxy HTTPS 443 -> \${PROXY_TARGET}\"

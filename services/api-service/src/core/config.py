@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CONTAINER_ACTAS: str = "actas-cliente-instalacion"
     AZURE_CONTAINER_PLANOS_PROYECTO: str = "planos-proyecto"
 
+    # --- ROBUSTEZ POSTGRES ---
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: int = 30
+    DB_POOL_RECYCLE_SECONDS: int = 1800
+    DB_CONNECT_TIMEOUT_SECONDS: int = 10
+    DB_COMMAND_TIMEOUT_SECONDS: int = 30
+    DB_STATEMENT_TIMEOUT_MS: int = 30000
+    DB_IDLE_TRANSACTION_TIMEOUT_MS: int = 60000
+    DB_LOCK_TIMEOUT_MS: int = 5000
+
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",

@@ -37,6 +37,7 @@ TEXTUAL_TYPES = {
     "uuid",
 }
 SUPPORTED_FILTER_OPERATORS = {"eq", "contains", "gt", "lt", "in", "between"}
+DEFAULT_QUERY_TIMEOUT_MS = 10000
 DEFAULT_COUNT_TIMEOUT_MS = 8000
 DEFAULT_EXPORT_TIMEOUT_MS = 12000
 DATA_VIEWER_MUTATION_TIMEOUT_MS = 5000
@@ -967,9 +968,13 @@ class DataViewerService:
         )
 
         try:
+            await self.db.execute(
+                text(f"SET LOCAL statement_timeout = {int(DEFAULT_QUERY_TIMEOUT_MS)}")
+            )
             data_result = await self.db.execute(text(data_sql), query_params)
             raw_rows = data_result.mappings().all()
         except Exception as error:
+            await self.db.rollback()
             if _is_timeout_error(error):
                 raise QueryTimeoutError()
             raise DBCommunicationError(f"Error running DataViewer query: {error}")
@@ -3874,6 +3879,7 @@ class DataViewerService:
             count_row = count_result.mappings().first()
             return int(count_row["total_count"]) if count_row else 0
         except Exception as error:
+            await self.db.rollback()
             if _is_timeout_error(error):
                 raise QueryTimeoutError()
             raise DBCommunicationError(f"Error running DataViewer count query: {error}")

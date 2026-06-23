@@ -1,0 +1,114 @@
+name: Monitor API Service
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-api
+  cancel-in-progress: true
+
+env:
+  PUBLIC_API_HEALTH_URL: https://api-vm.tail6cef8e.ts.net/api/v1/health/live
+
+jobs:
+  verify_and_repair:
+    name: Verify and repair API service
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Write SSH private key
+        run: |
+          echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > /tmp/id_key
+          chmod 600 /tmp/id_key
+          ssh-keygen -y -f /tmp/id_key > /dev/null
+
+      - name: Add VM to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.VM_TAILSCALE_IP }}" >> ~/.ssh/known_hosts
+
+      - name: Verify and repair container and Tailscale proxy
+        run: |
+          ssh -i /tmp/id_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
+            "set -e
+            check_url() {
+              curl -fsS --connect-timeout 3 --max-time 8 \"\$1\" >/dev/null
+            }
+
+            echo 'Container status:'
+            docker ps -a --filter name=allstar-api
+
+            LOCAL_LIVE='http://127.0.0.1/api/v1/health/live'
+            TAILSCALE_LIVE='http://${{ secrets.VM_TAILSCALE_IP }}/api/v1/health/live'
+
+            if ! check_url \"\${LOCAL_LIVE}\" && ! check_url \"\${TAILSCALE_LIVE}\"; then
+              echo 'API liveness failed. Restarting container once...'
+              docker restart allstar-api
+              for i in \$(seq 1 12); do
+                if check_url \"\${LOCAL_LIVE}\" || check_url \"\${TAILSCALE_LIVE}\"; then
+                  echo 'API recovered after restart.'
+                  break
+                fi
+                sleep 5
+              done
+            fi
+
+            if ! check_url \"\${LOCAL_LIVE}\" && ! check_url \"\${TAILSCALE_LIVE}\"; then
+              echo 'API is still not live after repair attempt.'
+              docker inspect --format='State={{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' allstar-api || true
+              docker logs --tail 200 allstar-api || true
+              exit 1
+            fi
+
+            PROXY_TARGET='http://127.0.0.1:80'
+            if ! check_url \"\${PROXY_TARGET}/api/v1/health/live\"; then
+              PROXY_TARGET='http://${{ secrets.VM_TAILSCALE_IP }}:80'
+            fi
+
+            echo \"Ensuring Tailscale Serve HTTPS 443 -> \${PROXY_TARGET}\"
+            if timeout 30s tailscale serve --yes --bg --https=443 \"\${PROXY_TARGET}\"; then
+              echo 'Tailscale Serve configured.'
+            elif command -v sudo >/dev/null 2>&1 && sudo -n timeout 30s tailscale serve --yes --bg --https=443 \"\${PROXY_TARGET}\"; then
+              echo 'Tailscale Serve configured with sudo.'
+            else
+              echo 'Unable to configure Tailscale Serve.'
+              timeout 10s tailscale serve status || true
+              exit 1
+            fi
+            timeout 10s tailscale serve status || true
+
+            LOCAL_READY='http://127.0.0.1/api/v1/health/ready'
+            TAILSCALE_READY='http://${{ secrets.VM_TAILSCALE_IP }}/api/v1/health/ready'
+            if ! check_url \"\${LOCAL_READY}\" && ! check_url \"\${TAILSCALE_READY}\"; then
+              echo 'API is live but database readiness failed.'
+              docker logs --tail 200 allstar-api || true
+              exit 1
+            fi
+            echo 'API liveness and readiness passed.'"
+
+      - name: Verify public HTTPS endpoint
+        run: |
+          for i in $(seq 1 3); do
+            if curl -fsS --connect-timeout 5 --max-time 10 "${{ env.PUBLIC_API_HEALTH_URL }}"; then
+              echo
+              echo 'Public HTTPS healthcheck passed.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Warning: public HTTPS endpoint did not respond from the GitHub runner after repair.'

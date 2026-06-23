@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.core.logging_config import setup_logging, get_logger
 
@@ -25,6 +26,7 @@ from src.api.v1.routes.tablet import production as tablet_production
 from src.api.v1.routes.tablet import upholstery as tablet_upholstery
 from src.core.config import settings
 from src.core.scheduler import scheduler
+from src.db.database import engine
 
 app = FastAPI(title="AllStar Platform API")
 
@@ -47,6 +49,37 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=422,
         content=jsonable_encoder({"detail": exc.errors(), "body": body}),
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    logger.exception(
+        "Database error path=%s method=%s error=%s",
+        request.url.path,
+        request.method,
+        exc,
+    )
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Database temporarily unavailable",
+            "code": "DATABASE_UNAVAILABLE",
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "Unhandled API error path=%s method=%s error=%s",
+        request.url.path,
+        request.method,
+        exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "code": "INTERNAL_ERROR"},
     )
 
 app.add_middleware(
@@ -100,4 +133,5 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     scheduler.shutdown()
+    await engine.dispose()
     logger.info("[Scheduler] Detenido")
