@@ -1,9 +1,23 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
     alias(libs.plugins.kotlin.android)
 }
+
+val releaseSigningPropertiesFile = rootProject.file("signing.properties")
+val releaseSigningProperties = Properties().apply {
+    if (releaseSigningPropertiesFile.exists()) {
+        releaseSigningPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun releaseSigningProperty(name: String): String =
+    releaseSigningProperties.getProperty(name)
+        ?: releaseSigningProperties.getProperty("\uFEFF$name")
+        ?: error("Missing '$name' in signing.properties")
 
 android {
     namespace = "com.allstar.pda"
@@ -13,14 +27,28 @@ android {
         applicationId = "com.allstar.pda"
         minSdk = 24
         targetSdk = 36
-        versionCode = 21
-        versionName = "3.6.4"
+        versionCode = 22
+        versionName = "3.6.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            if (releaseSigningPropertiesFile.exists()) {
+                storeFile = rootProject.file(releaseSigningProperty("storeFile"))
+                storePassword = releaseSigningProperty("storePassword")
+                keyAlias = releaseSigningProperty("keyAlias")
+                keyPassword = releaseSigningProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseSigningPropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
