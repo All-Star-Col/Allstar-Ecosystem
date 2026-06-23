@@ -39,6 +39,8 @@ TEXTUAL_TYPES = {
 SUPPORTED_FILTER_OPERATORS = {"eq", "contains", "gt", "lt", "in", "between"}
 DEFAULT_COUNT_TIMEOUT_MS = 8000
 DEFAULT_EXPORT_TIMEOUT_MS = 12000
+PURCHASE_ORDER_STATUS_SYNC_INTERVAL_SECONDS = 900
+PURCHASE_ORDER_STATUS_SYNC_TIMEOUT_MS = 1500
 MAX_EXPORT_ROWS = 10000
 EXPORT_CHUNK_SIZE = 1000
 IDENTIFIER_REGEX = re.compile(DATA_VIEWER_IDENTIFIER_PATTERN)
@@ -234,6 +236,8 @@ FINALIZED_STATUS_VALUES = (
     "terminados",
     "terminadas",
 )
+_purchase_order_status_sync_last_attempt = 0.0
+_purchase_order_status_sync_running = False
 
 
 class DataViewerError(Exception):
@@ -1995,7 +1999,7 @@ class DataViewerService:
                 can_release_order_process=False,
             )
 
-        await self._sync_purchase_order_statuses(expanded_allowlist)
+        await self._maybe_sync_purchase_order_statuses(expanded_allowlist)
 
         if user_id and role_permissions_by_table:
             for table_id, table_config in list(expanded_allowlist.items()):
@@ -2013,6 +2017,30 @@ class DataViewerService:
                 )
 
         return expanded_allowlist
+
+    async def _maybe_sync_purchase_order_statuses(
+        self,
+        table_configs: dict[str, TableConfig],
+    ) -> None:
+        global _purchase_order_status_sync_last_attempt
+        global _purchase_order_status_sync_running
+
+        now = time.monotonic()
+        if _purchase_order_status_sync_running:
+            return
+        if (
+            _purchase_order_status_sync_last_attempt
+            and now - _purchase_order_status_sync_last_attempt
+            < PURCHASE_ORDER_STATUS_SYNC_INTERVAL_SECONDS
+        ):
+            return
+
+        _purchase_order_status_sync_last_attempt = now
+        _purchase_order_status_sync_running = True
+        try:
+            await self._sync_purchase_order_statuses(table_configs)
+        finally:
+            _purchase_order_status_sync_running = False
 
     async def _get_existing_data_tables(self) -> set[str]:
         query = text(
@@ -2051,6 +2079,11 @@ class DataViewerService:
             return
 
         try:
+            await self.db.execute(
+                text(
+                    f"SET LOCAL statement_timeout = {int(PURCHASE_ORDER_STATUS_SYNC_TIMEOUT_MS)}"
+                )
+            )
             order_columns = await _get_table_columns(
                 self.db,
                 schema_name=order_config.schema_name,
