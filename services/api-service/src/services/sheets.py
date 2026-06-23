@@ -117,6 +117,13 @@ ORDER_QUANTITY_COLUMN_CANDIDATES = (
     "numero_items",
     "num_items",
 )
+ORDER_DETAIL_COLUMN_CANDIDATES = (
+    "detalle",
+    "descripcion",
+    "observaciones",
+    "nota",
+    "notas",
+)
 PRODUCT_NAME_COLUMN_CANDIDATES = ("nombre", "producto", "descripcion", "referencia", "sku")
 PRODUCT_COST_COLUMN_CANDIDATES = (
     "costo",
@@ -138,6 +145,23 @@ LOOKUP_LABEL_COLUMN_CANDIDATES = (
     "cliente",
     "razon_social",
 )
+ORDER_PROCESS_TABLE_CANDIDATES = ("ordenproceso", "ordenprocesos")
+ORDER_PROCESS_ITEM_COLUMN_CANDIDATES = ("id_item", "item_id", "item", "id_items")
+ORDER_PROCESS_PROCESS_COLUMN_CANDIDATES = ("id_proceso", "proceso_id", "id_prtoceso", "proceso")
+ORDER_PROCESS_START_COLUMN_CANDIDATES = (
+    "fecha_inicio",
+    "fecha_iniciado",
+    "fecha_inicio_real",
+    "fecha",
+)
+ORDER_PROCESS_FINISH_COLUMN_CANDIDATES = (
+    "fecha_finalizado",
+    "fecha_finalizacion",
+    "fecha_fin",
+    "fecha_terminado",
+)
+ORDER_PROCESS_ID_COLUMN_CANDIDATES = ("id", "id_ordenproceso", "ordenproceso_id")
+ITEM_PK_COLUMN_CANDIDATES = ("id", "id_item", "item_id")
 
 
 def _quote_identifier(identifier: str) -> str:
@@ -212,6 +236,14 @@ def _split_product_and_fabric(product_value: Any, fabric_value: Any) -> tuple[st
             if product_part.strip() and fabric_part.strip():
                 return _normalize_spaces(product_part), _normalize_spaces(fabric_part)
 
+    return product, fabric
+
+
+def _compose_inventory_product(product_value: Any, fabric_value: Any, detail_value: Any) -> tuple[str, str]:
+    product, fabric = _split_product_and_fabric(product_value, fabric_value)
+    detail = _normalize_spaces(_clean_sheet_text(detail_value))
+    if detail:
+        product = _normalize_spaces(f"{product} {detail}".strip())
     return product, fabric
 
 
@@ -889,9 +921,10 @@ class SheetsService:
             if exists_in_dispatch:
                 return 409
 
-            producto, tela = _split_product_and_fabric(
+            producto, tela = _compose_inventory_product(
                 item_payload["producto"],
                 item_payload["tela"],
+                item_payload.get("detalle"),
             )
 
             new_row = [
@@ -932,6 +965,15 @@ class SheetsService:
                 order_quantity=item_payload["order_quantity"],
             )
 
+            await self._mark_order_process_5_finished_today(
+                db,
+                item_table=item_payload["item_table"],
+                item_legacy_column=item_payload["item_legacy_column"],
+                item_pk_column=item_payload["item_pk_column"],
+                item_pk_value=item_payload["item_pk_value"],
+                item_code=item_code,
+            )
+
             self.sheets_logs_sync(
                 item_code,
                 "Ingreso Produccion",
@@ -939,6 +981,11 @@ class SheetsService:
                 "Se finalizo la produccion del item, se reviso el estado y ahora hace parte del inventario",
             )
 
+            logger.info(
+                "Item %s ingresado a inventario desde allstar_db; orden=%s proceso=5 sincronizado",
+                item_code,
+                item_payload.get("orden_cliente"),
+            )
             return 200
         except Exception as e:
             logger.exception(f"Error agregando item desde allstar_db: {e}")
@@ -992,6 +1039,7 @@ class SheetsService:
             return None
 
         item_legacy_column = _choose_column(item_columns, ITEM_LEGACY_COLUMN_CANDIDATES)
+        item_pk_column = _choose_column(item_columns, ITEM_PK_COLUMN_CANDIDATES) or item_legacy_column
         item_order_column = _choose_column(item_columns, ITEM_ORDER_COLUMN_CANDIDATES)
         item_delivery_column = _choose_column(item_columns, ("fecha_entrega",))
         item_fabric_column = _choose_column(item_columns, ITEM_FABRIC_NAME_COLUMN_CANDIDATES)
@@ -1009,11 +1057,12 @@ class SheetsService:
         order_client_column = _choose_column(order_columns, ORDER_CLIENT_COLUMN_CANDIDATES)
         order_product_column = _choose_column(order_columns, ORDER_PRODUCT_COLUMN_CANDIDATES)
         order_quantity_column = _choose_column(order_columns, ORDER_QUANTITY_COLUMN_CANDIDATES)
+        order_detail_column = _choose_column(order_columns, ORDER_DETAIL_COLUMN_CANDIDATES)
         if not (
             item_legacy_column
+            and item_pk_column
             and item_order_column
             and item_delivery_column
-            and order_status_column
             and order_product_column
         ):
             return None
@@ -1038,9 +1087,15 @@ class SheetsService:
         join_clauses: list[str] = []
         select_expressions: list[str] = [
             f"i.{_quote_identifier(item_legacy_column)}::text AS item_legado",
+            f"i.{_quote_identifier(item_pk_column)} AS item_pk_value",
             f"o.{_quote_identifier(order_pk_column)} AS order_pk_value",
-            f"o.{_quote_identifier(order_status_column)}::text AS order_status",
         ]
+        if order_status_column:
+            select_expressions.append(
+                f"o.{_quote_identifier(order_status_column)}::text AS order_status"
+            )
+        else:
+            select_expressions.append("NULL::text AS order_status")
 
         if order_client_order_column:
             select_expressions.append(
@@ -1057,6 +1112,13 @@ class SheetsService:
             )
         else:
             select_expressions.append("NULL::text AS order_quantity")
+
+        if order_detail_column:
+            select_expressions.append(
+                f"o.{_quote_identifier(order_detail_column)}::text AS detalle"
+            )
+        else:
+            select_expressions.append("NULL::text AS detalle")
 
         client_joins, client_expr = await _resolve_lookup_expression(
             db,
@@ -1168,11 +1230,6 @@ class SheetsService:
         else:
             select_expressions.append("NULL::text AS tela")
 
-        status_params = {
-            f"finalized_status_{index}": status
-            for index, status in enumerate(FINALIZED_ORDER_STATUS_VALUES)
-        }
-        status_placeholders = ", ".join(f":finalized_status_{index}" for index in range(len(FINALIZED_ORDER_STATUS_VALUES)))
         query = text(
             f"""
             SELECT {", ".join(select_expressions)}
@@ -1181,14 +1238,10 @@ class SheetsService:
               ON TRIM(i.{_quote_identifier(item_order_column)}::text) = TRIM(o.{_quote_identifier(order_pk_column)}::text)
             {" ".join(join_clauses)}
             WHERE TRIM(i.{_quote_identifier(item_legacy_column)}::text) = :item
-              AND (
-                o.{_quote_identifier(order_status_column)} IS NULL
-                OR LOWER(TRIM(o.{_quote_identifier(order_status_column)}::text)) NOT IN ({status_placeholders})
-              )
             LIMIT 1
             """
         )
-        result = await db.execute(query, {"item": str(item), **status_params})
+        result = await db.execute(query, {"item": str(item)})
         row = result.mappings().first()
         if not row:
             return None
@@ -1199,10 +1252,13 @@ class SheetsService:
             "tela": row["tela"] or "",
             "cliente": row["cliente"] or "",
             "orden_cliente": row["orden_cliente"] or "",
+            "detalle": row["detalle"] or "",
             "valor_producto": row["valor_producto"] or "",
             "order_quantity": row["order_quantity"],
             "item_table": item_table,
             "item_legacy_column": item_legacy_column,
+            "item_pk_column": item_pk_column,
+            "item_pk_value": row["item_pk_value"],
             "item_order_column": item_order_column,
             "item_delivery_column": item_delivery_column,
             "order_table": order_table,
@@ -1232,6 +1288,140 @@ class SheetsService:
         )
         await db.commit()
 
+    async def _mark_order_process_5_finished_today(
+        self,
+        db: AsyncSession,
+        *,
+        item_table: str,
+        item_legacy_column: str,
+        item_pk_column: str,
+        item_pk_value: Any,
+        item_code: str,
+    ) -> None:
+        process_table, process_columns = await _find_pg_table(
+            db,
+            schema_name=DATA_SCHEMA,
+            candidates=ORDER_PROCESS_TABLE_CANDIDATES,
+        )
+        if not process_table:
+            logger.warning("No se encontro tabla ordenproceso para sincronizar item %s", item_code)
+            return
+
+        process_item_column = _choose_column(
+            process_columns,
+            ORDER_PROCESS_ITEM_COLUMN_CANDIDATES,
+        )
+        process_process_column = _choose_column(
+            process_columns,
+            ORDER_PROCESS_PROCESS_COLUMN_CANDIDATES,
+        )
+        process_start_column = _choose_column(
+            process_columns,
+            ORDER_PROCESS_START_COLUMN_CANDIDATES,
+        )
+        process_finish_column = _choose_column(
+            process_columns,
+            ORDER_PROCESS_FINISH_COLUMN_CANDIDATES,
+        )
+        process_id_column = _choose_column(
+            process_columns,
+            ORDER_PROCESS_ID_COLUMN_CANDIDATES,
+        )
+        if not (process_item_column and process_process_column and process_start_column and process_finish_column):
+            logger.warning(
+                "ordenproceso no tiene columnas requeridas para sincronizar item %s",
+                item_code,
+            )
+            return
+
+        resolved_item_value = item_pk_value
+        if resolved_item_value is None:
+            item_result = await db.execute(
+                text(
+                    f"""
+                    SELECT {_quote_identifier(item_pk_column)} AS item_value
+                    FROM {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(item_table)}
+                    WHERE TRIM({_quote_identifier(item_legacy_column)}::text) = TRIM(:item_code)
+                    LIMIT 1
+                    """
+                ),
+                {"item_code": item_code},
+            )
+            resolved_item_value = item_result.scalar_one_or_none()
+
+        if resolved_item_value is None:
+            logger.warning("No se encontro id interno para sincronizar proceso 5 del item %s", item_code)
+            return
+
+        selected_process_id = (
+            f"{_quote_identifier(process_id_column)} AS process_row_id,"
+            if process_id_column
+            else "NULL::text AS process_row_id,"
+        )
+        existing_result = await db.execute(
+            text(
+                f"""
+                SELECT
+                    {selected_process_id}
+                    {_quote_identifier(process_start_column)} AS fecha_inicio,
+                    {_quote_identifier(process_finish_column)} AS fecha_finalizado
+                FROM {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(process_table)}
+                WHERE TRIM({_quote_identifier(process_item_column)}::text) = TRIM(CAST(:item_value AS text))
+                  AND TRIM({_quote_identifier(process_process_column)}::text) = '5'
+                ORDER BY
+                    CASE WHEN {_quote_identifier(process_finish_column)} IS NULL THEN 0 ELSE 1 END,
+                    {_quote_identifier(process_start_column)} DESC NULLS LAST
+                LIMIT 1
+                """
+            ),
+            {"item_value": str(resolved_item_value)},
+        )
+        existing_row = existing_result.mappings().first()
+
+        if existing_row:
+            where_clause = (
+                f"{_quote_identifier(process_id_column)} = :process_row_id"
+                if process_id_column and existing_row.get("process_row_id") is not None
+                else (
+                    f"TRIM({_quote_identifier(process_item_column)}::text) = TRIM(CAST(:item_value AS text)) "
+                    f"AND TRIM({_quote_identifier(process_process_column)}::text) = '5'"
+                )
+            )
+            params = {
+                "item_value": str(resolved_item_value),
+                "process_row_id": existing_row.get("process_row_id"),
+            }
+            await db.execute(
+                text(
+                    f"""
+                    UPDATE {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(process_table)}
+                    SET {_quote_identifier(process_start_column)} = COALESCE({_quote_identifier(process_start_column)}, CURRENT_DATE),
+                        {_quote_identifier(process_finish_column)} = COALESCE({_quote_identifier(process_finish_column)}, CURRENT_DATE)
+                    WHERE {where_clause}
+                    """
+                ),
+                params,
+            )
+            await db.commit()
+            logger.info("Proceso 5 actualizado para item %s", item_code)
+            return
+
+        await db.execute(
+            text(
+                f"""
+                INSERT INTO {_quote_identifier(DATA_SCHEMA)}.{_quote_identifier(process_table)}
+                    ({_quote_identifier(process_item_column)},
+                     {_quote_identifier(process_process_column)},
+                     {_quote_identifier(process_start_column)},
+                     {_quote_identifier(process_finish_column)})
+                VALUES (:item_value, 5, CURRENT_DATE, CURRENT_DATE)
+                """
+            ),
+            {"item_value": resolved_item_value},
+        )
+        await db.commit()
+        logger.info("Proceso 5 creado y finalizado para item %s", item_code)
+
     async def _finalize_order_if_complete(
         self,
         db: AsyncSession,
@@ -1240,11 +1430,13 @@ class SheetsService:
         item_order_column: str,
         item_delivery_column: str,
         order_table: str,
-        order_status_column: str,
+        order_status_column: str | None,
         order_pk_column: str,
         order_pk_value: Any,
         order_quantity: Any,
     ) -> None:
+        if not order_status_column:
+            return
         try:
             expected_quantity = int(float(str(order_quantity).replace(",", ".").strip()))
         except Exception:
