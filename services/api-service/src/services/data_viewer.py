@@ -1079,8 +1079,10 @@ class DataViewerService:
             await self.db.rollback()
             raise DBCommunicationError(f"Error patching DataViewer row: {error}")
 
-        returned_columns = [column["name"] for column in metadata.columns]
-        row_payload = {column: updated_row.get(column) for column in returned_columns}
+        row_payload = await self._fetch_row_payload_after_update(
+            metadata=metadata,
+            normalized_pk=normalized_pk,
+        )
 
         return DataViewerRowUpdateResponse(
             row=row_payload,
@@ -2865,6 +2867,45 @@ class DataViewerService:
                 select_parts.append(raw_value_sql)
         return ", ".join(select_parts)
 
+    async def _fetch_row_payload_after_update(
+        self,
+        *,
+        metadata: TableMetadata,
+        normalized_pk: dict[str, Any],
+    ) -> dict[str, Any]:
+        table_ref = (
+            f"{_quote_identifier(metadata.config.schema_name)}."
+            f"{_quote_identifier(metadata.config.table_name)}"
+        )
+        returned_columns = [column["name"] for column in metadata.columns]
+        select_sql = self._build_select_sql(
+            selected_columns=returned_columns,
+            metadata=metadata,
+        )
+        where_clauses: list[str] = []
+        query_params: dict[str, Any] = {}
+        for index, pk_column in enumerate(metadata.pk_columns):
+            pk_key = f"pk_value_{index}"
+            where_clauses.append(f"{_quote_identifier(pk_column)} = :{pk_key}")
+            query_params[pk_key] = normalized_pk[pk_column]
+
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT {select_sql}
+                FROM {table_ref} AS t
+                WHERE {" AND ".join(where_clauses)}
+                LIMIT 1
+                """
+            ),
+            query_params,
+        )
+        row = result.mappings().first()
+        if not row:
+            raise RowNotFoundError(metadata.config.table_id)
+
+        return {column: row.get(column) for column in returned_columns}
+
     def _query_column_expr(self, metadata: TableMetadata, column: str) -> str:
         return metadata.column_expression_sql.get(column, _column_ref(column))
 
@@ -3744,9 +3785,7 @@ class DataViewerService:
         )
 
     def _build_returning_sql(self, metadata: TableMetadata) -> str:
-        table_columns = [
-            _quote_identifier(column["name"]) for column in metadata.columns
-        ]
+        table_columns = [_quote_identifier(column) for column in metadata.pk_columns]
         return ", ".join(table_columns)
 
     async def _run_count_query(
