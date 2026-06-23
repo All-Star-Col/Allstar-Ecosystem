@@ -17,6 +17,7 @@ from src.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 _EXTERNAL_LOCATIONS = {"Tienda Bucaramanga", "Nihao Principal", "Tienda Unicentro"}
+PRODUCTION_INVENTORY_WAREHOUSE = "Bodega 2 Carpintería / Piso 3"
 DATA_SCHEMA = "data"
 FINALIZED_ORDER_STATUS_VALUES = (
     "finalizado",
@@ -933,7 +934,7 @@ class SheetsService:
                 tela,
                 _clean_sheet_text(item_payload["cliente"]),
                 _clean_sheet_text(item_payload["orden_cliente"]),
-                "Bodega 1 / Piso 1",
+                PRODUCTION_INVENTORY_WAREHOUSE,
                 "1",
                 item_payload["valor_producto"],
                 "",
@@ -1561,7 +1562,7 @@ class SheetsService:
                 tela_completa,       # C: TELA
                 cliente,             # D: CLIENTE
                 orden,               # E: ORDEN
-                "Bodega 1 / Piso 1", # F: UBICACION
+                PRODUCTION_INVENTORY_WAREHOUSE, # F: UBICACION
                 "1",                 # G: FILA
                 "",                  # H: VALOR PRODUCTO
                 "",                  # I: OBSERVACIONES PRODUCTO

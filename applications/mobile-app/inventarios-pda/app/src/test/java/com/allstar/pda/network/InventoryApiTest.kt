@@ -16,10 +16,7 @@ import org.junit.Assert.fail
 import org.junit.Test
 import org.mockito.Mockito
 import org.mockito.Mockito.`when`
-import org.mockito.Mockito.anyString
 import org.mockito.Mockito.mock
-import org.mockito.Mockito.never
-import org.mockito.Mockito.same
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import java.io.IOException
@@ -48,7 +45,7 @@ class InventoryApiTest {
         `when`(mockResponse.body).thenReturn(null)
 
         try {
-            requireBody(mockResponse)
+            requireBodyViaReflection(mockResponse)
             fail("Expected Exception to be thrown")
         } catch (e: Exception) {
             assertEquals("Respuesta vacía", e.message)
@@ -62,7 +59,7 @@ class InventoryApiTest {
         `when`(mockResponse.body).thenReturn(mockBody)
         `when`(mockBody.string()).thenReturn("""{"item":"12345"}""")
 
-        val result = requireBody(mockResponse)
+        val result = requireBodyViaReflection(mockResponse)
 
         assertEquals("""{"item":"12345"}""", result)
     }
@@ -404,18 +401,25 @@ class InventoryApiTest {
         return method.invoke(null, request, retryGetOnConnectionFailure) as Response
     }
 
+    private fun requireBodyViaReflection(response: Response): String {
+        val cls = Class.forName("com.allstar.pda.network.InventoryApiKt")
+        val method = cls.declaredMethods.first { it.name == "requireBody" }
+        method.isAccessible = true
+        return method.invoke(null, response) as String
+    }
+
     private fun injectClient(client: OkHttpClient) {
         val field = Class.forName("com.allstar.pda.network.ApiClient").getDeclaredField("http")
         field.isAccessible = true
         field.set(null, client)
     }
 
-    private fun ConsultarItemAPIWrapper(client: OkHttpClient, item: String): ItemInfo {
+    private suspend fun ConsultarItemAPIWrapper(client: OkHttpClient, item: String): ItemInfo {
         injectClient(client)
         return consultarItemAPI(item)
     }
 
-    private fun TraerDeProduccionAPIWrapper(client: OkHttpClient, item: String): Int {
+    private suspend fun TraerDeProduccionAPIWrapper(client: OkHttpClient, item: String): Int {
         injectClient(client)
         return traerDeProduccionAPI(item)
     }
