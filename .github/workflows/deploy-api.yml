@@ -118,8 +118,10 @@ jobs:
             echo 'Container status:'
             docker ps -a --filter name=allstar-api
             echo 'Waiting for API health...'
+            LOCAL_READY='http://127.0.0.1/api/v1/health/ready'
+            TAILSCALE_READY='http://${{ secrets.VM_TAILSCALE_IP }}/api/v1/health/ready'
             for i in \$(seq 1 12); do
-              if curl -fsS http://127.0.0.1/api/v1/health/ready; then
+              if curl -fsS --connect-timeout 3 --max-time 8 \"\${LOCAL_READY}\" || curl -fsS --connect-timeout 3 --max-time 8 \"\${TAILSCALE_READY}\"; then
                 echo
                 echo 'API healthcheck passed.'
                 exit 0
@@ -129,7 +131,7 @@ jobs:
             echo 'API did not become healthy on first pass. Restarting container once...'
             docker restart allstar-api
             for i in \$(seq 1 12); do
-              if curl -fsS http://127.0.0.1/api/v1/health/ready; then
+              if curl -fsS --connect-timeout 3 --max-time 8 \"\${LOCAL_READY}\" || curl -fsS --connect-timeout 3 --max-time 8 \"\${TAILSCALE_READY}\"; then
                 echo
                 echo 'API healthcheck passed after restart.'
                 exit 0
