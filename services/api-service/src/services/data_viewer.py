@@ -39,6 +39,7 @@ TEXTUAL_TYPES = {
 SUPPORTED_FILTER_OPERATORS = {"eq", "contains", "gt", "lt", "in", "between"}
 DEFAULT_COUNT_TIMEOUT_MS = 8000
 DEFAULT_EXPORT_TIMEOUT_MS = 12000
+DATA_VIEWER_MUTATION_TIMEOUT_MS = 5000
 PURCHASE_ORDER_STATUS_SYNC_INTERVAL_SECONDS = 900
 PURCHASE_ORDER_STATUS_SYNC_TIMEOUT_MS = 1500
 MAX_EXPORT_ROWS = 10000
@@ -1069,6 +1070,9 @@ class DataViewerService:
         )
 
         try:
+            await self.db.execute(
+                text(f"SET LOCAL statement_timeout = {int(DATA_VIEWER_MUTATION_TIMEOUT_MS)}")
+            )
             update_result = await self.db.execute(text(update_sql), query_params)
             updated_row = update_result.mappings().first()
 
@@ -1083,10 +1087,23 @@ class DataViewerService:
             await self.db.rollback()
             raise DBCommunicationError(f"Error patching DataViewer row: {error}")
 
-        row_payload = await self._fetch_row_payload_after_update(
+        row_payload = self._build_update_fallback_row_payload(
             metadata=metadata,
             normalized_pk=normalized_pk,
+            normalized_changes=normalized_changes,
         )
+        try:
+            row_payload = await self._fetch_row_payload_after_update(
+                metadata=metadata,
+                normalized_pk=normalized_pk,
+            )
+        except Exception as error:
+            await self.db.rollback()
+            logger.warning(
+                "data_viewer.patch_row returning fallback row after refresh failed table_id=%s error=%s",
+                request_data.table_id,
+                error,
+            )
 
         return DataViewerRowUpdateResponse(
             row=row_payload,
@@ -1175,6 +1192,9 @@ class DataViewerService:
         finished_time_sql = self._current_temporal_sql(columns_by_lower[finished_column.lower()])
 
         try:
+            await self.db.execute(
+                text(f"SET LOCAL statement_timeout = {int(DATA_VIEWER_MUTATION_TIMEOUT_MS)}")
+            )
             current_result = await self.db.execute(
                 text(
                     f"""
@@ -1502,6 +1522,9 @@ class DataViewerService:
             raise RowNotFoundError("producto")
 
         try:
+            await self.db.execute(
+                text(f"SET LOCAL statement_timeout = {int(DATA_VIEWER_MUTATION_TIMEOUT_MS)}")
+            )
             update_result = await self.db.execute(
                 text(
                     f"""
@@ -1998,8 +2021,6 @@ class DataViewerService:
                 can_delete=False,
                 can_release_order_process=False,
             )
-
-        await self._maybe_sync_purchase_order_statuses(expanded_allowlist)
 
         if user_id and role_permissions_by_table:
             for table_id, table_config in list(expanded_allowlist.items()):
@@ -2899,6 +2920,23 @@ class DataViewerService:
             if raw_value_sql:
                 select_parts.append(raw_value_sql)
         return ", ".join(select_parts)
+
+    def _build_update_fallback_row_payload(
+        self,
+        *,
+        metadata: TableMetadata,
+        normalized_pk: dict[str, Any],
+        normalized_changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        returned_columns = [column["name"] for column in metadata.columns]
+        row_payload = {column: None for column in returned_columns}
+        for column, value in normalized_pk.items():
+            if column in row_payload:
+                row_payload[column] = value
+        for column, value in normalized_changes.items():
+            if column in row_payload:
+                row_payload[column] = value
+        return row_payload
 
     async def _fetch_row_payload_after_update(
         self,
