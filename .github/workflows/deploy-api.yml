@@ -18,6 +18,7 @@ concurrency:
 env:
   IMAGE_NAME: starbotdocker/allstar-fastapi-repository
   ENVIRONMENT: prod
+  PUBLIC_API_HEALTH_URL: https://api-vm.tail6cef8e.ts.net/api/v1/public
 
 jobs:
   build_and_push:
@@ -140,3 +141,39 @@ jobs:
             echo 'Last container logs:'
             docker logs --tail 200 allstar-api || true
             exit 1"
+
+      - name: Configure and verify Tailscale HTTPS proxy
+        run: |
+          ssh -i /tmp/id_key \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
+            "set -e
+            echo 'Configuring Tailscale Serve to proxy HTTPS 443 -> http://127.0.0.1:80'
+            if command -v tailscale >/dev/null 2>&1; then
+              if tailscale serve --bg --https=443 http://127.0.0.1:80; then
+                echo 'Tailscale Serve configured.'
+              elif command -v sudo >/dev/null 2>&1 && sudo -n tailscale serve --bg --https=443 http://127.0.0.1:80; then
+                echo 'Tailscale Serve configured with sudo.'
+              else
+                echo 'Unable to configure Tailscale Serve.'
+                tailscale serve status || true
+                exit 1
+              fi
+              tailscale serve status || true
+            else
+              echo 'tailscale command is not available on the VM.'
+              exit 1
+            fi"
+
+          echo 'Verifying public API URL through Tailscale HTTPS...'
+          for i in $(seq 1 12); do
+            if curl -fsS "${{ env.PUBLIC_API_HEALTH_URL }}"; then
+              echo
+              echo 'Public Tailscale HTTPS healthcheck passed.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Public API URL did not become healthy through Tailscale HTTPS.'
+          exit 1
