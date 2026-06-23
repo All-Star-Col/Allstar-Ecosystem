@@ -45,7 +45,7 @@ jobs:
           file: ./services/api-service/Dockerfile
           push: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:prod
@@ -151,16 +151,16 @@ jobs:
             "set -e
             echo 'Configuring Tailscale Serve to proxy HTTPS 443 -> http://127.0.0.1:80'
             if command -v tailscale >/dev/null 2>&1; then
-              if tailscale serve --bg --https=443 http://127.0.0.1:80; then
+              if timeout 30s tailscale serve --yes --bg --https=443 http://127.0.0.1:80; then
                 echo 'Tailscale Serve configured.'
-              elif command -v sudo >/dev/null 2>&1 && sudo -n tailscale serve --bg --https=443 http://127.0.0.1:80; then
+              elif command -v sudo >/dev/null 2>&1 && sudo -n timeout 30s tailscale serve --yes --bg --https=443 http://127.0.0.1:80; then
                 echo 'Tailscale Serve configured with sudo.'
               else
                 echo 'Unable to configure Tailscale Serve.'
-                tailscale serve status || true
+                timeout 10s tailscale serve status || true
                 exit 1
               fi
-              tailscale serve status || true
+              timeout 10s tailscale serve status || true
             else
               echo 'tailscale command is not available on the VM.'
               exit 1
