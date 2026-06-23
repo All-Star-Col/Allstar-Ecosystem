@@ -149,11 +149,15 @@ jobs:
             -o StrictHostKeyChecking=yes \
             "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
             "set -e
-            echo 'Configuring Tailscale Serve to proxy HTTPS 443 -> http://127.0.0.1:80'
+            PROXY_TARGET='http://127.0.0.1:80'
+            if ! curl -fsS --connect-timeout 2 --max-time 5 \"\${PROXY_TARGET}/api/v1/public\" >/dev/null; then
+              PROXY_TARGET='http://${{ secrets.VM_TAILSCALE_IP }}:80'
+            fi
+            echo \"Configuring Tailscale Serve to proxy HTTPS 443 -> \${PROXY_TARGET}\"
             if command -v tailscale >/dev/null 2>&1; then
-              if timeout 30s tailscale serve --yes --bg --https=443 http://127.0.0.1:80; then
+              if timeout 30s tailscale serve --yes --bg --https=443 \"\${PROXY_TARGET}\"; then
                 echo 'Tailscale Serve configured.'
-              elif command -v sudo >/dev/null 2>&1 && sudo -n timeout 30s tailscale serve --yes --bg --https=443 http://127.0.0.1:80; then
+              elif command -v sudo >/dev/null 2>&1 && sudo -n timeout 30s tailscale serve --yes --bg --https=443 \"\${PROXY_TARGET}\"; then
                 echo 'Tailscale Serve configured with sudo.'
               else
                 echo 'Unable to configure Tailscale Serve.'
