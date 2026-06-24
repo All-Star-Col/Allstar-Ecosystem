@@ -170,6 +170,23 @@ PRODUCT_COMPONENT_REFERENCE_TABLES = {
     "id_referencia_3": "referencia",
     "id_tela": "tela",
 }
+PRODUCT_COMPONENT_CATALOG_COLUMNS = {
+    "base": ("id_base",),
+    "modelo": ("id_modelo",),
+    "referencia": (
+        "id_referencia",
+        "id_referencia_1",
+        "id_referencia_2",
+        "id_referencia_3",
+    ),
+    "tela": ("id_tela",),
+}
+PRODUCT_CATALOG_LABEL_CHANGE_COLUMNS = {
+    "base": {"nombre"},
+    "modelo": {"nombre"},
+    "referencia": {"nombre"},
+    "tela": {"nombre", "referencia"},
+}
 ITEM_REFERENCE_COLUMN_PRIORITY = (
     "id_item",
     "item_id",
@@ -1094,6 +1111,12 @@ class DataViewerService:
             if not updated_row:
                 raise RowNotFoundError(request_data.table_id)
 
+            await self._refresh_product_names_after_catalog_change(
+                table_config=table_config,
+                normalized_pk=normalized_pk,
+                normalized_changes=normalized_changes,
+            )
+
             await self.db.commit()
         except DataViewerError:
             await self.db.rollback()
@@ -1106,6 +1129,10 @@ class DataViewerService:
             ) from error
         except Exception as error:
             await self.db.rollback()
+            if _is_timeout_error(error):
+                raise QueryTimeoutError(
+                    "La edicion tardo demasiado y fue cancelada para proteger la API"
+                ) from error
             raise DBCommunicationError(f"Error patching DataViewer row: {error}")
 
         row_payload = self._build_update_fallback_row_payload(
@@ -1516,6 +1543,133 @@ class DataViewerService:
             )
 
         return normalized_changes
+
+    async def _catalog_label_sql(
+        self,
+        *,
+        table_name: str,
+        entity_expression: str,
+    ) -> str:
+        columns = await _get_table_columns(
+            self.db,
+            schema_name="data",
+            table_name=table_name,
+        )
+        column_names = {
+            _normalize_identifier(column["column_name"]).lower()
+            for column in columns
+            if column.get("column_name")
+        }
+        if "id" not in column_names or "nombre" not in column_names:
+            return "NULL"
+
+        table_ref = f'{_quote_identifier("data")}.{_quote_identifier(table_name)}'
+        if table_name == "tela" and "referencia" in column_names:
+            return (
+                "(SELECT NULLIF(TRIM(CONCAT_WS(' ', "
+                "NULLIF(TRIM(ref.\"nombre\"::text), ''), "
+                "NULLIF(TRIM(ref.\"referencia\"::text), '')"
+                f")), '') FROM {table_ref} ref "
+                f"WHERE ref.\"id\" = {entity_expression} LIMIT 1)"
+            )
+
+        return (
+            "(SELECT NULLIF(TRIM(ref.\"nombre\"::text), '') "
+            f"FROM {table_ref} ref "
+            f"WHERE ref.\"id\" = {entity_expression} LIMIT 1)"
+        )
+
+    async def _refresh_product_names_after_catalog_change(
+        self,
+        *,
+        table_config: TableConfig,
+        normalized_pk: dict[str, Any],
+        normalized_changes: dict[str, Any],
+    ) -> int:
+        catalog_table = table_config.table_name.lower()
+        affected_product_columns = PRODUCT_COMPONENT_CATALOG_COLUMNS.get(catalog_table)
+        label_change_columns = PRODUCT_CATALOG_LABEL_CHANGE_COLUMNS.get(catalog_table)
+        if not affected_product_columns or not label_change_columns:
+            return 0
+
+        if "id" not in normalized_pk:
+            return 0
+
+        if not (set(normalized_changes) & label_change_columns):
+            return 0
+
+        product_columns = await _get_table_columns(
+            self.db,
+            schema_name="data",
+            table_name="producto",
+        )
+        product_columns_by_lower = {
+            _normalize_identifier(column["column_name"]).lower(): _normalize_identifier(
+                column["column_name"]
+            )
+            for column in product_columns
+            if column.get("column_name")
+        }
+        if "nombre" not in product_columns_by_lower:
+            return 0
+
+        matched_columns = [
+            product_columns_by_lower[column]
+            for column in affected_product_columns
+            if column in product_columns_by_lower
+        ]
+        if not matched_columns:
+            return 0
+
+        label_parts: list[str] = []
+        for product_column, catalog_table_name in PRODUCT_COMPONENT_REFERENCE_TABLES.items():
+            actual_product_column = product_columns_by_lower.get(product_column)
+            if not actual_product_column:
+                continue
+            label_parts.append(
+                await self._catalog_label_sql(
+                    table_name=catalog_table_name,
+                    entity_expression=f"p.{_quote_identifier(actual_product_column)}",
+                )
+            )
+
+        if not label_parts:
+            return 0
+
+        set_clauses = [
+            f'{_quote_identifier(product_columns_by_lower["nombre"])} = '
+            f"TRIM(CONCAT_WS(' ', {', '.join(label_parts)}))"
+        ]
+        if "fecha_modificacion" in product_columns_by_lower:
+            set_clauses.append(
+                f'{_quote_identifier(product_columns_by_lower["fecha_modificacion"])} = '
+                "CURRENT_TIMESTAMP"
+            )
+
+        where_sql = " OR ".join(
+            f"p.{_quote_identifier(column)} = :catalog_id" for column in matched_columns
+        )
+        product_ref = f'{_quote_identifier("data")}.{_quote_identifier("producto")}'
+        update_result = await self.db.execute(
+            text(
+                f"""
+                UPDATE {product_ref} p
+                SET {", ".join(set_clauses)}
+                WHERE {where_sql}
+                RETURNING 1 AS refreshed
+                """
+            ),
+            {"catalog_id": normalized_pk["id"]},
+        )
+        updated_rows = update_result.mappings().all()
+        if updated_rows:
+            logger.info(
+                "data_viewer.product_names_refreshed catalog_table=%s catalog_id=%s count=%s",
+                catalog_table,
+                normalized_pk["id"],
+                len(updated_rows),
+            )
+        return len(updated_rows)
 
     async def merge_product_into_existing(
         self,

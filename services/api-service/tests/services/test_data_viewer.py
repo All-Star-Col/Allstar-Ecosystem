@@ -257,6 +257,78 @@ class TestProductNameRecalculation(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"id_tela"', fake_db.sql)
         self.assertIn('"nombre"', fake_db.sql)
 
+    async def test_catalog_change_refreshes_related_product_names(self) -> None:
+        class FakeResult:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def mappings(self):
+                return self
+
+            def all(self):
+                return self.rows
+
+        class FakeDb:
+            def __init__(self):
+                self.update_sql = ""
+
+            async def execute(self, statement, params=None):
+                sql = str(statement)
+                table_name = (params or {}).get("table_name")
+                if "information_schema.columns" in sql:
+                    if table_name == "producto":
+                        return FakeResult(
+                            [
+                                {"column_name": "id", "data_type": "integer"},
+                                {"column_name": "nombre", "data_type": "text"},
+                                {"column_name": "id_base", "data_type": "integer"},
+                                {"column_name": "id_modelo", "data_type": "integer"},
+                                {"column_name": "id_referencia_1", "data_type": "integer"},
+                                {"column_name": "id_referencia_2", "data_type": "integer"},
+                                {"column_name": "id_referencia_3", "data_type": "integer"},
+                                {"column_name": "id_tela", "data_type": "integer"},
+                            ]
+                        )
+                    if table_name == "tela":
+                        return FakeResult(
+                            [
+                                {"column_name": "id", "data_type": "integer"},
+                                {"column_name": "nombre", "data_type": "text"},
+                                {"column_name": "referencia", "data_type": "text"},
+                            ]
+                        )
+                    return FakeResult(
+                        [
+                            {"column_name": "id", "data_type": "integer"},
+                            {"column_name": "nombre", "data_type": "text"},
+                        ]
+                    )
+
+                self.update_sql = sql
+                return FakeResult([{"refreshed": 1}, {"refreshed": 1}])
+
+        fake_db = FakeDb()
+        service = DataViewerService(db=fake_db)
+        config = _table_config(
+            table_id="referencia",
+            table_name="referencia",
+            full_table_name="data.referencia",
+            display_name="Referencias",
+        )
+
+        refreshed_count = await service._refresh_product_names_after_catalog_change(
+            table_config=config,
+            normalized_pk={"id": 12},
+            normalized_changes={"nombre": "40X40X45"},
+        )
+
+        self.assertEqual(refreshed_count, 2)
+        self.assertIn('UPDATE "data"."producto" p', fake_db.update_sql)
+        self.assertIn('p."id_referencia_1" = :catalog_id', fake_db.update_sql)
+        self.assertIn('p."id_referencia_2" = :catalog_id', fake_db.update_sql)
+        self.assertIn('p."id_referencia_3" = :catalog_id', fake_db.update_sql)
+        self.assertIn('ref."referencia"::text', fake_db.update_sql)
+
 
 if __name__ == "__main__":
     unittest.main()

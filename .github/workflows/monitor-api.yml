@@ -111,4 +111,5 @@ jobs:
             fi
             sleep 5
           done
-          echo 'Warning: public HTTPS endpoint did not respond from the GitHub runner after repair.'
+          echo 'Public HTTPS endpoint did not respond from the GitHub runner after repair.'
+          exit 1

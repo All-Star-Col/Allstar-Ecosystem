@@ -181,4 +181,5 @@ jobs:
             fi
             sleep 5
           done
-          echo 'Warning: Public API URL did not respond from the GitHub runner. VM-local health passed; verify externally if needed.'
+          echo 'Public API URL did not respond after VM-local health passed.'
+          exit 1
