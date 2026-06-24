@@ -41,10 +41,12 @@ def _table_metadata(config):
         can_update=False,
         can_insert=False,
         can_delete=False,
+        can_release_order_process=False,
         stable_order_column=None,
         default_order_column=None,
         display_select_sql={},
         column_expression_sql={},
+        raw_value_select_sql={},
     )
 
 
@@ -60,10 +62,12 @@ def _order_purchase_metadata(config):
         can_update=False,
         can_insert=False,
         can_delete=False,
+        can_release_order_process=False,
         stable_order_column=None,
         default_order_column=None,
         display_select_sql={},
         column_expression_sql={},
+        raw_value_select_sql={},
     )
 
 
@@ -120,12 +124,12 @@ class TestDataViewerService(unittest.TestCase):
         self.assertIn(" IN ", where_sql)
         self.assertIn("finalizado", params.values())
 
-    def test_order_process_fk_id_columns_keep_raw_ids(self) -> None:
+    def test_order_process_fk_id_columns_display_labels_but_keep_row_id(self) -> None:
         config = _table_config()
 
         self.assertTrue(DataViewerService._should_preserve_raw_fk_id(config, "id"))
-        self.assertTrue(DataViewerService._should_preserve_raw_fk_id(config, "id_item"))
-        self.assertTrue(DataViewerService._should_preserve_raw_fk_id(config, "proceso_id"))
+        self.assertFalse(DataViewerService._should_preserve_raw_fk_id(config, "id_item"))
+        self.assertFalse(DataViewerService._should_preserve_raw_fk_id(config, "proceso_id"))
         self.assertFalse(DataViewerService._should_preserve_raw_fk_id(config, "valor"))
 
     def test_validate_changes_coerces_timestamp_strings(self) -> None:
@@ -161,6 +165,113 @@ class TestDataViewerService(unittest.TestCase):
         )
 
         self.assertFalse(DataViewerService._should_preserve_raw_fk_id(config, "id_item"))
+
+
+class TestProductNameRecalculation(unittest.IsolatedAsyncioTestCase):
+    async def test_cleared_referencia_1_ignores_legacy_column(self) -> None:
+        class LabelService(DataViewerService):
+            async def _lookup_catalog_label(
+                self,
+                *,
+                table_name,
+                entity_id,
+                include_tela_reference=False,
+            ):
+                labels = {
+                    ("base", 1): "PUFF",
+                    ("referencia", 99): "NEIVA",
+                    ("tela", 3): "OTRO BLANCO",
+                }
+                return labels.get((table_name, entity_id), "")
+
+        service = LabelService(db=object())
+
+        product_name = await service._build_product_name_from_components(
+            {
+                "id_base": 1,
+                "id_referencia": 99,
+                "id_referencia_1": None,
+                "id_tela": 3,
+            }
+        )
+
+        self.assertEqual(product_name, "PUFF OTRO BLANCO")
+
+    def test_product_name_sql_prefers_referencia_1_column(self) -> None:
+        expression = DataViewerService._product_name_sql_expression(
+            product_alias="p",
+            product_columns_by_lower={
+                "id": "id",
+                "nombre": "nombre",
+                "id_base": "id_base",
+                "id_referencia": "id_referencia",
+                "id_referencia_1": "id_referencia_1",
+                "id_tela": "id_tela",
+            },
+        )
+
+        self.assertIn('p."id_referencia_1"', expression)
+        self.assertNotIn('p."id_referencia" ', expression)
+
+    async def test_fetch_product_row_by_pk_reads_component_columns(self) -> None:
+        class FakeResult:
+            def mappings(self):
+                return self
+
+            def first(self):
+                return {
+                    "id": 356,
+                    "id_base": 1,
+                    "id_referencia_1": None,
+                    "id_tela": 3,
+                    "nombre": "PUFF OTRO BLANCO",
+                }
+
+        class FakeDb:
+            def __init__(self):
+                self.sql = ""
+
+            async def execute(self, statement, params):
+                self.sql = str(statement)
+                self.params = params
+                return FakeResult()
+
+        fake_db = FakeDb()
+        service = DataViewerService(db=fake_db)
+        config = _table_config(
+            table_id="producto",
+            table_name="producto",
+            full_table_name="data.producto",
+            display_name="Productos",
+        )
+        metadata = _table_metadata(config)
+        metadata.columns = [
+            {"name": "id"},
+            {"name": "id_base"},
+            {"name": "id_referencia_1"},
+            {"name": "id_tela"},
+            {"name": "nombre"},
+        ]
+        metadata.allowed_columns = {
+            "id",
+            "id_base",
+            "id_referencia_1",
+            "id_tela",
+            "nombre",
+        }
+        metadata.pk_columns = ["id"]
+
+        row = await service._fetch_row_by_pk(
+            table_config=config,
+            metadata=metadata,
+            normalized_pk={"id": 356},
+        )
+
+        self.assertEqual(row["id_base"], 1)
+        self.assertIn('"id_base"', fake_db.sql)
+        self.assertIn('"id_referencia_1"', fake_db.sql)
+        self.assertIn('"id_tela"', fake_db.sql)
+        self.assertIn('"nombre"', fake_db.sql)
 
 
 if __name__ == "__main__":
