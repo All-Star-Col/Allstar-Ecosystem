@@ -67,6 +67,7 @@ const MISSING_LABELS: Record<string, string> = {
     referencia_2: "Referencia 2",
     referencia_3: "Referencia 3",
     tela: "Tela",
+    fecha_entrega: "Fecha entrega",
     producto: "Producto",
 };
 
@@ -76,6 +77,7 @@ const BULK_TABLE_COLUMNS = [
     200,
     360,
     280,
+    180,
     380,
     280,
     280,
@@ -199,6 +201,18 @@ function uniqueProductParts(parts: string[]): string[] {
         seen.add(key);
         return true;
     });
+}
+
+function addDaysIso(days: number, fromDate: Date = new Date()): string {
+    const nextDate = new Date(
+        fromDate.getFullYear(),
+        fromDate.getMonth(),
+        fromDate.getDate() + days,
+    );
+    const year = nextDate.getFullYear();
+    const month = String(nextDate.getMonth() + 1).padStart(2, "0");
+    const day = String(nextDate.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
 }
 
 function buildProductToCreateLabel(row: BulkPurchaseOrderRowAPI): string {
@@ -341,7 +355,9 @@ export default function BulkPurchaseOrderUpload() {
     const hasBlockingMissing = useMemo(
         () =>
             preview?.rows.some((row) =>
-                row.missing.some((missing) => missing === "cliente"),
+                row.missing.some((missing) =>
+                    missing === "cliente" || missing === "fecha_entrega",
+                ),
             ) ?? false,
         [preview],
     );
@@ -353,6 +369,7 @@ export default function BulkPurchaseOrderUpload() {
     const canCommit =
         Boolean(preview?.rows.length) &&
         allRowsFinalized &&
+        !hasBlockingMissing &&
         !isCommitting;
 
     const previewSummary = useMemo(() => {
@@ -1088,6 +1105,15 @@ export default function BulkPurchaseOrderUpload() {
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="min-w-0 space-y-5 pt-6">
+                        <div className="rounded-md border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                            Formato de Excel: <strong>Cliente</strong>, <strong>Nombre</strong>,{" "}
+                            <strong>Tela</strong>, <strong>fecha de entrega</strong>,{" "}
+                            <strong>Oc cliente</strong>, <strong>Cantidad</strong>. Para la fecha
+                            se acepta <strong>YYYY-MM-DD</strong>, <strong>DD/MM/YYYY</strong>,{" "}
+                            <strong>DD-MM-YYYY</strong>, fechas de Excel y variantes con hora.
+                            Si viene vacia, debes escribirla manualmente o usar el boton{" "}
+                            <strong>20 dias</strong>.
+                        </div>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                             <input
                                 type="file"
@@ -1215,9 +1241,9 @@ export default function BulkPurchaseOrderUpload() {
                         {hasBlockingMissing && (
                             <Alert variant="destructive">
                                 <AlertCircle className="h-4 w-4" />
-                                <AlertTitle>Falta cliente</AlertTitle>
+                                <AlertTitle>Faltan datos obligatorios</AlertTitle>
                                 <AlertDescription>
-                                    El cliente debe existir para crear la orden de compra.
+                                    El cliente debe existir y la fecha de entrega es obligatoria.
                                     Base, modelo, referencias y tela pueden quedar vacios.
                                 </AlertDescription>
                             </Alert>
@@ -1248,6 +1274,7 @@ export default function BulkPurchaseOrderUpload() {
                                                 <TableHead>Cliente</TableHead>
                                                 <TableHead>Nombre</TableHead>
                                                 <TableHead>Tela</TableHead>
+                                                <TableHead>Fecha entrega</TableHead>
                                                 <TableHead>Producto homologado</TableHead>
                                                 <TableHead>Base</TableHead>
                                                 <TableHead>Modelo</TableHead>
@@ -1281,6 +1308,51 @@ export default function BulkPurchaseOrderUpload() {
                                                     </TableCell>
                                                     <TableCell className="whitespace-normal break-words align-top leading-snug">
                                                         {row.tela}
+                                                    </TableCell>
+                                                    <TableCell className="align-top">
+                                                        <div className="grid gap-2">
+                                                            <input
+                                                                type="date"
+                                                                value={row.fecha_entrega ?? ""}
+                                                                onChange={(event) =>
+                                                                    updateRow(row.row_number, (current) => {
+                                                                        const nextMissing = event.target.value
+                                                                            ? current.missing.filter(
+                                                                                  (missing) => missing !== "fecha_entrega",
+                                                                              )
+                                                                            : Array.from(
+                                                                                  new Set([
+                                                                                      ...current.missing,
+                                                                                      "fecha_entrega",
+                                                                                  ]),
+                                                                              );
+                                                                        return {
+                                                                            ...current,
+                                                                            fecha_entrega: event.target.value,
+                                                                            missing: nextMissing,
+                                                                        };
+                                                                    })
+                                                                }
+                                                                className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                                                            />
+                                                            <Button
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={() =>
+                                                                    updateRow(row.row_number, (current) => ({
+                                                                        ...current,
+                                                                        fecha_entrega: addDaysIso(20),
+                                                                        missing: current.missing.filter(
+                                                                            (missing) => missing !== "fecha_entrega",
+                                                                        ),
+                                                                    }))
+                                                                }
+                                                                className="h-8 justify-center text-xs"
+                                                            >
+                                                                20 dias
+                                                            </Button>
+                                                        </div>
                                                     </TableCell>
                                                     <TableCell className="whitespace-normal break-words align-top">
                                                         <ProductHomologationBadge row={row} />

@@ -548,7 +548,7 @@ export function DataViewerProModule({
     const [filters, setFilters] = useState<DataViewerFilter[]>([]);
     const [sort, setSort] = useState<DataViewerSort | null>(null);
 
-    const [includeTotal] = useState(true);
+    const includeTotal = false;
     const [limit, setLimit] = useState(clampLimit(defaultLimit));
     const [offset, setOffset] = useState(0);
 

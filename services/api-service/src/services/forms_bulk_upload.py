@@ -26,6 +26,10 @@ ORDER_HEADERS = {
     "oc_cliente": "Oc cliente",
     "cantidad": "Cantidad",
 }
+DELIVERY_DATE_HEADER_KEYS = (
+    "fecha_entrega",
+    "fecha_de_entrega",
+)
 FULL_PRODUCT_HEADERS = {
     "base": "Base",
     "modelo": "Modelo",
@@ -69,6 +73,7 @@ class BulkRow:
     referencia_2: str
     referencia_3: str
     tela: str
+    fecha_entrega: date | None
     detalle: str
     oc_interno: str
     oc_cliente: str
@@ -179,6 +184,22 @@ def _parse_optional_datetime(value: Any) -> datetime | None:
         except ValueError:
             continue
     return datetime.fromisoformat(normalized).replace(tzinfo=None)
+
+
+def _parse_optional_date(value: Any) -> date | None:
+    parsed_datetime = _parse_optional_datetime(value)
+    return parsed_datetime.date() if parsed_datetime else None
+
+
+def _parse_purchase_order_delivery_date(value: Any) -> date | None:
+    return _parse_optional_date(value)
+
+
+def _first_present_value(row: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
 
 
 def _coerce_column_value(value: Any, column_meta: dict[str, Any]) -> Any:
@@ -1031,6 +1052,9 @@ def parse_purchase_order_excel(content: bytes) -> list[BulkRow]:
                     referencia_2=_component_text(raw.get("referencia_2")),
                     referencia_3=_component_text(raw.get("referencia_3")),
                     tela=_component_text(raw.get("tela")),
+                    fecha_entrega=_parse_purchase_order_delivery_date(
+                        _first_present_value(raw, DELIVERY_DATE_HEADER_KEYS)
+                    ),
                     detalle=_clean_cell_text(raw.get("detalle")),
                     oc_interno=_clean_cell_text(raw.get("oc_interno")),
                     oc_cliente=_clean_cell_text(raw.get("oc_cliente")),
@@ -1055,6 +1079,9 @@ def _bulk_row_from_payload(payload: dict[str, Any]) -> BulkRow:
         referencia_2=_component_text(payload.get("referencia_2")),
         referencia_3=_component_text(payload.get("referencia_3")),
         tela=_component_text(payload.get("tela")),
+        fecha_entrega=_parse_purchase_order_delivery_date(
+            _first_present_value(payload, DELIVERY_DATE_HEADER_KEYS)
+        ),
         detalle=_clean_cell_text(payload.get("detalle")),
         oc_interno=_clean_cell_text(payload.get("oc_interno")),
         oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
@@ -1409,6 +1436,8 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
         missing = []
         if not client:
             missing.append("cliente")
+        if not row.fecha_entrega:
+            missing.append("fecha_entrega")
 
         preview_rows.append(
             {
@@ -1420,6 +1449,7 @@ async def preview_purchase_order_import(db: AsyncSession, content: bytes) -> dic
                 "referencia_2": row.referencia_2,
                 "referencia_3": row.referencia_3,
                 "tela": row.tela,
+                "fecha_entrega": row.fecha_entrega.isoformat() if row.fecha_entrega else "",
                 "detalle": row.detalle,
                 "oc_interno": row.oc_interno,
                 "oc_cliente": row.oc_cliente,
@@ -1648,6 +1678,12 @@ async def commit_purchase_order_import(
     created_products = 0
     next_item_legado = await _get_next_item_legado(db)
     default_fabric_unit_id = await _get_default_fabric_unit_id(db)
+    order_columns = await _table_columns_map(db, "ordencompra")
+    if "fecha_entrega" not in order_columns:
+        raise DBCommunicationError(
+            "La tabla data.ordencompra no tiene la columna fecha_entrega. "
+            "Crea la columna antes de continuar con la carga masiva."
+        )
 
     try:
         for payload in rows_payload:
@@ -1663,6 +1699,9 @@ async def commit_purchase_order_import(
                     referencia_2=_component_text(payload.get("referencia_2")),
                     referencia_3=_component_text(payload.get("referencia_3")),
                     tela=_component_text(payload.get("tela")),
+                    fecha_entrega=_parse_purchase_order_delivery_date(
+                        _first_present_value(payload, DELIVERY_DATE_HEADER_KEYS)
+                    ),
                     detalle=_clean_cell_text(payload.get("detalle")),
                     oc_interno=_clean_cell_text(payload.get("oc_interno")),
                     oc_cliente=_clean_cell_text(payload.get("oc_cliente")),
@@ -1683,6 +1722,10 @@ async def commit_purchase_order_import(
                 if not client_id:
                     raise DBCommunicationError(
                         f"Fila {row.row_number}: el cliente debe existir antes de cargar"
+                    )
+                if not row.fecha_entrega:
+                    raise DBCommunicationError(
+                        f"Fila {row.row_number}: falta fecha de entrega"
                     )
 
                 if product_id:
@@ -1796,6 +1839,7 @@ async def commit_purchase_order_import(
                         "oc_cliente": row.oc_cliente,
                         "cantidad": row.cantidad,
                         "detalle": row.detalle,
+                        "fecha_entrega": row.fecha_entrega,
                         "estado": "pendiente",
                         "fecha_pedido": date.today(),
                     },

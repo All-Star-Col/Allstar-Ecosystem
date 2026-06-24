@@ -33,5 +33,14 @@ describe("form defaults", () => {
             fecha_inicio: "2026-01-10",
         });
     });
+
+    it("leaves fecha_entrega empty so it must be selected manually", () => {
+        const columns: ColumnSchema[] = [
+            { name: "fecha_entrega", type: "date" },
+        ];
+
+        expect(buildInitialFormData(columns, new Date("2026-04-23T00:00:00.000Z"))).toEqual({
+        });
+    });
 });
 

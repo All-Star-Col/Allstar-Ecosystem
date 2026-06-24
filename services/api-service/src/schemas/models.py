@@ -341,7 +341,7 @@ class DataViewerQueryRequest(BaseModel):
     q: str | None = None
     limit: int = Field(default=100, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
-    include_total: bool = True
+    include_total: bool = False
 
     @field_validator("columns")
     @classmethod
