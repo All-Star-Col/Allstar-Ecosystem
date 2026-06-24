@@ -173,13 +173,14 @@ jobs:
             fi"
 
           echo 'Verifying public API URL through Tailscale HTTPS from GitHub runner...'
-          for i in $(seq 1 3); do
+          for i in $(seq 1 12); do
             if curl -fsS --connect-timeout 5 --max-time 10 "${{ env.PUBLIC_API_HEALTH_URL }}"; then
               echo
               echo 'Public Tailscale HTTPS healthcheck passed.'
               exit 0
             fi
-            sleep 5
+            echo "Public API healthcheck attempt ${i}/12 failed; retrying..."
+            sleep 10
           done
           echo 'Public API URL did not respond after VM-local health passed.'
           exit 1

@@ -103,13 +103,14 @@ jobs:
 
       - name: Verify public HTTPS endpoint
         run: |
-          for i in $(seq 1 3); do
+          for i in $(seq 1 12); do
             if curl -fsS --connect-timeout 5 --max-time 10 "${{ env.PUBLIC_API_HEALTH_URL }}"; then
               echo
               echo 'Public HTTPS healthcheck passed.'
               exit 0
             fi
-            sleep 5
+            echo "Public HTTPS healthcheck attempt ${i}/12 failed; retrying..."
+            sleep 10
           done
           echo 'Public HTTPS endpoint did not respond from the GitHub runner after repair.'
           exit 1
