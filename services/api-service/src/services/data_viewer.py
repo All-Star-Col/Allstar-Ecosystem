@@ -11,6 +11,7 @@ from datetime import date, datetime, timezone
 from typing import Any, AsyncIterator, Iterable
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging_config import get_logger
@@ -346,6 +347,15 @@ class ColumnNotEditableError(DataViewerError):
             detail=f"Column {column} is not editable",
             code="COLUMN_NOT_EDITABLE",
             status_code=422,
+        )
+
+
+class DataIntegrityConstraintError(DataViewerError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            detail=detail,
+            code="DATA_INTEGRITY_CONSTRAINT",
+            status_code=409,
         )
 
 
@@ -1088,6 +1098,12 @@ class DataViewerService:
         except DataViewerError:
             await self.db.rollback()
             raise
+        except IntegrityError as error:
+            await self.db.rollback()
+            raise DataIntegrityConstraintError(
+                "No se pudo guardar porque el cambio viola una restriccion de la base de datos. "
+                "Si el valor ya existe, selecciona el registro existente o fusiona el producto cuando aplique."
+            ) from error
         except Exception as error:
             await self.db.rollback()
             raise DBCommunicationError(f"Error patching DataViewer row: {error}")
@@ -1285,6 +1301,26 @@ class DataViewerService:
             f"{_quote_identifier(table_config.schema_name)}."
             f"{_quote_identifier(table_config.table_name)}"
         )
+        column_names = {
+            str(column.get("name"))
+            for column in metadata.columns
+            if column.get("name")
+        }
+        selected_columns: list[str] = []
+        for column_name in (
+            *metadata.pk_columns,
+            "id",
+            *PRODUCT_COMPONENT_COLUMNS,
+            "nombre",
+        ):
+            if column_name in column_names and column_name not in selected_columns:
+                selected_columns.append(column_name)
+        if not selected_columns:
+            selected_columns = list(metadata.pk_columns)
+        selected_columns_sql = ", ".join(
+            _quote_identifier(column) for column in selected_columns
+        )
+
         where_clauses: list[str] = []
         params: dict[str, Any] = {}
         for index, pk_column in enumerate(metadata.pk_columns):
@@ -1295,7 +1331,7 @@ class DataViewerService:
         result = await self.db.execute(
             text(
                 f"""
-                SELECT {self._build_returning_sql(metadata)}
+                SELECT {selected_columns_sql}
                 FROM {table_ref}
                 WHERE {" AND ".join(where_clauses)}
                 LIMIT 1
@@ -1353,8 +1389,9 @@ class DataViewerService:
         self,
         row_values: dict[str, Any],
     ) -> str:
-        referencia_1_value = row_values.get("id_referencia_1")
-        if referencia_1_value is None and "id_referencia" in row_values:
+        if "id_referencia_1" in row_values:
+            referencia_1_value = row_values.get("id_referencia_1")
+        else:
             referencia_1_value = row_values.get("id_referencia")
 
         labels = [
@@ -1456,10 +1493,11 @@ class DataViewerService:
         )
         next_row = {**current_row, **normalized_changes}
         recalculated_name = await self._build_product_name_from_components(next_row)
-        if recalculated_name:
-            normalized_changes["nombre"] = recalculated_name
+        normalized_changes["nombre"] = recalculated_name
         if "fecha_modificacion" in column_names:
-            normalized_changes["fecha_modificacion"] = datetime.now(timezone.utc).replace(tzinfo=None)
+            normalized_changes["fecha_modificacion"] = datetime.now(
+                timezone.utc
+            ).replace(tzinfo=None)
 
         current_product_id = None
         if current_row.get("id") is not None:
