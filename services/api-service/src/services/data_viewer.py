@@ -484,6 +484,8 @@ class CsvExportResult:
 
 _table_metadata_cache: dict[tuple[Any, ...], tuple[float, TableMetadata]] = {}
 
+_MISSING = object()
+
 
 def _table_metadata_cache_key(config: TableConfig) -> tuple[Any, ...]:
     return (
@@ -1105,6 +1107,128 @@ class DataViewerService:
             has_more=has_more,
         )
 
+    async def _update_order_delivery_date_from_item(
+        self,
+        *,
+        table_config: TableConfig,
+        metadata: TableMetadata,
+        normalized_pk: dict[str, Any],
+        delivery_value: Any,
+    ) -> None:
+        if not self._is_item_table_config(table_config):
+            raise ColumnNotEditableError("fecha_estimada")
+
+        item_columns = await _get_table_columns(
+            self.db,
+            schema_name=table_config.schema_name,
+            table_name=table_config.table_name,
+        )
+
+        item_order_column = _choose_existing_column(
+            item_columns,
+            ITEM_ORDER_COLUMN_PRIORITY,
+        )
+        if not item_order_column:
+            raise DBCommunicationError(
+                "No se encontro la columna de orden de compra en la tabla item"
+            )
+
+        order_ref = await _resolve_reference_from_column(
+            self.db,
+            schema_name=table_config.schema_name,
+            source_table=table_config.table_name,
+            source_column=item_order_column,
+            fallback_table_candidates=ORDER_TABLE_NAME_CANDIDATES,
+            fallback_value_candidates=(
+                item_order_column.lower(),
+                "id",
+                "id_orden_compra",
+                "orden_compra_id",
+                "ordencompra_id",
+                "oc",
+            ),
+        )
+        if not order_ref:
+            raise DBCommunicationError(
+                "No se pudo resolver la orden de compra relacionada al item"
+            )
+
+        order_columns = await _get_table_columns(
+            self.db,
+            schema_name=order_ref["referenced_schema"],
+            table_name=order_ref["referenced_table"],
+        )
+
+        order_delivery_column = _choose_existing_column(
+            order_columns,
+            ORDER_DELIVERY_DATE_COLUMN_PRIORITY,
+        )
+        if not order_delivery_column:
+            raise DBCommunicationError(
+                "La tabla de ordenes de compra no tiene columna fecha_entrega"
+            )
+
+        item_table_ref = (
+            f"{_quote_identifier(table_config.schema_name)}."
+            f"{_quote_identifier(table_config.table_name)}"
+        )
+
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
+
+        for index, pk_column in enumerate(metadata.pk_columns):
+            pk_key = f"item_pk_{index}"
+            where_clauses.append(f"{_quote_identifier(pk_column)} = :{pk_key}")
+            params[pk_key] = normalized_pk[pk_column]
+
+        item_order_result = await self.db.execute(
+            text(
+                f"""
+                SELECT {_quote_identifier(item_order_column)} AS order_id
+                FROM {item_table_ref}
+                WHERE {" AND ".join(where_clauses)}
+                LIMIT 1
+                """
+            ),
+            params,
+        )
+
+        item_row = item_order_result.mappings().first()
+        if not item_row:
+            raise RowNotFoundError(table_config.table_id)
+
+        order_id = item_row.get("order_id")
+        if order_id is None or str(order_id).strip() == "":
+            raise DBCommunicationError(
+                "El item no tiene una orden de compra relacionada"
+            )
+
+        order_table_ref = (
+            f"{_quote_identifier(order_ref['referenced_schema'])}."
+            f"{_quote_identifier(order_ref['referenced_table'])}"
+        )
+
+        order_update_result = await self.db.execute(
+            text(
+                f"""
+                UPDATE {order_table_ref}
+                SET {_quote_identifier(order_delivery_column)} = :delivery_value
+                WHERE TRIM({_quote_identifier(order_ref["referenced_column"])}::text) = TRIM(CAST(:order_id AS text))
+                RETURNING {_quote_identifier(order_ref["referenced_column"])}
+                """
+            ),
+            {
+                "delivery_value": delivery_value,
+                "order_id": str(order_id),
+            },
+        )
+
+        updated_order = order_update_result.mappings().first()
+        if not updated_order:
+            raise RowNotFoundError(order_ref["referenced_table"])
+
+
+
     async def patch_row(
         self,
         request_data: DataViewerRowUpdateRequest,
@@ -1134,16 +1258,21 @@ class DataViewerService:
             normalized_changes=normalized_changes,
         )
 
+        fecha_estimada_update_value = normalized_changes.pop("fecha_estimada", _MISSING)
+
         table_ref = (
             f"{_quote_identifier(table_config.schema_name)}."
             f"{_quote_identifier(table_config.table_name)}"
         )
         update_columns = list(normalized_changes.keys())
 
+        if fecha_estimada_update_value is not _MISSING:
+            update_columns.append("fecha_estimada")
+
         set_clauses: list[str] = []
         query_params: dict[str, Any] = {}
 
-        for index, column_name in enumerate(update_columns):
+        for index, column_name in enumerate(normalized_changes.keys()):
             value_key = f"set_value_{index}"
             set_clauses.append(f"{_quote_identifier(column_name)} = :{value_key}")
             query_params[value_key] = normalized_changes[column_name]
@@ -1155,28 +1284,43 @@ class DataViewerService:
             query_params[pk_key] = normalized_pk[pk_column]
 
         where_sql = " AND ".join(where_clauses)
-        update_sql = (
-            f"UPDATE {table_ref} "
-            f"SET {', '.join(set_clauses)} "
-            f"WHERE {where_sql} "
-            f"RETURNING {self._build_returning_sql(metadata)}"
-        )
+
+        update_sql = None
+        if normalized_changes:
+            update_sql = (
+                f"UPDATE {table_ref} "
+                f"SET {', '.join(set_clauses)} "
+                f"WHERE {where_sql} "
+                f"RETURNING {self._build_returning_sql(metadata)}"
+            )
 
         try:
             await self.db.execute(
                 text(f"SET LOCAL statement_timeout = {int(DATA_VIEWER_MUTATION_TIMEOUT_MS)}")
             )
-            update_result = await self.db.execute(text(update_sql), query_params)
-            updated_row = update_result.mappings().first()
 
-            if not updated_row:
-                raise RowNotFoundError(request_data.table_id)
+            if normalized_changes and update_sql is not None:
+                update_result = await self.db.execute(text(update_sql), query_params)
+                updated_row = update_result.mappings().first()
 
-            await self._refresh_product_names_after_catalog_change(
-                table_config=table_config,
-                normalized_pk=normalized_pk,
-                normalized_changes=normalized_changes,
-            )
+                if not updated_row:
+                    raise RowNotFoundError(request_data.table_id)
+
+                await self._refresh_product_names_after_catalog_change(
+                    table_config=table_config,
+                    normalized_pk=normalized_pk,
+                    normalized_changes=normalized_changes,
+                )
+            else:
+                updated_row = normalized_pk
+
+            if fecha_estimada_update_value is not _MISSING:
+                await self._update_order_delivery_date_from_item(
+                    table_config=table_config,
+                    metadata=metadata,
+                    normalized_pk=normalized_pk,
+                    delivery_value=fecha_estimada_update_value,
+                )
 
             await self.db.commit()
         except DataViewerError:
@@ -1368,6 +1512,14 @@ class DataViewerService:
             "next_process": 2,
             "inserted_row": inserted_row,
         }
+    def _is_item_table_config(self, table_config: TableConfig) -> bool:
+        candidates = {
+            table_config.table_name.lower(),
+            table_config.full_table_name.lower().split(".")[-1],
+            table_config.table_id.lower(),
+            (table_config.display_name or "").strip().lower(),
+        }
+        return not candidates.isdisjoint(ITEM_TABLE_NAME_CANDIDATES)
 
     def _is_product_table_config(self, table_config: TableConfig) -> bool:
         candidates = {
@@ -3052,6 +3204,39 @@ class DataViewerService:
                 expression=item_tela_expression,
                 read_only_reason="DERIVED_ORDER_PRODUCT_TELA",
             )
+        item_fecha_estimada_expression = item_order_expressions.get("fecha_estimada")
+        if item_fecha_estimada_expression:
+            if "fecha_estimada" not in allowed_columns:
+                columns.append(
+                    {
+                        "name": "fecha_estimada",
+                        "type": "date",
+                        "nullable": True,
+                        "visible": True,
+                        "editable": True,
+                        "required": False,
+                        "max_length": None,
+                        "enum_values": None,
+                        "read_only_reason": None,
+                        "raw_value_column": None,
+                    }
+                )
+                allowed_columns.add("fecha_estimada")
+
+            editable_columns.add("fecha_estimada")
+            text_columns.discard("fecha_estimada")
+            display_select_sql["fecha_estimada"] = (
+                f"{item_fecha_estimada_expression} AS {_quote_identifier('fecha_estimada')}"
+            )
+            column_expression_sql["fecha_estimada"] = item_fecha_estimada_expression
+
+            for column in columns:
+                if str(column.get("name") or "").lower() == "fecha_estimada":
+                    column["type"] = "date"
+                    column["editable"] = True
+                    column["read_only_reason"] = None
+                    column["raw_value_column"] = None
+                    break       
 
         order_id_index = next(
             (
@@ -3103,7 +3288,12 @@ class DataViewerService:
         if item_order_expressions:
             self._place_columns_in_order(
                 columns,
-                ["item_legado", "producto", "tela", "detalle"],
+                ["item_legado",
+            "producto",
+            "tela",
+            "detalle",
+            "fecha_produccion",
+            "fecha_estimada",],
             )
 
         has_pk = bool(pk_columns)
@@ -4049,6 +4239,22 @@ class DataViewerService:
                 f"NULLIF(TRIM({item_order_ref}::text), '')"
             )
         }
+
+        order_delivery_column = _choose_existing_column(
+            order_columns,
+            ORDER_DELIVERY_DATE_COLUMN_PRIORITY,
+        )
+
+        if order_delivery_column:
+            order_delivery = _quote_identifier(order_delivery_column)
+            expressions["fecha_estimada"] = (
+                "COALESCE(("
+                f"SELECT TO_CHAR(order_ref.{order_delivery}::date, 'YYYY-MM-DD') "
+                f"FROM {order_schema}.{order_table} order_ref "
+                f"WHERE TRIM(order_ref.{order_value}::text) = TRIM({item_order_ref}::text) "
+                "LIMIT 1"
+                "), NULL)"
+            )
         order_detail_column = _choose_existing_column(
             order_columns,
             ("detalle", "descripcion", "observaciones"),
@@ -4142,6 +4348,7 @@ class DataViewerService:
                 "LIMIT 1"
                 f"), {fallback_expression})"
             )
+
         return expressions
 
     @staticmethod
