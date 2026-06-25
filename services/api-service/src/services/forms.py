@@ -301,6 +301,13 @@ def _normalize_label_for_match(value: Any) -> str:
 def _is_items_table(table_name: str) -> bool:
     return _normalize_table_name_for_match(table_name) in {"item", "items"}
 
+def _is_purchase_order_table(table_name: str) -> bool:
+    return _normalize_table_name_for_match(table_name) in {
+        "ordencompra",
+        "ordenescompra",
+        "ordenesdecompra",
+    }
+
 
 def _is_hidden_form_column(table_name: str, column_name: str) -> bool:
     return _is_items_table(table_name) and column_name == "fecha_entrega"
@@ -1016,6 +1023,10 @@ async def _build_tables_payload(
                 "foreign_key_label_field": None,
                 "foreign_key_options": None,
             }
+
+            if _is_purchase_order_table(table_name) and column_name == "fecha_entrega":
+                column_payload["nullable"] = False
+                column_payload["required"] = True            
 
             fk_info = foreign_keys.get((table_name, column_name))
             if fk_info:
@@ -3280,6 +3291,15 @@ async def new_tabledata(
             )
 
         row_data[normalized_column] = coerced
+
+    if _is_purchase_order_table(table_name):
+        fecha_entrega = row_data.get("fecha_entrega")
+        if fecha_entrega is None or (
+            isinstance(fecha_entrega, str) and fecha_entrega.strip() == ""
+        ):
+            raise DBCommunicationError(
+                "La fecha de entrega es obligatoria para crear una orden de compra"
+            )
 
     if not row_data:
         raise DBCommunicationError("No hay datos para insertar")
