@@ -9,6 +9,9 @@ data class ItemDto(
     @SerializedName("Item")
     val item: Double?,
 
+    @SerializedName("EstadoItem")
+    val estadoItem: String?,
+
     @SerializedName("ID")
     val id: Double?,
 
@@ -57,8 +60,8 @@ data class ItemDto(
     @SerializedName("Producto")
     val producto: String?,
 
-    @SerializedName("ProductoSku")
-    val productoSku: String?,
+    @SerializedName("Tela")
+    val tela: String?,
 
     @SerializedName("ProcesoNombre")
     val procesoNombre: String?,
@@ -92,6 +95,12 @@ data class OrdenProcesoDto(
     @SerializedName("Item")
     val item: Double?,
 
+    @SerializedName("Item legado")
+    val itemLegado: Double?,
+
+    @SerializedName("EstadoItem")
+    val estadoItem: String?,
+
     @SerializedName("Fecha inicio")
     val fechaInicio: String?,
 
@@ -119,8 +128,8 @@ data class OrdenProcesoDto(
     @SerializedName("Producto")
     val producto: String?,
 
-    @SerializedName("ProductoSku")
-    val productoSku: String?,
+    @SerializedName("Tela")
+    val tela: String?,
 
     @SerializedName("Cliente")
     val cliente: Double?,
@@ -145,6 +154,9 @@ data class EmpleadoDto(
     @SerializedName("ID")
     val id: Double?,
 
+    @SerializedName("IdArea")
+    val idArea: Double?,
+
     @SerializedName("Nombre")
     val nombre: String?,
 
@@ -161,6 +173,9 @@ data class ProcesoDto(
 
     @SerializedName("Nombre")
     val nombre: String?,
+
+    @SerializedName("IdArea")
+    val idArea: Double?,
 
     @SerializedName("Area")
     val area: String?

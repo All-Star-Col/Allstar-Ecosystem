@@ -7,10 +7,10 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 object ApiClient {
 
-    private const val BASE_URL = "http://100.123.211.106/api/v1/tablet/tapiceria/"
+    //private const val BASE_URL = "http://100.123.211.106/api/v1/tablet/tapiceria/"
 
     // Produccion/oficial:
-    // private const val BASE_URL = "https://api-vm.tail6cef8e.ts.net/api/v1/tablet/tapiceria/"
+    private const val BASE_URL = "https://api-vm.tail6cef8e.ts.net/api/v1/tablet/tapiceria/"
 
     private val logging = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

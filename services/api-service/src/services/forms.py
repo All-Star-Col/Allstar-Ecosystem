@@ -59,6 +59,7 @@ TELA_LOOKUP_FIELDS = ("nombre", "referencia")
 SYNTHETIC_PRODUCTION_CATEGORY_ID = 900001
 SYNTHETIC_ORDER_PROCESS_TABLE_ID = 900101
 ORDER_PROCESS_SEQUENCE = (1, 6, 2, 3, 4, 5)
+INITIAL_ITEM_PROCESS_IDS = (1, 6)
 FINALIZED_STATUS_VALUES = (
     "finalizado",
     "finalizada",
@@ -1411,6 +1412,7 @@ async def _find_or_create_named_entity(
     existing_id = existing.scalar_one_or_none()
     if existing_id is not None:
         return int(existing_id)
+    
 
     row_data: dict[str, Any] = {"nombre": clean_name}
     await _add_manual_integer_id_if_needed(db, table_name=table_name, row_data=row_data)
@@ -1491,8 +1493,8 @@ async def _find_or_create_fabric(
         row_data["nombre"] = clean_name or clean_reference
     if "referencia" in table_columns:
         row_data["referencia"] = clean_reference
-    if unidad_medida_id and "id_unidad_medida" in table_columns:
-        row_data["id_unidad_medida"] = int(unidad_medida_id)
+    if "id_unidad_medida" in table_columns:
+        row_data["id_unidad_medida"] = 1
 
     await _add_manual_integer_id_if_needed(db, table_name="tela", row_data=row_data)
     columns_sql = ", ".join(_quote_identifier(column, field_name="fabric_column") for column in row_data)
@@ -3121,7 +3123,7 @@ async def _create_initial_item_process(
     process_table = await _find_item_process_table(db)
     if not process_table:
         raise DBCommunicationError(
-            "No se encontro la tabla ordenproceso para crear el proceso inicial del item"
+            "No se encontro la tabla ordenproceso para crear los procesos iniciales del item"
         )
 
     table_name, columns = process_table
@@ -3142,6 +3144,11 @@ async def _create_initial_item_process(
         ("fecha_creacion", "created_at", "fecha", "fecha_inicio", "timestamp"),
     )
 
+    if not process_column or not item_column:
+        raise DBCommunicationError(
+            "No se pudo crear ordenproceso: faltan columnas de item o proceso"
+        )
+
     item_id = (
         inserted_item.get("id")
         or inserted_item.get("id_item")
@@ -3161,38 +3168,67 @@ async def _create_initial_item_process(
         or datetime.now(timezone.utc)
     )
 
-    row_data: dict[str, Any] = {}
-    if process_column:
-        row_data[process_column] = 1
+    employee_value: Any = None
+    include_employee = False
     if employee_column:
         include_employee, employee_value = await _resolve_initial_employee_value(
             db,
             process_table=table_name,
             employee_column=employee_column,
         )
-        if include_employee:
+
+    q_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    q_table = _quote_identifier(table_name, field_name="item_process_table")
+    q_item_column = _quote_identifier(item_column, field_name="item_process_item_column")
+    q_process_column = _quote_identifier(process_column, field_name="item_process_process_column")
+
+    for process_id in INITIAL_ITEM_PROCESS_IDS:
+        existing_process = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT 1
+                    FROM {q_schema}.{q_table}
+                    WHERE {q_item_column} = :item_id
+                      AND {q_process_column} = :process_id
+                    LIMIT 1
+                    """
+                ),
+                {"item_id": item_id, "process_id": process_id},
+            )
+        ).scalar_one_or_none()
+
+        if existing_process is not None:
+            continue
+
+        row_data: dict[str, Any] = {
+            process_column: process_id,
+            item_column: item_id,
+        }
+
+        if employee_column and include_employee:
             row_data[employee_column] = employee_value
-    if item_column:
-        row_data[item_column] = item_id
-    if created_column:
-        row_data[created_column] = item_created_at
 
-    await _add_manual_integer_id_if_needed(
-        db,
-        table_name=table_name,
-        row_data=row_data,
-    )
+        if created_column:
+            row_data[created_column] = item_created_at
 
-    columns_sql = ", ".join(
-        _quote_identifier(column, field_name="item_process_column")
-        for column in row_data
-    )
-    placeholders = ", ".join(f":{column}" for column in row_data)
-    query = text(
-        f"INSERT INTO {_quote_identifier(FORMS_SCHEMA, field_name='schema')}.{_quote_identifier(table_name, field_name='item_process_table')} ({columns_sql}) VALUES ({placeholders})"
-    )
-    await db.execute(query, row_data)
+        await _add_manual_integer_id_if_needed(
+            db,
+            table_name=table_name,
+            row_data=row_data,
+        )
 
+        columns_sql = ", ".join(
+            _quote_identifier(column, field_name="item_process_column")
+            for column in row_data
+        )
+        placeholders = ", ".join(f":{column}" for column in row_data)
+
+        query = text(
+            f"INSERT INTO {q_schema}.{q_table} ({columns_sql}) VALUES ({placeholders})"
+        )
+
+        await db.execute(query, row_data)
 
 async def new_tabledata(
     db: AsyncSession,

@@ -20,6 +20,9 @@ from src.services.forms import (
     _resolve_initial_employee_value,
 )
 
+INITIAL_ITEM_PROCESS_IDS = (1, 6)
+
+
 
 ORDER_HEADERS = {
     "cliente": "Cliente",
@@ -1625,6 +1628,7 @@ async def _create_initial_bulk_item_process(
 
     columns = await _table_columns_map(db, "ordenproceso")
     available_columns = set(columns)
+
     process_column = _first_existing_column(
         available_columns,
         ("id_proceso", "proceso_id", "id_prtoceso"),
@@ -1642,27 +1646,60 @@ async def _create_initial_bulk_item_process(
         ("fecha_inicio", "fecha_creacion", "created_at", "fecha", "timestamp"),
     )
 
-    row_data: dict[str, Any] = {}
-    if process_column:
-        row_data[process_column] = 1
+    if not process_column or not item_column:
+        raise DBCommunicationError(
+            "No se pudo crear ordenproceso: faltan columnas de item o proceso"
+        )
+
+    employee_value: Any = None
+    include_employee = False
     if employee_column:
         include_employee, employee_value = await _resolve_initial_employee_value(
             db,
             process_table="ordenproceso",
             employee_column=employee_column,
         )
-        if include_employee:
-            row_data[employee_column] = employee_value
-    if item_column:
-        row_data[item_column] = item_id
-    if created_column:
-        row_data[created_column] = date.today()
 
-    await _insert_dynamic_row(
-        db,
-        "ordenproceso",
-        row_data,
-    )
+    q_schema = _quote_identifier(FORMS_SCHEMA, field_name="schema")
+    q_table = _quote_identifier("ordenproceso", field_name="bulk_table")
+    q_item_column = _quote_identifier(item_column, field_name="bulk_item_column")
+    q_process_column = _quote_identifier(process_column, field_name="bulk_process_column")
+
+    for process_id in INITIAL_ITEM_PROCESS_IDS:
+        existing_process = (
+            await db.execute(
+                text(
+                    f"""
+                    SELECT 1
+                    FROM {q_schema}.{q_table}
+                    WHERE {q_item_column} = :item_id
+                      AND {q_process_column} = :process_id
+                    LIMIT 1
+                    """
+                ),
+                {"item_id": item_id, "process_id": process_id},
+            )
+        ).scalar_one_or_none()
+
+        if existing_process is not None:
+            continue
+
+        row_data: dict[str, Any] = {
+            process_column: process_id,
+            item_column: item_id,
+        }
+
+        if employee_column and include_employee:
+            row_data[employee_column] = employee_value
+
+        if created_column:
+            row_data[created_column] = date.today()
+
+        await _insert_dynamic_row(
+            db,
+            "ordenproceso",
+            row_data,
+        )
 
 
 async def commit_purchase_order_import(

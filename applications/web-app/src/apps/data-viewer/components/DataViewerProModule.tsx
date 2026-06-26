@@ -96,6 +96,8 @@ const FILTER_OPERATOR_LABELS: Record<DataViewerFilterOperator, string> = {
     lt: "menor que",
     in: "incluye",
     between: "entre",
+    is_null: "vacío",
+    is_not_null: "no vacío",
 };
 
 const FILTER_OPERATOR_OPTIONS: {
@@ -108,6 +110,8 @@ const FILTER_OPERATOR_OPTIONS: {
     { value: "lt", label: "menor que" },
     { value: "in", label: "incluye" },
     { value: "between", label: "entre" },
+    { value: "is_null", label: "vacío / NULL" },
+    { value: "is_not_null", label: "no vacío / NOT NULL" },
 ];
 
 interface UiErrorState {
@@ -263,22 +267,22 @@ function getAllowedFilterOperators(
     }
 
     if (isBooleanType(column.type)) {
-        return ["eq"];
+        return ["eq", "is_null", "is_not_null"];
     }
 
     if (isDateType(column.type) || isDateTimeType(column.type)) {
-        return ["eq", "gt", "lt", "between"];
+        return ["eq", "gt", "lt", "between", "is_null", "is_not_null"];
     }
 
     if (isNumericType(column.type) && column.read_only_reason !== "FOREIGN_KEY_DISPLAY_VALUE") {
-        return ["eq", "gt", "lt", "in", "between"];
+        return ["eq", "gt", "lt", "in", "between", "is_null", "is_not_null"];
     }
 
     if (isTextualFilterColumn(column)) {
-        return ["eq", "contains", "in"];
+        return ["eq", "contains", "in", "is_null", "is_not_null"];
     }
 
-    return ["eq", "contains"];
+    return ["eq", "contains", "is_null", "is_not_null"];
 }
 
 function isDateType(type: string): boolean {
@@ -1223,18 +1227,24 @@ export function DataViewerProModule({
             return;
         }
 
-        if (!draftFilter.value.trim()) {
+        if (
+            !["is_null", "is_not_null"].includes(draftFilter.operator) &&
+            !draftFilter.value.trim()
+        ) {
             toast.error("El valor del filtro es obligatorio");
             return;
         }
-
         const nextFilter: DataViewerFilter = {
             column: draftFilter.column,
             operator: draftFilter.operator,
             value: "",
         };
 
-        if (draftFilter.operator === "in") {
+        if (draftFilter.operator === "is_null" || draftFilter.operator === "is_not_null") {
+            nextFilter.value = null;
+        } else if (draftFilter.operator === "in") {
+
+        
             const values = draftFilter.value
                 .split(",")
                 .map((entry) => entry.trim())
@@ -1249,7 +1259,7 @@ export function DataViewerProModule({
             }
 
             nextFilter.value = values;
-        } else if (draftFilter.operator === "between") {
+        
             if (!draftFilter.valueTo.trim()) {
                 toast.error("BETWEEN requiere valor inicial y valor final");
                 return;
@@ -1597,8 +1607,9 @@ export function DataViewerProModule({
 
                         <DataToolbar
                             onExportExcel={handleExport}
+                            onRefresh={handleRefresh}
                             disabled={
-                                !activeTable || isTablesLoading || isExporting
+                                !activeTable || isTablesLoading || isExporting || isQueryLoading
                             }
                         />
                     </div>

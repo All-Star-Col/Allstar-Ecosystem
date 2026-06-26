@@ -15,12 +15,12 @@ async def get_empleados(db: AsyncSession) -> list[dict[str, Any]]:
     result = await db.execute(
         text(
             """
-            SELECT e.id AS "ID",
-                   e.nombre AS "Nombre",
-                   a.nombre AS "Area",
-                   e.estado AS "Estado"
+            SELECT
+                e.id AS "ID",
+                e.id_area AS "IdArea",
+                e.nombre AS "Nombre"
             FROM data.empleado e
-            LEFT JOIN data.area a ON a.id = e.id_area
+            WHERE COALESCE(e.estado, TRUE) = TRUE
             ORDER BY e.nombre ASC
             """
         )
@@ -32,11 +32,11 @@ async def get_procesos(db: AsyncSession) -> list[dict[str, Any]]:
     result = await db.execute(
         text(
             """
-            SELECT p.id AS "ID",
-                   p.nombre AS "Nombre",
-                   a.nombre AS "Area"
+            SELECT
+                p.id AS "ID",
+                p.id_area AS "IdArea",
+                p.nombre AS "Nombre"
             FROM data.proceso p
-            LEFT JOIN data.area a ON a.id = p.id_area
             WHERE p.id BETWEEN 1 AND 5
             ORDER BY p.id ASC
             """
@@ -92,32 +92,41 @@ async def get_pendientes(db: AsyncSession, proceso_id: int) -> list[dict[str, An
                    op.fecha_finalizado AS "Fecha finalizado",
                    op.comentario AS "Comentario",
                    p.nombre AS "ProcesoNombre",
-                   i.item_legado AS "Item legado",
-                   i.id AS "Item",
-                   i.id_orden_compra AS "Orden compra",
-                   i.id_cliente AS "Cliente",
-                   c.nombre AS "ClienteNombre",
-                   oc.oc_cliente AS "OcCliente",
-                   pr.nombre AS "Producto",
-                   pr.sku AS "ProductoSku",
-                   i.detalle AS "Detalle",
-                   oc.costo AS "Valor unidad",
-                   i.fecha_produccion AS "Fecha produccion",
-                   i.fecha_entrega AS "Fecha entrega",
-                   i.notas AS "Notas"
+                    i.item_legado AS "Item legado",
+                    i.id AS "Item",
+                    oc.estado AS "EstadoItem",
+                    i.id_orden_compra AS "Orden compra",
+                    i.id_cliente AS "Cliente",
+                    c.nombre AS "ClienteNombre",
+                    oc.oc_cliente AS "OcCliente",
+                    COALESCE(
+                        NULLIF(TRIM(CONCAT_WS(' ', b.nombre, m.nombre, r1.nombre, r2.nombre, r3.nombre)), ''),
+                        pr.nombre
+                    ) AS "Producto",
+                    NULLIF(TRIM(CONCAT_WS(' ', t.nombre, t.referencia)), '') AS "Tela",
+                    oc.detalle AS "Detalle",
+                    oc.costo AS "Valor unidad",
+                    i.fecha_produccion AS "Fecha produccion",
+                    oc.fecha_entrega AS "Fecha entrega"
             FROM data.ordenproceso op
             LEFT JOIN data.proceso p ON p.id = op.id_proceso
             LEFT JOIN data.item i ON i.id = op.id_item
             LEFT JOIN data.cliente c ON c.id = i.id_cliente
             LEFT JOIN data.ordencompra oc ON oc.id = i.id_orden_compra
             LEFT JOIN data.producto pr ON pr.id = oc.id_producto
+            LEFT JOIN data.base b ON b.id = pr.id_base
+            LEFT JOIN data.modelo m ON m.id = pr.id_modelo
+            LEFT JOIN data.referencia r1 ON r1.id = pr.id_referencia_1
+            LEFT JOIN data.referencia r2 ON r2.id = pr.id_referencia_2
+            LEFT JOIN data.referencia r3 ON r3.id = pr.id_referencia_3
+            LEFT JOIN data.tela t ON t.id = pr.id_tela
             WHERE op.id_proceso = :proceso_id
               AND op.id_proceso BETWEEN 1 AND 5
               AND op.id_empleado IS NULL
               AND op.fecha_finalizado IS NULL
               AND oc.id IS NOT NULL
-              AND COALESCE(LOWER(oc.estado), '') <> 'finalizado'
-            ORDER BY i.fecha_entrega ASC NULLS LAST, i.item_legado ASC
+              AND COALESCE(LOWER(TRIM(oc.estado::TEXT)), '') <> 'finalizado'
+            ORDER BY oc.fecha_entrega ASC NULLS LAST, i.item_legado ASC
             LIMIT 300
             """
         ),
@@ -133,36 +142,46 @@ async def get_en_proceso(db: AsyncSession, proceso_id: int) -> list[dict[str, An
             SELECT op.id AS "ID",
                    op.id_proceso AS "Proceso",
                    op.id_empleado AS "Empleado",
-                   op.id_item AS "Item",
-                   op.fecha_inicio AS "Fecha inicio",
-                   op.fecha_finalizado AS "Fecha finalizado",
-                   op.comentario AS "Comentario",
-                   p.nombre AS "ProcesoNombre",
-                   e.nombre AS "EmpleadoNombre",
-                   i.detalle AS "Detalle",
-                   i.id_orden_compra AS "OrdenCompra",
-                   oc.oc_cliente AS "OcCliente",
-                   pr.nombre AS "Producto",
-                   pr.sku AS "ProductoSku",
-                   i.id_cliente AS "Cliente",
-                   c.nombre AS "ClienteNombre",
-                   oc.costo AS "ValorUnidad",
-                   i.fecha_produccion AS "FechaProduccion",
-                   i.fecha_entrega AS "FechaEntrega",
-                   i.notas AS "Notas"
+                    op.id_item AS "Item",
+                    i.item_legado AS "Item legado",
+                    oc.estado AS "EstadoItem",
+                    op.fecha_inicio AS "Fecha inicio",
+                    op.fecha_finalizado AS "Fecha finalizado",
+                    op.comentario AS "Comentario",
+                    p.nombre AS "ProcesoNombre",
+                    e.nombre AS "EmpleadoNombre",
+                    oc.detalle AS "Detalle",
+                    i.id_orden_compra AS "OrdenCompra",
+                    oc.oc_cliente AS "OcCliente",
+                    COALESCE(
+                        NULLIF(TRIM(CONCAT_WS(' ', b.nombre, m.nombre, r1.nombre, r2.nombre, r3.nombre)), ''),
+                        pr.nombre
+                    ) AS "Producto",
+                    NULLIF(TRIM(CONCAT_WS(' ', t.nombre, t.referencia)), '') AS "Tela",
+                    i.id_cliente AS "Cliente",
+                    c.nombre AS "ClienteNombre",
+                    oc.costo AS "ValorUnidad",
+                    i.fecha_produccion AS "FechaProduccion",
+                    oc.fecha_entrega AS "FechaEntrega"
             FROM data.ordenproceso op
             LEFT JOIN data.proceso p ON p.id = op.id_proceso
             LEFT JOIN data.empleado e ON e.id = op.id_empleado
             LEFT JOIN data.item i ON i.id = op.id_item
             LEFT JOIN data.ordencompra oc ON oc.id = i.id_orden_compra
             LEFT JOIN data.producto pr ON pr.id = oc.id_producto
+            LEFT JOIN data.base b ON b.id = pr.id_base
+            LEFT JOIN data.modelo m ON m.id = pr.id_modelo
+            LEFT JOIN data.referencia r1 ON r1.id = pr.id_referencia_1
+            LEFT JOIN data.referencia r2 ON r2.id = pr.id_referencia_2
+            LEFT JOIN data.referencia r3 ON r3.id = pr.id_referencia_3
+            LEFT JOIN data.tela t ON t.id = pr.id_tela
             LEFT JOIN data.cliente c ON c.id = i.id_cliente
             WHERE op.id_proceso = :proceso_id
               AND op.id_proceso BETWEEN 1 AND 5
               AND op.id_empleado IS NOT NULL
               AND (op.id_proceso = 5 OR op.fecha_finalizado IS NULL)
               AND oc.id IS NOT NULL
-              AND COALESCE(LOWER(oc.estado), '') <> 'finalizado'
+              AND COALESCE(LOWER(TRIM(oc.estado::TEXT)), '') <> 'finalizado'
             ORDER BY op.fecha_inicio ASC NULLS LAST, op.id ASC
             """
         ),
@@ -210,6 +229,7 @@ async def asignar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[str
 
 async def finalizar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
     finished_at = datetime.now().isoformat(timespec="seconds")
+
     result = await db.execute(
         text(
             """
@@ -228,12 +248,51 @@ async def finalizar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[s
             "comentario": payload.get("comentario"),
         },
     )
+
     row = result.mappings().first()
     if row is None:
         raise ValueError("No existe una orden proceso activa para finalizar.")
 
-    siguiente_proceso = row["id_proceso"] + 1 if row["id_proceso"] < 5 else None
+    item_id = row["id_item"]
+    proceso_actual = int(row["id_proceso"])
+
+    siguiente_proceso = None
+
+    if proceso_actual == 2:
+        siguiente_proceso = 3
+
+    elif proceso_actual in (1, 3):
+        estado_result = await db.execute(
+            text(
+                """
+                SELECT
+                    id_proceso,
+                    BOOL_OR(fecha_finalizado IS NOT NULL) AS finalizado
+                FROM data.ordenproceso
+                WHERE id_item = :item
+                  AND id_proceso IN (1, 3)
+                GROUP BY id_proceso
+                """
+            ),
+            {"item": item_id},
+        )
+
+        procesos_finalizados = {
+            int(estado["id_proceso"]): bool(estado["finalizado"])
+            for estado in estado_result.mappings().all()
+        }
+
+        if procesos_finalizados.get(1) and procesos_finalizados.get(3):
+            siguiente_proceso = 4
+
+    elif proceso_actual == 4:
+        siguiente_proceso = 5
+
+    elif proceso_actual == 5:
+        siguiente_proceso = None
+
     siguiente_row = None
+
     if siguiente_proceso is not None:
         siguiente_result = await db.execute(
             text(
@@ -245,19 +304,19 @@ async def finalizar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[s
                     FROM data.ordenproceso
                     WHERE id_item = :item
                       AND id_proceso = :siguiente_proceso
-                      AND fecha_finalizado IS NULL
                 )
                 RETURNING id
                 """
             ),
             {
                 "siguiente_proceso": siguiente_proceso,
-                "item": row["id_item"],
+                "item": item_id,
             },
         )
+
         siguiente_row = siguiente_result.mappings().first()
 
-    if row["id_proceso"] == 5:
+    if proceso_actual == 5:
         await db.execute(
             text(
                 """
@@ -278,6 +337,7 @@ async def finalizar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[s
         )
 
     await db.commit()
+
     return {
         "message": "Proceso finalizado correctamente.",
         "orden_proceso_id": row["id"],
@@ -286,25 +346,6 @@ async def finalizar_proceso(db: AsyncSession, payload: dict[str, Any]) -> dict[s
         "siguiente_creado": siguiente_row is not None,
         "siguiente_orden_proceso_id": siguiente_row["id"] if siguiente_row else None,
     }
-
-
-async def registrar_consumo_material(
-    db: AsyncSession,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    await db.execute(
-        text(
-            """
-            INSERT INTO data.historialconsumomaterial (
-                item, id_material, id_proceso, cantidad, fecha_registro
-            )
-            VALUES (:item, :material, :proceso, :cantidad, NOW())
-            """
-        ),
-        payload,
-    )
-    await db.commit()
-    return {"message": "Consumo de material registrado correctamente."}
 
 
 async def registrar_consumo_tela(
