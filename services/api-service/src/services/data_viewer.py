@@ -1967,6 +1967,121 @@ class DataViewerService:
             "finished_column": finished_column,
         }
 
+    async def _fetch_row_by_pk(
+        self,
+        metadata,
+        pk_values=None,
+        pk_columns=None,
+        db=None,
+        **kwargs,
+    ):
+        db = db or self.db
+
+        if pk_values is None:
+            pk_values = (
+                kwargs.get("primary_key_values")
+                or kwargs.get("row_keys")
+                or kwargs.get("keys")
+                or kwargs.get("normalized_pk")
+            )
+
+        if pk_values is None:
+            row_id = (
+                kwargs.get("row_id")
+                or kwargs.get("pk_value")
+                or kwargs.get("id")
+            )
+
+            if row_id is not None:
+                pk_values = {"id": row_id}
+
+        if not pk_values:
+            return None
+
+        def read_metadata_value(*names, default=None):
+            for name in names:
+                if isinstance(metadata, dict) and name in metadata:
+                    return metadata[name]
+
+                value = getattr(metadata, name, None)
+                if value is not None:
+                    return value
+
+            return default
+
+        schema_name = read_metadata_value(
+            "schema_name",
+            "schema",
+            default="data",
+        )
+        if (
+            schema_name == "data"
+            and not isinstance(metadata, dict)
+            and getattr(metadata, "config", None) is not None
+        ):
+            schema_name = metadata.config.schema_name
+
+        table_name = read_metadata_value(
+            "table_name",
+            "table",
+            "name",
+            default=None,
+        )
+        if (
+            not table_name
+            and not isinstance(metadata, dict)
+            and getattr(metadata, "config", None) is not None
+        ):
+            table_name = metadata.config.table_name
+
+        if not table_name:
+            return None
+
+        quoted_schema = _quote_identifier(schema_name)
+        quoted_table = _quote_identifier(table_name)
+        selectable_columns: list[str] = []
+        metadata_columns = getattr(metadata, "columns", None)
+        if isinstance(metadata, dict):
+            metadata_columns = metadata.get("columns")
+        if isinstance(metadata_columns, list):
+            for column in metadata_columns:
+                column_name = (
+                    column.get("name")
+                    if isinstance(column, dict)
+                    else getattr(column, "name", None)
+                )
+                if column_name:
+                    selectable_columns.append(_quote_identifier(str(column_name)))
+        select_sql = ", ".join(dict.fromkeys(selectable_columns)) or "*"
+
+        where_clauses = []
+        params = {}
+
+        for index, (column_name, value) in enumerate(pk_values.items()):
+            param_name = f"pk_{index}"
+            quoted_column = _quote_identifier(str(column_name))
+
+            where_clauses.append(f"{quoted_column} = :{param_name}")
+            params[param_name] = value
+
+        if not where_clauses:
+            return None
+
+        result = await db.execute(
+            text(
+                f"""
+                SELECT {select_sql}
+                FROM {quoted_schema}.{quoted_table}
+                WHERE {" AND ".join(where_clauses)}
+                LIMIT 1
+                """
+            ),
+            params,
+        )
+
+        row = result.mappings().first()
+        return dict(row) if row else None
+
     async def _prepare_product_changes(
         self,
         *,
@@ -1989,10 +2104,13 @@ class DataViewerService:
             return normalized_changes
 
         current_row = await self._fetch_row_by_pk(
-            table_config=table_config,
+            db=self.db,
             metadata=metadata,
-            normalized_pk=normalized_pk,
+            pk_values=normalized_pk,
         )
+        if not current_row:
+            raise RowNotFoundError(table_config.table_id)
+
         next_row = {**current_row, **normalized_changes}
         recalculated_name = await self._build_product_name_from_components(next_row)
         normalized_changes["nombre"] = recalculated_name
