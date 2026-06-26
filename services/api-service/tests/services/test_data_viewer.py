@@ -257,6 +257,76 @@ class TestProductNameRecalculation(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"id_tela"', fake_db.sql)
         self.assertIn('"nombre"', fake_db.sql)
 
+    async def test_prepare_product_changes_fetches_current_row_and_recalculates_name(self) -> None:
+        class FakeResult:
+            def mappings(self):
+                return self
+
+            def first(self):
+                return {
+                    "id": 413,
+                    "id_base": 1,
+                    "id_modelo": 2,
+                    "id_referencia_1": None,
+                    "id_referencia_2": None,
+                    "id_referencia_3": None,
+                    "id_tela": 3,
+                    "nombre": "AAAA AGATHA TELA VIEJA",
+                }
+
+        class FakeDb:
+            async def execute(self, statement, params):
+                return FakeResult()
+
+        class ProductService(DataViewerService):
+            async def _lookup_catalog_label(
+                self,
+                *,
+                table_name,
+                entity_id,
+                include_tela_reference=False,
+            ):
+                labels = {
+                    ("base", 1): "AAAA",
+                    ("modelo", 2): "AGATHA",
+                    ("tela", 4): "AAAAAAA PREBA",
+                }
+                return labels.get((table_name, entity_id), "")
+
+            async def _find_equivalent_product(self, **kwargs):
+                return None
+
+        service = ProductService(db=FakeDb())
+        config = _table_config(
+            table_id="producto",
+            table_name="producto",
+            full_table_name="data.producto",
+            display_name="Productos",
+        )
+        metadata = _table_metadata(config)
+        metadata.columns = [
+            {"name": "id"},
+            {"name": "id_base"},
+            {"name": "id_modelo"},
+            {"name": "id_referencia_1"},
+            {"name": "id_referencia_2"},
+            {"name": "id_referencia_3"},
+            {"name": "id_tela"},
+            {"name": "nombre"},
+        ]
+        metadata.allowed_columns = {column["name"] for column in metadata.columns}
+        metadata.pk_columns = ["id"]
+
+        changes = await service._prepare_product_changes(
+            table_config=config,
+            metadata=metadata,
+            normalized_pk={"id": 413},
+            normalized_changes={"id_tela": 4},
+        )
+
+        self.assertEqual(changes["id_tela"], 4)
+        self.assertEqual(changes["nombre"], "AAAA AGATHA AAAAAAA PREBA")
+
     async def test_catalog_change_refreshes_related_product_names(self) -> None:
         class FakeResult:
             def __init__(self, rows):
