@@ -144,6 +144,7 @@ fun ProduccionApp(viewModel: EstacionViewModel) {
                         .weight(1f)
                         .fillMaxHeight(),
                     procesoId = state.procesoId,
+                    procesos = state.procesos,
                     items = state.pendientes,
                     empleados = state.empleados,
                     onAsignar = { item, empleadoId ->
@@ -609,12 +610,25 @@ fun SectionHeader(
 fun PanelPendientes(
     modifier: Modifier,
     procesoId: Int,
+    procesos: List<ProcesoDto>,
     items: List<ItemDto>,
     empleados: List<EmpleadoDto>,
     onAsignar: (ItemDto, Int) -> Unit
 ) {
     val empleadosSeleccionados = remember {
         mutableStateMapOf<Int, Int>()
+    }
+
+    val procesoActual = procesos.firstOrNull {
+        it.id?.toInt() == procesoId
+    }
+
+    val empleadosFiltrados = if (procesoActual?.idArea != null) {
+        empleados.filter { empleado ->
+            empleado.idArea?.toInt() == procesoActual.idArea.toInt()
+        }
+    } else {
+        emptyList()
     }
 
     Card(
@@ -652,14 +666,14 @@ fun PanelPendientes(
 
                             val empleadoId = empleadosSeleccionados[itemKey]
 
-                            val empleadoSeleccionado = empleados.firstOrNull {
+                            val empleadoSeleccionado = empleadosFiltrados.firstOrNull {
                                 it.id?.toInt() == empleadoId
                             }
 
                             ItemPendienteCard(
                                 item = item,
                                 empleadoSeleccionado = empleadoSeleccionado,
-                                empleados = empleados,
+                                empleados = empleadosFiltrados,
                                 onEmpleadoChange = { nuevoEmpleado ->
                                     nuevoEmpleado.id?.toInt()?.let {
                                         empleadosSeleccionados[itemKey] = it
@@ -731,8 +745,8 @@ fun ItemPendienteCard(
                 .fillMaxWidth()
                 .padding(13.dp)
         ) {
-            val itemMostrado = item.item?.toInt()
-                ?: item.itemLegado?.toInt()
+            val itemMostrado = item.itemLegado?.toInt()
+                ?: item.item?.toInt()
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -741,7 +755,7 @@ fun ItemPendienteCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Item ${itemMostrado ?: "-"}",
+                        text = "Item legado ${itemMostrado ?: "-"}",
                         color = AllStarBlue,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
@@ -776,7 +790,9 @@ fun ItemPendienteCard(
             Spacer(modifier = Modifier.height(6.dp))
 
             Text("Cliente: ${item.clienteNombre ?: "-"}", color = AllStarAnthracite)
+            Text("Estado item: ${item.estadoItem ?: "-"}", color = AllStarAnthracite)
             Text("Producto: ${item.producto ?: "-"}", color = AllStarAnthracite)
+            Text("Tela: ${item.tela ?: "-"}", color = AllStarAnthracite)
             Text("Detalle: ${item.detalle ?: "-"}", color = AllStarAnthracite)
 
             Spacer(modifier = Modifier.height(11.dp))
@@ -1040,29 +1056,7 @@ fun OrdenProcesoCard(
     onRegistrarTela: (Int, Double) -> Unit,
     onFinalizar: () -> Unit
 ) {
-    var tipoConsumo by remember { mutableStateOf(TipoConsumo.MATERIAL) }
-
-    var cantidadMaterialTexto by remember { mutableStateOf("") }
-    var materialSeleccionadoId by remember { mutableStateOf<Int?>(null) }
-
-    var cantidadTelaTexto by remember { mutableStateOf("") }
-    var telaSeleccionadaId by remember { mutableStateOf<Int?>(null) }
-
-    val materialesAgregados = remember(orden.id) {
-        mutableStateListOf<MaterialRegistradoUi>()
-    }
-
-    val telasAgregadas = remember(orden.id) {
-        mutableStateListOf<MaterialRegistradoUi>()
-    }
-
-    val materialSeleccionado = materiales.firstOrNull {
-        it.id?.toInt() == materialSeleccionadoId
-    }
-
-    val telaSeleccionada = telas.firstOrNull {
-        it.id?.toInt() == telaSeleccionadaId
-    }
+    val esAlistamiento = orden.proceso?.toInt() == 5
 
     Card(
         colors = CardDefaults.cardColors(containerColor = AllStarBone),
@@ -1079,6 +1073,9 @@ fun OrdenProcesoCard(
                 .fillMaxWidth()
                 .padding(13.dp)
         ) {
+            val itemMostrado = orden.itemLegado?.toInt()
+                ?: orden.item?.toInt()
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1086,7 +1083,7 @@ fun OrdenProcesoCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Item ${orden.item?.toInt() ?: "-"}",
+                        text = "Item legado ${itemMostrado ?: "-"}",
                         color = AllStarBlue,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
@@ -1094,314 +1091,49 @@ fun OrdenProcesoCard(
 
                     Spacer(modifier = Modifier.height(3.dp))
 
-                    Text(
-                        text = "OC Cliente: ${orden.ocCliente ?: "-"}",
-                        color = AllStarAnthracite,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("Cliente: ${orden.clienteNombre ?: "-"}", color = AllStarAnthracite)
+                    Text("Estado item: ${orden.estadoItem ?: "-"}", color = AllStarAnthracite)
+                    Text("Producto: ${orden.producto ?: "-"}", color = AllStarAnthracite)
+                    Text("Tela: ${orden.tela ?: "-"}", color = AllStarAnthracite)
+                    Text("Detalle: ${orden.detalle ?: "-"}", color = AllStarAnthracite)
+                    Text("Empleado: ${orden.empleadoNombre ?: orden.empleado?.toInt()?.toString() ?: "-"}", color = AllStarAnthracite)
+                    Text("Inicio: ${orden.fechaInicio ?: "-"}", color = AllStarAnthracite)
                 }
 
                 Box(
                     modifier = Modifier
                         .background(
-                            color = AllStarSuccess.copy(alpha = 0.18f),
+                            color = if (esAlistamiento) AllStarGoldSoft else AllStarSuccess.copy(alpha = 0.18f),
                             shape = RoundedCornerShape(100.dp)
                         )
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = "Activo",
-                        color = AllStarSuccess,
+                        text = if (esAlistamiento) "Alistamiento" else "Activo",
+                        color = if (esAlistamiento) AllStarBlue else AllStarSuccess,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(7.dp))
-
-            Text("Cliente: ${orden.clienteNombre ?: "-"}", color = AllStarAnthracite)
-            Text("Producto: ${orden.producto ?: "-"}", color = AllStarAnthracite)
-            Text("Detalle: ${orden.detalle ?: "-"}", color = AllStarAnthracite)
-            Text("Empleado: ${orden.empleadoNombre ?: orden.empleado?.toInt()?.toString() ?: "-"}", color = AllStarAnthracite)
-            Text("Inicio: ${orden.fechaInicio ?: "-"}", color = AllStarAnthracite)
-
-            if (materialesAgregados.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(11.dp))
-
-                Text(
-                    text = "Materiales agregados",
-                    color = AllStarBlue,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(5.dp))
-
-                materialesAgregados.forEach { material ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = AllStarGoldSoft,
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = material.nombre,
-                            color = AllStarAnthracite,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        Text(
-                            text = "Cant. ${material.cantidad}",
-                            color = AllStarBlue,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(5.dp))
-                }
-            }
-
-            if (telasAgregadas.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(11.dp))
-
-                Text(
-                    text = "Telas agregadas",
-                    color = AllStarBlue,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(5.dp))
-
-                telasAgregadas.forEach { tela ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                color = AllStarGoldSoft,
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = tela.nombre,
-                            color = AllStarAnthracite,
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        Text(
-                            text = "Cant. ${tela.cantidad}",
-                            color = AllStarBlue,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(5.dp))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(13.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        color = AllStarWhite,
-                        shape = RoundedCornerShape(16.dp)
-                    )
-                    .padding(5.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = { tipoConsumo = TipoConsumo.MATERIAL },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (tipoConsumo == TipoConsumo.MATERIAL) AllStarBlue else AllStarWhite,
-                        contentColor = if (tipoConsumo == TipoConsumo.MATERIAL) AllStarBone else AllStarBlue
-                    ),
-                    shape = RoundedCornerShape(13.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-                ) {
-                    Text(
-                        text = "Material",
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = { tipoConsumo = TipoConsumo.TELA },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (tipoConsumo == TipoConsumo.TELA) AllStarBlue else AllStarWhite,
-                        contentColor = if (tipoConsumo == TipoConsumo.TELA) AllStarBone else AllStarBlue
-                    ),
-                    shape = RoundedCornerShape(13.dp),
-                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
-                ) {
-                    Text(
-                        text = "Tela",
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(11.dp))
-
-            if (tipoConsumo == TipoConsumo.MATERIAL) {
-                SelectorBuscableObjeto(
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Buscar material",
-                    value = materialSeleccionado,
-                    options = materiales,
-                    optionText = { material ->
-                        listOfNotNull(
-                            material.nombre,
-                            material.referencia
-                        ).joinToString(" - ")
-                    },
-                    onChange = { material ->
-                        materialSeleccionadoId = material.id?.toInt()
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = cantidadMaterialTexto,
-                    onValueChange = { cantidadMaterialTexto = it },
-                    label = { Text("Cantidad material") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = selectorFieldColors(),
-                    shape = RoundedCornerShape(15.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
+            if (!esAlistamiento) {
                 Spacer(modifier = Modifier.height(11.dp))
 
                 Button(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        val material = materialSeleccionado
-                        val materialId = materialSeleccionadoId
-                        val cantidad = cantidadMaterialTexto.replace(",", ".").toDoubleOrNull()
-
-                        if (material != null && materialId != null && cantidad != null && cantidad > 0) {
-                            val nombreMaterial = listOfNotNull(
-                                material.nombre,
-                                material.referencia
-                            ).joinToString(" - ")
-
-                            materialesAgregados.add(
-                                MaterialRegistradoUi(
-                                    nombre = nombreMaterial,
-                                    cantidad = cantidad
-                                )
-                            )
-
-                            onRegistrarMaterial(materialId, cantidad)
-                            cantidadMaterialTexto = ""
-                        }
-                    },
-                    enabled = materialSeleccionadoId != null && cantidadMaterialTexto.isNotBlank(),
+                    onClick = onFinalizar,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = AllStarGold,
-                        contentColor = AllStarBlue,
-                        disabledContainerColor = AllStarMuted.copy(alpha = 0.25f),
-                        disabledContentColor = AllStarWhite
+                        containerColor = AllStarBlue,
+                        contentColor = AllStarBone
                     ),
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
-                        text = "Agregar material",
+                        text = "Finalizar proceso",
                         fontWeight = FontWeight.Bold
                     )
                 }
-            } else {
-                SelectorBuscableObjeto(
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Buscar tela",
-                    value = telaSeleccionada,
-                    options = telas,
-                    optionText = { tela ->
-                        tela.nombreReferencia
-                            ?: listOfNotNull(tela.nombre, tela.referencia).joinToString(" - ")
-                    },
-                    onChange = { tela ->
-                        telaSeleccionadaId = tela.id?.toInt()
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = cantidadTelaTexto,
-                    onValueChange = { cantidadTelaTexto = it },
-                    label = { Text("Cantidad tela") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    colors = selectorFieldColors(),
-                    shape = RoundedCornerShape(15.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(11.dp))
-
-                Button(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        val tela = telaSeleccionada
-                        val telaId = telaSeleccionadaId
-                        val cantidad = cantidadTelaTexto.replace(",", ".").toDoubleOrNull()
-
-                        if (tela != null && telaId != null && cantidad != null && cantidad > 0) {
-                            val nombreTela = tela.nombreReferencia
-                                ?: listOfNotNull(tela.nombre, tela.referencia).joinToString(" - ")
-
-                            telasAgregadas.add(
-                                MaterialRegistradoUi(
-                                    nombre = nombreTela,
-                                    cantidad = cantidad
-                                )
-                            )
-
-                            onRegistrarTela(telaId, cantidad)
-                            cantidadTelaTexto = ""
-                        }
-                    },
-                    enabled = telaSeleccionadaId != null && cantidadTelaTexto.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AllStarTerracotta,
-                        contentColor = AllStarWhite,
-                        disabledContainerColor = AllStarMuted.copy(alpha = 0.25f),
-                        disabledContentColor = AllStarWhite
-                    ),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text(
-                        text = "Agregar tela",
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(11.dp))
-
-            Button(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = onFinalizar,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AllStarBlue,
-                    contentColor = AllStarBone
-                ),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Text(
-                    text = "Finalizar proceso",
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
     }

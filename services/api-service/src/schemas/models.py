@@ -315,7 +315,7 @@ class DataViewerFilter(BaseModel):
         max_length=63,
         pattern=DATA_VIEWER_IDENTIFIER_PATTERN,
     )
-    operator: Literal["eq", "contains", "gt", "lt", "in", "between"]
+    operator: Literal["eq","contains","gt","lt","in","between","is_null","is_not_null"]
     value: Any | None = None
     value_to: Any | None = None
 

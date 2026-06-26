@@ -46,7 +46,9 @@ export type DataViewerFilterOperator =
     | "gt"
     | "lt"
     | "in"
-    | "between";
+    | "between"
+    | "is_null"
+    | "is_not_null";
 
 export interface DataViewerFilter {
     column: string;

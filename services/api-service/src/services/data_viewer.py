@@ -37,7 +37,16 @@ TEXTUAL_TYPES = {
     "name",
     "uuid",
 }
-SUPPORTED_FILTER_OPERATORS = {"eq", "contains", "gt", "lt", "in", "between"}
+SUPPORTED_FILTER_OPERATORS = {
+    "eq",
+    "contains",
+    "gt",
+    "lt",
+    "in",
+    "between",
+    "is_null",
+    "is_not_null",
+}
 DEFAULT_QUERY_TIMEOUT_MS = 10000
 DEFAULT_COUNT_TIMEOUT_MS = 2000
 DEFAULT_EXPORT_TIMEOUT_MS = 12000
@@ -1260,6 +1269,18 @@ class DataViewerService:
 
         fecha_estimada_update_value = normalized_changes.pop("fecha_estimada", _MISSING)
 
+        order_process_flow_columns = None
+        should_advance_order_process_flow = False
+
+        if self._is_order_process_table_config(table_config):
+            order_process_flow_columns = self._get_order_process_flow_columns(metadata)
+            if order_process_flow_columns:
+                finished_column = order_process_flow_columns["finished_column"]
+                should_advance_order_process_flow = (
+                    finished_column in normalized_changes
+                    and normalized_changes[finished_column] is not None
+                )
+
         table_ref = (
             f"{_quote_identifier(table_config.schema_name)}."
             f"{_quote_identifier(table_config.table_name)}"
@@ -1321,6 +1342,36 @@ class DataViewerService:
                     normalized_pk=normalized_pk,
                     delivery_value=fecha_estimada_update_value,
                 )
+
+            if should_advance_order_process_flow and order_process_flow_columns:
+                process_column = order_process_flow_columns["process_column"]
+                item_column = order_process_flow_columns["item_column"]
+                finished_column = order_process_flow_columns["finished_column"]
+
+                current_row_result = await self.db.execute(
+                    text(
+                        f"""
+                        SELECT
+                            {_quote_identifier(process_column)} AS process_id,
+                            {_quote_identifier(item_column)} AS item_value,
+                            {_quote_identifier(finished_column)} AS finished_value
+                        FROM {table_ref}
+                        WHERE {where_sql}
+                        LIMIT 1
+                        """
+                    ),
+                    query_params,
+                )
+
+                current_flow_row = current_row_result.mappings().first()
+
+                if current_flow_row and current_flow_row["finished_value"] is not None:
+                    await self._advance_order_process_flow(
+                        table_config=table_config,
+                        metadata=metadata,
+                        current_process_id=int(current_flow_row["process_id"]),
+                        item_value=current_flow_row["item_value"],
+                    )
 
             await self.db.commit()
         except DataViewerError:
@@ -1424,6 +1475,12 @@ class DataViewerService:
             f"{_quote_identifier(table_config.schema_name)}."
             f"{_quote_identifier(table_config.table_name)}"
         )
+
+        q_process_column = _quote_identifier(process_column)
+        q_item_column = _quote_identifier(item_column)
+        q_started_column = _quote_identifier(started_column)
+        q_finished_column = _quote_identifier(finished_column)
+
         where_clauses: list[str] = []
         query_params: dict[str, Any] = {}
         for index, pk_column in enumerate(metadata.pk_columns):
@@ -1444,10 +1501,14 @@ class DataViewerService:
         current_time_sql = self._current_temporal_sql(columns_by_lower[started_column.lower()])
         finished_time_sql = self._current_temporal_sql(columns_by_lower[finished_column.lower()])
 
+        inserted_rows: list[dict[str, Any]] = []
+        next_process_ids: list[int] = []
+
         try:
             await self.db.execute(
                 text(f"SET LOCAL statement_timeout = {int(DATA_VIEWER_MUTATION_TIMEOUT_MS)}")
             )
+
             current_result = await self.db.execute(
                 text(
                     f"""
@@ -1463,42 +1524,110 @@ class DataViewerService:
             if not current_row:
                 raise RowNotFoundError(table_id)
 
-            if int(current_row[process_column]) != 6:
-                raise InvalidOrderProcessReleaseError(
-                    "Solo se pueden liberar filas que esten en proceso 6"
-                )
             if current_row[finished_column] is not None:
                 raise InvalidOrderProcessReleaseError(
                     "La fila ya tiene fecha de finalizado"
                 )
 
+            try:
+                current_process_id = int(current_row[process_column])
+            except (TypeError, ValueError) as error:
+                raise InvalidOrderProcessReleaseError(
+                    "No se pudo identificar el proceso actual"
+                ) from error
+
+            if current_process_id not in {1, 2, 3, 4, 5, 6}:
+                raise InvalidOrderProcessReleaseError(
+                    f"El proceso {current_process_id} no esta configurado para liberacion"
+                )
+
+            item_value = current_row[item_column]
+
             await self.db.execute(
                 text(
                     f"""
                     UPDATE {table_ref}
-                    SET {_quote_identifier(finished_column)} = {finished_time_sql}
+                    SET {q_finished_column} = {finished_time_sql}
                     WHERE {where_sql}
                     """
                 ),
                 query_params,
             )
 
-            await self._sync_integer_id_sequence(
-                table_config=table_config,
-                metadata=metadata,
-            )
-            insert_sql = (
-                f"INSERT INTO {table_ref} "
-                f"({_quote_identifier(process_column)}, {_quote_identifier(item_column)}, {_quote_identifier(started_column)}) "
-                f"VALUES (:next_process, :item_value, {current_time_sql}) "
-                "RETURNING *"
-            )
-            insert_result = await self.db.execute(
-                text(insert_sql),
-                {"next_process": 2, "item_value": current_row[item_column]},
-            )
-            inserted_row = dict(insert_result.mappings().first() or {})
+            if current_process_id == 6:
+                next_process_ids = [2]
+
+            elif current_process_id == 2:
+                next_process_ids = [3]
+
+            elif current_process_id in {1, 3}:
+                status_result = await self.db.execute(
+                    text(
+                        f"""
+                        SELECT
+                            {q_process_column} AS process_id,
+                            BOOL_OR({q_finished_column} IS NOT NULL) AS is_finished
+                        FROM {table_ref}
+                        WHERE {q_item_column} = :item_value
+                          AND {q_process_column} IN (1, 3)
+                        GROUP BY {q_process_column}
+                        """
+                    ),
+                    {"item_value": item_value},
+                )
+
+                finished_by_process = {
+                    int(row["process_id"]): bool(row["is_finished"])
+                    for row in status_result.mappings().all()
+                    if row.get("process_id") is not None
+                }
+
+                if finished_by_process.get(1) and finished_by_process.get(3):
+                    next_process_ids = [4]
+
+            elif current_process_id == 4:
+                next_process_ids = [5]
+
+            elif current_process_id == 5:
+                next_process_ids = []
+
+            if next_process_ids:
+                await self._sync_integer_id_sequence(
+                    table_config=table_config,
+                    metadata=metadata,
+                )
+
+            for next_process_id in next_process_ids:
+                insert_result = await self.db.execute(
+                    text(
+                        f"""
+                        INSERT INTO {table_ref}
+                            ({q_process_column}, {q_item_column}, {q_started_column})
+                        SELECT
+                            :next_process,
+                            :item_value,
+                            {current_time_sql}
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM {table_ref}
+                            WHERE {q_item_column} = :item_value
+                              AND {q_process_column} = :next_process
+                        )
+                        RETURNING *
+                        """
+                    ),
+                    {
+                        "next_process": next_process_id,
+                        "item_value": item_value,
+                    },
+                )
+
+                inserted_row = insert_result.mappings().first()
+                if inserted_row:
+                    inserted_rows.append(dict(inserted_row))
+
             await self.db.commit()
+
         except DataViewerError:
             await self.db.rollback()
             raise
@@ -1509,80 +1638,12 @@ class DataViewerService:
         return {
             "status": "success",
             "released_pk": normalized_pk,
-            "next_process": 2,
-            "inserted_row": inserted_row,
+            "released_process": current_process_id,
+            "next_process": next_process_ids[0] if next_process_ids else None,
+            "next_processes": next_process_ids,
+            "inserted_row": inserted_rows[0] if inserted_rows else {},
+            "inserted_rows": inserted_rows,
         }
-    def _is_item_table_config(self, table_config: TableConfig) -> bool:
-        candidates = {
-            table_config.table_name.lower(),
-            table_config.full_table_name.lower().split(".")[-1],
-            table_config.table_id.lower(),
-            (table_config.display_name or "").strip().lower(),
-        }
-        return not candidates.isdisjoint(ITEM_TABLE_NAME_CANDIDATES)
-
-    def _is_product_table_config(self, table_config: TableConfig) -> bool:
-        candidates = {
-            table_config.table_name.lower(),
-            table_config.full_table_name.lower().split(".")[-1],
-            table_config.table_id.lower(),
-            (table_config.display_name or "").strip().lower(),
-        }
-        return not candidates.isdisjoint(PRODUCT_TABLE_NAME_CANDIDATES)
-
-    async def _fetch_row_by_pk(
-        self,
-        *,
-        table_config: TableConfig,
-        metadata: TableMetadata,
-        normalized_pk: dict[str, Any],
-    ) -> dict[str, Any]:
-        table_ref = (
-            f"{_quote_identifier(table_config.schema_name)}."
-            f"{_quote_identifier(table_config.table_name)}"
-        )
-        column_names = {
-            str(column.get("name"))
-            for column in metadata.columns
-            if column.get("name")
-        }
-        selected_columns: list[str] = []
-        for column_name in (
-            *metadata.pk_columns,
-            "id",
-            *PRODUCT_COMPONENT_COLUMNS,
-            "nombre",
-        ):
-            if column_name in column_names and column_name not in selected_columns:
-                selected_columns.append(column_name)
-        if not selected_columns:
-            selected_columns = list(metadata.pk_columns)
-        selected_columns_sql = ", ".join(
-            _quote_identifier(column) for column in selected_columns
-        )
-
-        where_clauses: list[str] = []
-        params: dict[str, Any] = {}
-        for index, pk_column in enumerate(metadata.pk_columns):
-            key = f"pk_lookup_{index}"
-            where_clauses.append(f"{_quote_identifier(pk_column)} = :{key}")
-            params[key] = normalized_pk[pk_column]
-
-        result = await self.db.execute(
-            text(
-                f"""
-                SELECT {selected_columns_sql}
-                FROM {table_ref}
-                WHERE {" AND ".join(where_clauses)}
-                LIMIT 1
-                """
-            ),
-            params,
-        )
-        row = result.mappings().first()
-        if not row:
-            raise RowNotFoundError(table_config.table_id)
-        return dict(row)
 
     async def _lookup_catalog_label(
         self,
@@ -1704,6 +1765,207 @@ class DataViewerService:
         )
         row = result.mappings().first()
         return dict(row) if row else None
+    
+
+    def _is_item_table_config(self, table_config: TableConfig) -> bool:
+        candidates = {
+            table_config.table_name.lower(),
+            table_config.full_table_name.lower().split(".")[-1],
+            table_config.table_id.lower(),
+            (table_config.display_name or "").strip().lower(),
+        }
+        return not candidates.isdisjoint(ITEM_TABLE_NAME_CANDIDATES)
+
+    def _is_product_table_config(self, table_config: TableConfig) -> bool:
+        candidates = {
+            table_config.table_name.lower(),
+            table_config.full_table_name.lower().split(".")[-1],
+            table_config.table_id.lower(),
+            (table_config.display_name or "").strip().lower(),
+        }
+        return not candidates.isdisjoint(PRODUCT_TABLE_NAME_CANDIDATES)
+
+    def _is_order_process_table_config(self, table_config: TableConfig) -> bool:
+        candidates = {
+            table_config.table_name.lower(),
+            table_config.full_table_name.lower().split(".")[-1],
+            table_config.table_id.lower(),
+            (table_config.display_name or "").strip().lower(),
+        }
+        return not candidates.isdisjoint(ORDER_PROCESS_TABLE_NAME_CANDIDATES)
+    
+
+    async def _advance_order_process_flow(
+        self,
+        *,
+        table_config: TableConfig,
+        metadata: TableMetadata,
+        current_process_id: int,
+        item_value: Any,
+    ) -> dict[str, Any]:
+        if not self._is_order_process_table_config(table_config):
+            return {
+                "next_processes": [],
+                "inserted_rows": [],
+            }
+
+        columns_by_lower = {
+            column["name"].lower(): column
+            for column in metadata.columns
+            if column.get("name")
+        }
+
+        process_column = self._first_metadata_column(
+            columns_by_lower,
+            ("id_proceso", "proceso_id", "id_prtoceso"),
+        )
+        item_column = self._first_metadata_column(
+            columns_by_lower,
+            ("id_item", "item_id", "items_id", "item", "item_legado"),
+        )
+        started_column = self._first_metadata_column(
+            columns_by_lower,
+            ("fecha_inicio", "fecha_iniciado", "fecha", "fecha_creacion", "created_at"),
+        )
+        finished_column = self._first_metadata_column(
+            columns_by_lower,
+            ("fecha_finalizado", "fecha_finalizacion", "fecha_fin"),
+        )
+
+        if not process_column or not item_column or not started_column or not finished_column:
+            raise InvalidOrderProcessReleaseError(
+                "ordenproceso debe tener columnas de item, proceso, fecha_inicio y fecha_finalizado"
+            )
+
+        table_ref = (
+            f"{_quote_identifier(table_config.schema_name)}."
+            f"{_quote_identifier(table_config.table_name)}"
+        )
+
+        q_process_column = _quote_identifier(process_column)
+        q_item_column = _quote_identifier(item_column)
+        q_started_column = _quote_identifier(started_column)
+        q_finished_column = _quote_identifier(finished_column)
+
+        current_time_sql = self._current_temporal_sql(
+            columns_by_lower[started_column.lower()]
+        )
+
+        next_process_ids: list[int] = []
+
+        if current_process_id == 6:
+            next_process_ids = [2]
+
+        elif current_process_id == 2:
+            next_process_ids = [3]
+
+        elif current_process_id in {1, 3}:
+            status_result = await self.db.execute(
+                text(
+                    f"""
+                    SELECT
+                        {q_process_column} AS process_id,
+                        BOOL_OR({q_finished_column} IS NOT NULL) AS is_finished
+                    FROM {table_ref}
+                    WHERE {q_item_column} = :item_value
+                      AND {q_process_column} IN (1, 3)
+                    GROUP BY {q_process_column}
+                    """
+                ),
+                {"item_value": item_value},
+            )
+
+            finished_by_process = {
+                int(row["process_id"]): bool(row["is_finished"])
+                for row in status_result.mappings().all()
+                if row.get("process_id") is not None
+            }
+
+            if finished_by_process.get(1) and finished_by_process.get(3):
+                next_process_ids = [4]
+
+        elif current_process_id == 4:
+            next_process_ids = [5]
+
+        elif current_process_id == 5:
+            next_process_ids = []
+
+        else:
+            next_process_ids = []
+
+        inserted_rows: list[dict[str, Any]] = []
+
+        if next_process_ids:
+            await self._sync_integer_id_sequence(
+                table_config=table_config,
+                metadata=metadata,
+            )
+
+        for next_process_id in next_process_ids:
+            insert_result = await self.db.execute(
+                text(
+                    f"""
+                    INSERT INTO {table_ref}
+                        ({q_process_column}, {q_item_column}, {q_started_column})
+                    SELECT
+                        :next_process,
+                        :item_value,
+                        {current_time_sql}
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM {table_ref}
+                        WHERE {q_item_column} = :item_value
+                          AND {q_process_column} = :next_process
+                    )
+                    RETURNING *
+                    """
+                ),
+                {
+                    "next_process": next_process_id,
+                    "item_value": item_value,
+                },
+            )
+
+            inserted_row = insert_result.mappings().first()
+            if inserted_row:
+                inserted_rows.append(dict(inserted_row))
+
+        return {
+            "next_processes": next_process_ids,
+            "inserted_rows": inserted_rows,
+        }
+
+    def _get_order_process_flow_columns(
+        self,
+        metadata: TableMetadata,
+    ) -> dict[str, str] | None:
+        columns_by_lower = {
+            column["name"].lower(): column
+            for column in metadata.columns
+            if column.get("name")
+        }
+
+        process_column = self._first_metadata_column(
+            columns_by_lower,
+            ("id_proceso", "proceso_id", "id_prtoceso"),
+        )
+        item_column = self._first_metadata_column(
+            columns_by_lower,
+            ("id_item", "item_id", "items_id", "item", "item_legado"),
+        )
+        finished_column = self._first_metadata_column(
+            columns_by_lower,
+            ("fecha_finalizado", "fecha_finalizacion", "fecha_fin"),
+        )
+
+        if not process_column or not item_column or not finished_column:
+            return None
+
+        return {
+            "process_column": process_column,
+            "item_column": item_column,
+            "finished_column": finished_column,
+        }
 
     async def _prepare_product_changes(
         self,
@@ -4405,6 +4667,13 @@ class DataViewerService:
             quoted_column = self._query_column_expr(metadata, column)
             column_meta = columns_by_name.get(column, {"name": column, "type": "text"})
             is_text_filter = _is_filter_text_column(metadata, column)
+            if operator == "is_null":
+                clauses.append(f"{quoted_column} IS NULL")
+                continue
+
+            if operator == "is_not_null":
+                clauses.append(f"{quoted_column} IS NOT NULL")
+                continue
 
             if operator == "eq":
                 if filter_item.value is None:
