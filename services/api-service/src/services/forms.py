@@ -2114,6 +2114,22 @@ async def get_unassigned_orders(
                 where_clauses.append("(" + " OR ".join(search_parts) + ")")
                 params['q'] = f"%{normalized_q}%"
 
+            if q_src_quantity:
+                quantity_text_expr = f"NULLIF(TRIM(o.{q_src_quantity}::text), '')"
+                quantity_numeric_expr = (
+                    "CASE "
+                    f"WHEN {quantity_text_expr} ~ '^[0-9]+([\\.,][0-9]+)?$' "
+                    f"THEN REPLACE({quantity_text_expr}, ',', '.')::numeric "
+                    "ELSE NULL "
+                    "END"
+                )
+                where_clauses.append(
+                    "("
+                    f"{quantity_numeric_expr} IS NULL "
+                    f"OR COALESCE(item_counts.conteo, 0)::numeric <> {quantity_numeric_expr}"
+                    ")"
+                )
+
             where_sql = " AND ".join(where_clauses)
 
             select_cols = ", ".join(select_parts)
@@ -2122,15 +2138,11 @@ async def get_unassigned_orders(
             query = text(
                 f"""
                 SELECT {select_cols}
-                FROM (
-                    SELECT *
-                    FROM {quoted_schema}.{q_orders_table} o
-                    WHERE {where_sql}
-                    ORDER BY o.{q_src_order} ASC NULLS LAST
-                    LIMIT :limit OFFSET :offset
-                ) o
+                FROM {quoted_schema}.{q_orders_table} o
                 {join_sql}
+                WHERE {where_sql}
                 ORDER BY o.{q_src_order} ASC NULLS LAST
+                LIMIT :limit OFFSET :offset
                 """
             )
 
