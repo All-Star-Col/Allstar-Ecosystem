@@ -49,6 +49,11 @@ class OrderProcessReleaseRequest(BaseModel):
     pk: dict[str, str | int | bool]
 
 
+class DataViewerRowDeleteRequest(BaseModel):
+    table_id: str = Field(..., min_length=1, max_length=64)
+    pk: dict[str, str | int | bool]
+
+
 def get_data_viewer_service(db: AsyncSession = Depends(get_db)) -> DataViewerService:
     """
     get_data_viewer_service()
@@ -454,6 +459,164 @@ async def patch_data_viewer_row(
             request_id=request_id,
             username=current_user.username,
             table_id=patch_request.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=500,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=500,
+            detail="Internal server error",
+            code="INTERNAL_ERROR",
+        )
+
+
+@router.post("/rows/delete-preview")
+async def preview_data_viewer_row_delete(
+    request: Request,
+    response: Response,
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    data_viewer_service: DataViewerService = Depends(get_data_viewer_service),
+):
+    request_id = resolve_request_id(request)
+    started_at = time.perf_counter()
+
+    try:
+        delete_request = DataViewerRowDeleteRequest.model_validate(payload)
+    except ValidationError as validation_error:
+        detail = format_validation_detail(validation_error)
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=str(payload.get("table_id", "-")),
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=422,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=422,
+            detail=detail,
+            code="VALIDATION_ERROR",
+        )
+
+    try:
+        result = await data_viewer_service.preview_delete_row(
+            table_id=delete_request.table_id,
+            pk=dict(delete_request.pk),
+            user_id=str(current_user.id),
+        )
+        response.headers["X-Request-ID"] = request_id
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=delete_request.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=int(result.get("total_rows", 0)),
+            status_code=200,
+        )
+        return result
+    except DataViewerError as error:
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=delete_request.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=error.status_code,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=error.status_code,
+            detail=error.detail,
+            code=error.code,
+        )
+    except Exception as error:
+        logger.exception("Unexpected error in DataViewer delete preview endpoint: %s", error)
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=delete_request.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=500,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=500,
+            detail="Internal server error",
+            code="INTERNAL_ERROR",
+        )
+
+
+@router.post("/rows/delete")
+async def delete_data_viewer_row(
+    request: Request,
+    response: Response,
+    payload: dict = Body(...),
+    current_user: User = Depends(get_current_user),
+    data_viewer_service: DataViewerService = Depends(get_data_viewer_service),
+):
+    request_id = resolve_request_id(request)
+    started_at = time.perf_counter()
+
+    try:
+        delete_request = DataViewerRowDeleteRequest.model_validate(payload)
+    except ValidationError as validation_error:
+        detail = format_validation_detail(validation_error)
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=str(payload.get("table_id", "-")),
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=422,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=422,
+            detail=detail,
+            code="VALIDATION_ERROR",
+        )
+
+    try:
+        result = await data_viewer_service.delete_row(
+            table_id=delete_request.table_id,
+            pk=dict(delete_request.pk),
+            user_id=str(current_user.id),
+        )
+        response.headers["X-Request-ID"] = request_id
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=delete_request.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=int(result.get("deleted_rows", 0)),
+            status_code=200,
+        )
+        return result
+    except DataViewerError as error:
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=delete_request.table_id,
+            query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            row_count=0,
+            status_code=error.status_code,
+        )
+        return build_error_response(
+            request_id=request_id,
+            status_code=error.status_code,
+            detail=error.detail,
+            code=error.code,
+        )
+    except Exception as error:
+        logger.exception("Unexpected error in DataViewer delete endpoint: %s", error)
+        log_operation(
+            request_id=request_id,
+            username=current_user.username,
+            table_id=delete_request.table_id,
             query_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
             row_count=0,
             status_code=500,

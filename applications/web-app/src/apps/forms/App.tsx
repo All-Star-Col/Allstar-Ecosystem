@@ -10,6 +10,7 @@ const BulkPurchaseOrderUpload = lazy(
     () => import("./pages/BulkPurchaseOrderUpload"),
 );
 const SalesAssistant = lazy(() => import("./pages/SalesAssistant"));
+const CostCalculator = lazy(() => import("./pages/CostCalculator"));
 
 export default function FormsApp() {
     return (
@@ -29,6 +30,14 @@ export default function FormsApp() {
                     element={
                         <Suspense fallback={null}>
                             <SalesAssistant />
+                        </Suspense>
+                    }
+                />
+                <Route
+                    path="cost-calculator"
+                    element={
+                        <Suspense fallback={null}>
+                            <CostCalculator />
                         </Suspense>
                     }
                 />

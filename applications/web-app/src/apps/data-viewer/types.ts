@@ -88,6 +88,39 @@ export interface DataViewerUpdateRowResponse {
     request_id?: string;
 }
 
+export interface DataViewerDeletePlanSampleRow {
+    pk: DataViewerPk;
+    label: string;
+}
+
+export interface DataViewerDeletePlanTable {
+    schema: string;
+    table: string;
+    table_id: string;
+    display_name: string;
+    row_count: number;
+    sample_rows: DataViewerDeletePlanSampleRow[];
+}
+
+export interface DataViewerDeletePlan {
+    table_id: string;
+    pk: DataViewerPk;
+    total_rows: number;
+    max_rows: number;
+    tables: DataViewerDeletePlanTable[];
+}
+
+export interface DataViewerDeleteResponse {
+    status: string;
+    deleted_rows: number;
+    deleted_tables: Array<{
+        schema: string;
+        table: string;
+        row_count: number;
+    }>;
+    plan: DataViewerDeletePlan;
+}
+
 export interface ProductMergeConflict {
     source_product_id: number;
     target_product_id: number;
@@ -120,6 +153,9 @@ export type DataViewerErrorCode =
     | "PK_REQUIRED"
     | "ROW_NOT_FOUND"
     | "COLUMN_NOT_EDITABLE"
+    | "TABLE_NOT_DELETABLE"
+    | "DELETE_CASCADE_TOO_LARGE"
+    | "DATA_INTEGRITY_CONSTRAINT"
     | "PRODUCT_MERGE_REQUIRED"
     | "VALIDATION_ERROR"
     | "CONFLICT_VERSION"

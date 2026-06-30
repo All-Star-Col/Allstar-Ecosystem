@@ -123,6 +123,7 @@ class RoleTablePermission(BaseModel):
     visible: bool = True
     can_edit: bool = False
     can_create: bool = False
+    can_delete: bool = False
     can_release_order_process: bool = False
 
 

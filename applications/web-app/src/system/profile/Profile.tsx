@@ -1244,6 +1244,9 @@ export default function Profile() {
                                                             Editar
                                                         </TableHead>
                                                         <TableHead className="text-right">
+                                                            Eliminar
+                                                        </TableHead>
+                                                        <TableHead className="text-right">
                                                             Liberar
                                                         </TableHead>
                                                     </TableRow>
@@ -1252,7 +1255,7 @@ export default function Profile() {
                                                     {roleTablePermissions.length === 0 ? (
                                                         <TableRow>
                                                             <TableCell
-                                                                colSpan={4}
+                                                                colSpan={5}
                                                                 className="text-center text-sm text-muted-foreground"
                                                             >
                                                                 No hay tablas configuradas para
@@ -1302,6 +1305,40 @@ export default function Profile() {
                                                                                                     ? {
                                                                                                           ...item,
                                                                                                           can_view:
+                                                                                                              checked,
+                                                                                                      }
+                                                                                                    : item,
+                                                                                        ),
+                                                                                );
+                                                                            }}
+                                                                        />
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div className="inline-flex items-center justify-end">
+                                                                        <Switch
+                                                                            checked={
+                                                                                permission.can_delete
+                                                                            }
+                                                                            disabled={
+                                                                                isSavingRoleTables ||
+                                                                                isSavingRoleApps ||
+                                                                                isSavingRoleForms
+                                                                            }
+                                                                            onCheckedChange={(
+                                                                                checked,
+                                                                            ) => {
+                                                                                setRoleTablePermissions(
+                                                                                    (prev) =>
+                                                                                        prev.map(
+                                                                                            (
+                                                                                                item,
+                                                                                            ) =>
+                                                                                                item.table_id ===
+                                                                                                permission.table_id
+                                                                                                    ? {
+                                                                                                          ...item,
+                                                                                                          can_delete:
                                                                                                               checked,
                                                                                                       }
                                                                                                     : item,

@@ -1,8 +1,14 @@
 import pyodbc
+from fastapi import HTTPException
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import declarative_base
 
 from src.core.config import settings
@@ -10,36 +16,62 @@ from src.core.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-if not settings.POSTGRES_URL_DATABASE:
-    raise RuntimeError("POSTGRES_URL_DATABASE no esta definido en variables de entorno")
 
-engine = create_async_engine(
-    settings.POSTGRES_URL_DATABASE,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=settings.DB_POOL_SIZE,
-    max_overflow=settings.DB_MAX_OVERFLOW,
-    pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
-    pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
-    pool_reset_on_return="rollback",
-    connect_args={
-        "timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
-        "command_timeout": settings.DB_COMMAND_TIMEOUT_SECONDS,
-        "server_settings": {
-            "application_name": "allstar-api",
-            "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
-            "idle_in_transaction_session_timeout": str(
-                settings.DB_IDLE_TRANSACTION_TIMEOUT_MS
-            ),
-            "lock_timeout": str(settings.DB_LOCK_TIMEOUT_MS),
+class DatabaseUnavailableError(RuntimeError):
+    pass
+
+
+def _create_engine() -> AsyncEngine | None:
+    if not settings.POSTGRES_URL_DATABASE:
+        logger.error(
+            "POSTGRES_URL_DATABASE no esta definido; la API arrancara, "
+            "pero los endpoints que usan base de datos responderan 503."
+        )
+        return None
+
+    return create_async_engine(
+        settings.POSTGRES_URL_DATABASE,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
+        pool_recycle=settings.DB_POOL_RECYCLE_SECONDS,
+        pool_reset_on_return="rollback",
+        connect_args={
+            "timeout": settings.DB_CONNECT_TIMEOUT_SECONDS,
+            "command_timeout": settings.DB_COMMAND_TIMEOUT_SECONDS,
+            "server_settings": {
+                "application_name": "allstar-api",
+                "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
+                "idle_in_transaction_session_timeout": str(
+                    settings.DB_IDLE_TRANSACTION_TIMEOUT_MS
+                ),
+                "lock_timeout": str(settings.DB_LOCK_TIMEOUT_MS),
+            },
         },
-    },
+    )
+
+
+engine = _create_engine()
+SessionLocal = (
+    async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    if engine is not None
+    else None
 )
-SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 Base = declarative_base()
 
 
 async def get_db():
+    if SessionLocal is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "DATABASE_NOT_CONFIGURED",
+                "message": "POSTGRES_URL_DATABASE no esta definido.",
+            },
+        )
+
     session = SessionLocal()
     try:
         yield session
@@ -60,6 +92,9 @@ async def _rollback_safely(session: AsyncSession) -> None:
 
 
 async def check_database() -> None:
+    if SessionLocal is None:
+        raise DatabaseUnavailableError("POSTGRES_URL_DATABASE no esta definido")
+
     try:
         async with SessionLocal() as session:
             await session.execute(

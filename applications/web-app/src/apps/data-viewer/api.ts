@@ -2,6 +2,8 @@ import { API_SERVER } from "@/config/api";
 import { getToken } from "@/core/auth/auth.service";
 import type {
     DataViewerApiErrorBody,
+    DataViewerDeletePlan,
+    DataViewerDeleteResponse,
     DataViewerErrorCode,
     DataViewerQueryRequest,
     DataViewerQueryResponse,
@@ -238,6 +240,54 @@ export async function releaseOrderProcess(payload: {
 
     return {
         result: (await response.json()) as { status: string; next_process: number },
+        requestId: response.headers.get("X-Request-ID") ?? requestId,
+    };
+}
+
+export async function previewDeleteDataViewerRow(payload: {
+    table_id: string;
+    pk: Record<string, string | number | boolean>;
+}): Promise<{ result: DataViewerDeletePlan; requestId: string }> {
+    const { headers, requestId } = buildHeaders(undefined, {
+        contentTypeJson: true,
+    });
+
+    const response = await fetch(`${DATA_VIEWER_BASE}/rows/delete-preview`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw await toApiError(response, requestId);
+    }
+
+    return {
+        result: (await response.json()) as DataViewerDeletePlan,
+        requestId: response.headers.get("X-Request-ID") ?? requestId,
+    };
+}
+
+export async function deleteDataViewerRow(payload: {
+    table_id: string;
+    pk: Record<string, string | number | boolean>;
+}): Promise<{ result: DataViewerDeleteResponse; requestId: string }> {
+    const { headers, requestId } = buildHeaders(undefined, {
+        contentTypeJson: true,
+    });
+
+    const response = await fetch(`${DATA_VIEWER_BASE}/rows/delete`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        throw await toApiError(response, requestId);
+    }
+
+    return {
+        result: (await response.json()) as DataViewerDeleteResponse,
         requestId: response.headers.get("X-Request-ID") ?? requestId,
     };
 }

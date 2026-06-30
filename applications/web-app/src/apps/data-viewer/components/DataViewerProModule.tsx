@@ -34,10 +34,12 @@ import { LoadingSkeleton } from "./LoadingSkeleton";
 import { RowEditSheet } from "./RowEditSheet";
 import {
     DataViewerApiError,
+    deleteDataViewerRow,
     exportDataViewerExcel,
     fetchProductEditorRow,
     fetchDataViewerTables,
     mergeProductRows,
+    previewDeleteDataViewerRow,
     queryDataViewer,
     releaseOrderProcess,
     updateDataViewerRow,
@@ -54,6 +56,7 @@ import {
 import type {
     DataViewerFilter,
     DataViewerFilterOperator,
+    DataViewerDeletePlan,
     DataViewerModuleProps,
     DataViewerPk,
     DataViewerQueryRequest,
@@ -121,6 +124,12 @@ interface UiErrorState {
 }
 
 interface PendingProductMergeState extends ProductMergeConflict {
+    requestId?: string;
+}
+
+interface PendingDeleteState {
+    pk: DataViewerPk;
+    plan: DataViewerDeletePlan;
     requestId?: string;
 }
 
@@ -364,6 +373,12 @@ function getCodeMessage(code?: string): string {
             return "La fila que intentas actualizar ya no existe.";
         case "COLUMN_NOT_EDITABLE":
             return "Hay columnas no editables en los cambios enviados.";
+        case "TABLE_NOT_DELETABLE":
+            return "La tabla no permite eliminacion de filas.";
+        case "DELETE_CASCADE_TOO_LARGE":
+            return "La eliminacion en cadena supera el limite seguro.";
+        case "DATA_INTEGRITY_CONSTRAINT":
+            return "La operacion no se pudo completar por relaciones de integridad.";
         case "PRODUCT_MERGE_REQUIRED":
             return "El producto editado queda igual a un producto existente.";
         case "VALIDATION_ERROR":
@@ -574,9 +589,14 @@ export function DataViewerProModule({
     const [selectedRow, setSelectedRow] = useState<DataViewerRow | null>(null);
     const [isSavingRow, setIsSavingRow] = useState(false);
     const [isMergingProduct, setIsMergingProduct] = useState(false);
+    const [isPreviewingDelete, setIsPreviewingDelete] = useState(false);
+    const [isDeletingRow, setIsDeletingRow] = useState(false);
     const [releasingRowKey, setReleasingRowKey] = useState<string | null>(null);
+    const [deletingRowKey, setDeletingRowKey] = useState<string | null>(null);
     const [pendingProductMerge, setPendingProductMerge] =
         useState<PendingProductMergeState | null>(null);
+    const [pendingDelete, setPendingDelete] =
+        useState<PendingDeleteState | null>(null);
     const [pendingRetryDraftValues, setPendingRetryDraftValues] =
         useState<Record<string, unknown> | null>(null);
 
@@ -752,6 +772,7 @@ export function DataViewerProModule({
         setSelectedRow(null);
         setRowSaveError(null);
         setPendingRetryDraftValues(null);
+        setPendingDelete(null);
         setDraftFilter({
             column: firstVisibleColumn,
             operator: "eq",
@@ -1008,9 +1029,87 @@ export function DataViewerProModule({
         [activeTable],
     );
 
+    const handlePreviewDeleteRow = useCallback(
+        async (row: DataViewerRow) => {
+            if (!activeTable) {
+                return;
+            }
+            if (!activeTable.can_delete) {
+                toast.warning("Sin permiso para eliminar", {
+                    description:
+                        "Activa el permiso Eliminar para esta tabla en Perfil / Permisos.",
+                });
+                return;
+            }
+
+            const pk = extractRowPk(row, activeTable.pk_columns);
+            if (!pk) {
+                toast.error("No se pudo preparar la eliminacion", {
+                    description: "No se pudo identificar la fila seleccionada.",
+                });
+                return;
+            }
+
+            const rowKey = pkToStableKey(pk);
+            setDeletingRowKey(rowKey);
+            setIsPreviewingDelete(true);
+            try {
+                const { result, requestId } = await previewDeleteDataViewerRow({
+                    table_id: activeTable.table_id,
+                    pk,
+                });
+                setPendingDelete({
+                    pk,
+                    plan: result,
+                    requestId,
+                });
+            } catch (error) {
+                const normalized = normalizeError(error);
+                toast.error("No se pudo preparar la eliminacion", {
+                    description: normalized.requestId
+                        ? `${normalized.detail} (request_id: ${normalized.requestId})`
+                        : normalized.detail,
+                });
+            } finally {
+                setIsPreviewingDelete(false);
+                setDeletingRowKey(null);
+            }
+        },
+        [activeTable],
+    );
+
+    const handleConfirmDeleteRow = async () => {
+        if (!pendingDelete) {
+            return;
+        }
+
+        setIsDeletingRow(true);
+        try {
+            const { result, requestId } = await deleteDataViewerRow({
+                table_id: pendingDelete.plan.table_id,
+                pk: pendingDelete.pk,
+            });
+
+            toast.success("Fila eliminada", {
+                description: `${result.deleted_rows.toLocaleString("es-CO")} registros eliminados. request_id: ${requestId}`,
+            });
+            setPendingDelete(null);
+            setRefreshCounter((previous) => previous + 1);
+        } catch (error) {
+            const normalized = normalizeError(error);
+            toast.error("No se pudo eliminar la fila", {
+                description: normalized.requestId
+                    ? `${normalized.detail} (request_id: ${normalized.requestId})`
+                    : normalized.detail,
+            });
+        } finally {
+            setIsDeletingRow(false);
+        }
+    };
+
     const getGridRowActions = useCallback(
         (row: DataViewerRow) => {
-            if (!activeTable || !isOrderProcessReleaseCandidate(activeTable, row)) {
+            if (!activeTable) {
                 return [];
             }
 
@@ -1020,16 +1119,41 @@ export function DataViewerProModule({
             }
 
             const rowKey = pkToStableKey(pk);
-            return [
-                {
+            const actions = [];
+
+            if (isOrderProcessReleaseCandidate(activeTable, row)) {
+                actions.push({
                     label: releasingRowKey === rowKey ? "Liberando..." : "Liberar",
                     onClick: () => void handleReleaseOrderProcess(row),
                     disabled: releasingRowKey !== null,
                     title: "Finaliza el proceso 6 y crea el proceso 2 para el item",
-                },
-            ];
+                });
+            }
+
+            actions.push({
+                label:
+                    isPreviewingDelete && deletingRowKey === rowKey
+                        ? "Revisando..."
+                        : "Eliminar",
+                onClick: () => void handlePreviewDeleteRow(row),
+                disabled:
+                    !activeTable.can_delete || isPreviewingDelete || isDeletingRow,
+                title: activeTable.can_delete
+                    ? "Ver dependencias antes de eliminar la fila"
+                    : "Sin permiso de eliminar para esta tabla",
+            });
+
+            return actions;
         },
-        [activeTable, handleReleaseOrderProcess, releasingRowKey],
+        [
+            activeTable,
+            deletingRowKey,
+            handlePreviewDeleteRow,
+            handleReleaseOrderProcess,
+            isDeletingRow,
+            isPreviewingDelete,
+            releasingRowKey,
+        ],
     );
 
     const handleEditRow = async (row: DataViewerRow) => {
@@ -1797,6 +1921,98 @@ export function DataViewerProModule({
                             disabled={isMergingProduct}
                         >
                             {isMergingProduct ? "Fusionando..." : "Fusionar producto"}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog
+                open={Boolean(pendingDelete)}
+                onOpenChange={(open) => {
+                    if (!open && !isDeletingRow) {
+                        setPendingDelete(null);
+                    }
+                }}
+            >
+                <AlertDialogContent className="max-w-2xl">
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            Eliminar fila y dependencias
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Antes de eliminar, revisa el impacto completo. Esta
+                            accion no se puede deshacer desde Data Viewer.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+
+                    {pendingDelete && (
+                        <div className="space-y-3">
+                            <div className="rounded-md border border-destructive/25 bg-destructive/5 p-3 text-sm">
+                                <div className="font-semibold text-destructive">
+                                    Se eliminaran{" "}
+                                    {pendingDelete.plan.total_rows.toLocaleString("es-CO")}{" "}
+                                    registros en total.
+                                </div>
+                                {pendingDelete.requestId && (
+                                    <div className="mt-1 text-xs text-muted-foreground">
+                                        preview request_id: {pendingDelete.requestId}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="max-h-80 overflow-auto rounded-md border border-border divide-y divide-border">
+                                {pendingDelete.plan.tables.map((table) => (
+                                    <div
+                                        key={`${table.schema}.${table.table}`}
+                                        className="p-3 text-sm"
+                                    >
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div>
+                                                <div className="font-semibold text-foreground">
+                                                    {table.display_name}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground">
+                                                    {table.schema}.{table.table}
+                                                </div>
+                                            </div>
+                                            <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium">
+                                                {table.row_count.toLocaleString("es-CO")}{" "}
+                                                filas
+                                            </span>
+                                        </div>
+
+                                        {table.sample_rows.length > 0 && (
+                                            <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                                                {table.sample_rows.map((sample) => (
+                                                    <li
+                                                        key={`${table.schema}.${table.table}.${JSON.stringify(sample.pk)}`}
+                                                        className="truncate"
+                                                        title={sample.label}
+                                                    >
+                                                        {sample.label}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeletingRow}>
+                            Cancelar
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={(event) => {
+                                event.preventDefault();
+                                void handleConfirmDeleteRow();
+                            }}
+                            disabled={isDeletingRow}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            {isDeletingRow ? "Eliminando..." : "Eliminar en cadena"}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>

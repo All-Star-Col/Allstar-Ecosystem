@@ -107,6 +107,7 @@ async def _ensure_role_data_viewer_tables_table(db: AsyncSession) -> None:
                 visible BOOLEAN NOT NULL DEFAULT false,
                 can_edit BOOLEAN NOT NULL DEFAULT false,
                 can_create BOOLEAN NOT NULL DEFAULT false,
+                can_delete BOOLEAN NOT NULL DEFAULT false,
                 can_release_order_process BOOLEAN NOT NULL DEFAULT false,
                 granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 PRIMARY KEY (role_id, table_id)
@@ -119,6 +120,14 @@ async def _ensure_role_data_viewer_tables_table(db: AsyncSession) -> None:
             """
             ALTER TABLE workspace.role_data_viewer_tables
             ADD COLUMN IF NOT EXISTS can_release_order_process BOOLEAN NOT NULL DEFAULT false
+            """
+        )
+    )
+    await db.execute(
+        text(
+            """
+            ALTER TABLE workspace.role_data_viewer_tables
+            ADD COLUMN IF NOT EXISTS can_delete BOOLEAN NOT NULL DEFAULT false
             """
         )
     )
@@ -150,6 +159,7 @@ async def _resolve_role_data_viewer_tables_columns(
         "visible",
         "can_edit",
         "can_create",
+        "can_delete",
         "can_release_order_process",
     }.issubset(column_names):
         logger.warning(
@@ -161,6 +171,7 @@ async def _resolve_role_data_viewer_tables_columns(
         "visible": "visible",
         "can_edit": "can_edit",
         "can_create": "can_create",
+        "can_delete": "can_delete",
         "can_release_order_process": "can_release_order_process",
         "has_granted_at": "granted_at" in column_names,
     }
@@ -383,6 +394,9 @@ async def get_role_permissions(
         can_create_column = _quote_identifier(
             str(role_data_viewer_tables_columns["can_create"])
         )
+        can_delete_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["can_delete"])
+        )
         can_release_column = _quote_identifier(
             str(role_data_viewer_tables_columns["can_release_order_process"])
         )
@@ -394,6 +408,7 @@ async def get_role_permissions(
                 COALESCE({visible_column}, false) AS visible,
                 COALESCE({can_edit_column}, false) AS can_edit,
                 COALESCE({can_create_column}, false) AS can_create,
+                COALESCE({can_delete_column}, false) AS can_delete,
                 COALESCE({can_release_column}, false) AS can_release_order_process
             FROM workspace.role_data_viewer_tables
             WHERE role_id = :role_id
@@ -460,6 +475,12 @@ async def get_role_permissions(
                         table.table_id,
                         legacy_permissions_by_table.get(table.table_id, {}),
                     ).get("can_create", False)
+                ),
+                can_delete=bool(
+                    role_permissions_by_table.get(
+                        table.table_id,
+                        legacy_permissions_by_table.get(table.table_id, {}),
+                    ).get("can_delete", False)
                 ),
                 can_release_order_process=bool(
                     role_permissions_by_table.get(
@@ -546,6 +567,9 @@ async def upsert_role_permissions(
         can_create_column = _quote_identifier(
             str(role_data_viewer_tables_columns["can_create"])
         )
+        can_delete_column = _quote_identifier(
+            str(role_data_viewer_tables_columns["can_delete"])
+        )
         can_release_column = _quote_identifier(
             str(role_data_viewer_tables_columns["can_release_order_process"])
         )
@@ -557,6 +581,7 @@ async def upsert_role_permissions(
             visible_column,
             can_edit_column,
             can_create_column,
+            can_delete_column,
             can_release_column,
         ]
         insert_values = [
@@ -565,12 +590,14 @@ async def upsert_role_permissions(
             ":visible",
             ":can_edit",
             ":can_create",
+            ":can_delete",
             ":can_release_order_process",
         ]
         update_assignments = [
             f"{visible_column} = EXCLUDED.{visible_column}",
             f"{can_edit_column} = EXCLUDED.{can_edit_column}",
             f"{can_create_column} = EXCLUDED.{can_create_column}",
+            f"{can_delete_column} = EXCLUDED.{can_delete_column}",
             f"{can_release_column} = EXCLUDED.{can_release_column}",
         ]
 
@@ -636,6 +663,7 @@ async def upsert_role_permissions(
                         "visible": permission.visible,
                         "can_edit": permission.can_edit,
                         "can_create": permission.can_create,
+                        "can_delete": permission.can_delete,
                         "can_release_order_process": permission.can_release_order_process,
                     },
                 )

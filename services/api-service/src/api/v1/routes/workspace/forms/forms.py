@@ -13,7 +13,23 @@ from src.schemas.models import (
     SubmitFormResponse,
     User,
 )
+from src.schemas.cost_calculator import (
+    CostCalculatorApplyCostResponse,
+    CostCalculatorBreakdownResponse,
+    CostCalculatorBreakdownUpsertRequest,
+    CostCalculatorLaborCostRequest,
+    CostCalculatorManualCostRequest,
+    CostCalculatorMaterialCreateRequest,
+    CostCalculatorMaterialListResponse,
+    CostCalculatorMaterialSummary,
+    CostCalculatorProductDetail,
+    CostCalculatorProductListResponse,
+)
 from src.services import forms
+from src.services.cost_calculator import (
+    CostCalculatorError,
+    CostCalculatorService,
+)
 from src.services.forms_bulk_upload import (
     commit_order_process_import,
     commit_purchase_order_import,
@@ -101,6 +117,16 @@ def is_sales_assistant_enabled() -> bool:
 
 def get_forms_service(db: AsyncSession = Depends(get_db)) -> forms.FormsService:
     return forms.FormsService(db)
+
+
+def get_cost_calculator_service(
+    db: AsyncSession = Depends(get_db),
+) -> CostCalculatorService:
+    return CostCalculatorService(db)
+
+
+def raise_cost_calculator_http_error(error: CostCalculatorError) -> None:
+    raise HTTPException(status_code=error.status_code, detail=str(error))
 
 
 @router.get("/categories", response_model=List[CategoriesForms] | None)
@@ -366,6 +392,180 @@ async def submit_order_process_endpoint(
         )
     except forms.DBCommunicationError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get(
+    "/cost-calculator/products",
+    response_model=CostCalculatorProductListResponse,
+)
+async def list_cost_calculator_products_endpoint(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return {"items": await service.list_products(query=q, limit=limit)}
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error listing cost calculator products: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.get(
+    "/cost-calculator/products/{product_id}",
+    response_model=CostCalculatorProductDetail,
+)
+async def get_cost_calculator_product_endpoint(
+    product_id: int,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return await service.get_product(product_id)
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error loading cost calculator product: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.patch(
+    "/cost-calculator/products/{product_id}/manual-cost",
+    response_model=CostCalculatorProductDetail,
+)
+async def update_cost_calculator_manual_cost_endpoint(
+    product_id: int,
+    payload: CostCalculatorManualCostRequest,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return await service.update_manual_cost(
+            product_id=product_id,
+            new_cost=payload.new_cost,
+        )
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error updating manual product cost: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.get(
+    "/cost-calculator/products/{product_id}/breakdown",
+    response_model=CostCalculatorBreakdownResponse,
+)
+async def get_cost_calculator_breakdown_endpoint(
+    product_id: int,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return await service.get_breakdown(product_id)
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error loading product breakdown: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post(
+    "/cost-calculator/products/{product_id}/breakdown",
+    response_model=CostCalculatorBreakdownResponse,
+)
+async def upsert_cost_calculator_breakdown_endpoint(
+    product_id: int,
+    payload: CostCalculatorBreakdownUpsertRequest,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return await service.upsert_breakdown(product_id=product_id, payload=payload)
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error saving product breakdown: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.patch(
+    "/cost-calculator/products/{product_id}/labor-cost",
+    response_model=CostCalculatorBreakdownResponse,
+)
+async def update_cost_calculator_labor_cost_endpoint(
+    product_id: int,
+    payload: CostCalculatorLaborCostRequest,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return await service.update_labor_cost(
+            product_id=product_id,
+            costo_mano_obra=payload.costo_mano_obra,
+        )
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error updating product labor cost: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post(
+    "/cost-calculator/products/{product_id}/apply-calculated-cost",
+    response_model=CostCalculatorApplyCostResponse,
+)
+async def apply_cost_calculator_calculated_cost_endpoint(
+    product_id: int,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        product, breakdown = await service.apply_calculated_cost(product_id)
+        return {"status": "success", "product": product, "breakdown": breakdown}
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error applying calculated product cost: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.get(
+    "/cost-calculator/materials",
+    response_model=CostCalculatorMaterialListResponse,
+)
+async def list_cost_calculator_materials_endpoint(
+    q: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return {"items": await service.list_materials(query=q, limit=limit)}
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error listing cost calculator materials: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.post(
+    "/cost-calculator/materials",
+    response_model=CostCalculatorMaterialSummary,
+)
+async def create_cost_calculator_material_endpoint(
+    payload: CostCalculatorMaterialCreateRequest,
+    _current_user: User = Depends(get_current_user),
+    service: CostCalculatorService = Depends(get_cost_calculator_service),
+):
+    try:
+        return await service.create_material(payload)
+    except CostCalculatorError as e:
+        raise_cost_calculator_http_error(e)
+    except Exception as e:
+        logger.exception("Error creating cost calculator material: %s", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @router.post("/bulk/purchase-orders/preview")

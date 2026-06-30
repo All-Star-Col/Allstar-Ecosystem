@@ -1,8 +1,11 @@
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from src.services.data_viewer import (
     DataViewerService,
+    DeleteDependencyEdge,
+    DeletePlanEntry,
     TableConfig,
     TableMetadata,
     _resolve_view_status_values,
@@ -165,6 +168,103 @@ class TestDataViewerService(unittest.TestCase):
         )
 
         self.assertFalse(DataViewerService._should_preserve_raw_fk_id(config, "id_item"))
+
+    def test_delete_plan_serialization_groups_rows_by_table(self) -> None:
+        service = DataViewerService(db=object())
+        allowlist = {
+            "producto": _table_config(
+                table_id="producto",
+                table_name="producto",
+                full_table_name="data.producto",
+                display_name="Productos",
+            ),
+            "ordencompra": _table_config(
+                table_id="ordencompra",
+                table_name="ordencompra",
+                full_table_name="data.ordencompra",
+                display_name="Ordenes de compra",
+            ),
+        }
+        entries = [
+            DeletePlanEntry(
+                schema_name="data",
+                table_name="producto",
+                pk_columns=["id"],
+                pk={"id": 10},
+                row={"id": 10, "nombre": "SOFA TEST"},
+                depth=0,
+            ),
+            DeletePlanEntry(
+                schema_name="data",
+                table_name="ordencompra",
+                pk_columns=["id"],
+                pk={"id": 20},
+                row={"id": 20, "oc_cliente": "OC-20"},
+                depth=1,
+            ),
+        ]
+
+        plan = service._serialize_delete_plan(
+            table_id="producto",
+            normalized_pk={"id": 10},
+            entries=entries,
+            allowlist=allowlist,
+        )
+
+        self.assertEqual(plan["total_rows"], 2)
+        self.assertEqual(len(plan["tables"]), 2)
+        self.assertEqual(plan["tables"][0]["sample_rows"][0]["label"], "oc_cliente: OC-20")
+        self.assertEqual(plan["tables"][1]["sample_rows"][0]["label"], "nombre: SOFA TEST")
+
+
+class TestDeletePlan(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_delete_child_entries_casts_text_compare_value(self) -> None:
+        class FakeResult:
+            def mappings(self):
+                return self
+
+            def all(self):
+                return []
+
+        class FakeDb:
+            def __init__(self):
+                self.params = {}
+
+            async def execute(self, statement, params=None):
+                self.params = params or {}
+                return FakeResult()
+
+        fake_db = FakeDb()
+        service = DataViewerService(db=fake_db)
+        edge = DeleteDependencyEdge(
+            parent_schema="data",
+            parent_table="ordencompra",
+            parent_column="id",
+            child_schema="data",
+            child_table="item",
+            child_column="id_orden_compra",
+        )
+
+        with patch(
+            "src.services.data_viewer._get_primary_key_columns",
+            return_value=["id"],
+        ), patch(
+            "src.services.data_viewer._get_table_columns",
+            return_value=[
+                {"column_name": "id"},
+                {"column_name": "id_orden_compra"},
+            ],
+        ):
+            entries = await service._fetch_delete_child_entries(
+                edge=edge,
+                parent_value=774,
+                depth=1,
+                remaining_limit=10,
+            )
+
+        self.assertEqual(entries, [])
+        self.assertEqual(fake_db.params["parent_value"], "774")
+        self.assertIsInstance(fake_db.params["parent_value"], str)
 
 
 class TestProductNameRecalculation(unittest.IsolatedAsyncioTestCase):

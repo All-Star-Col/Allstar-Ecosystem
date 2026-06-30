@@ -55,6 +55,8 @@ PURCHASE_ORDER_STATUS_SYNC_INTERVAL_SECONDS = 30
 PURCHASE_ORDER_STATUS_SYNC_TIMEOUT_MS = 5000
 MAX_EXPORT_ROWS = 10000
 EXPORT_CHUNK_SIZE = 1000
+MAX_DELETE_CASCADE_ROWS = 5000
+DELETE_PREVIEW_SAMPLE_LIMIT = 5
 TABLE_METADATA_CACHE_TTL_SECONDS = 30
 TABLE_METADATA_CACHE_MAX_ENTRIES = 256
 IDENTIFIER_REGEX = re.compile(DATA_VIEWER_IDENTIFIER_PATTERN)
@@ -434,6 +436,27 @@ class ProductMergeConflictError(DataViewerError):
         )
 
 
+class TableNotDeletableError(DataViewerError):
+    def __init__(self, table_id: str) -> None:
+        super().__init__(
+            detail=f"Table {table_id} is not deletable",
+            code="TABLE_NOT_DELETABLE",
+            status_code=422,
+        )
+
+
+class DeleteCascadeTooLargeError(DataViewerError):
+    def __init__(self, max_rows: int) -> None:
+        super().__init__(
+            detail=(
+                "La eliminacion en cadena supera el limite seguro de "
+                f"{max_rows} registros. Refina la eliminacion o hazla manualmente."
+            ),
+            code="DELETE_CASCADE_TOO_LARGE",
+            status_code=422,
+        )
+
+
 @dataclass
 class TableConfig:
     table_id: str
@@ -489,6 +512,26 @@ class CsvExportResult:
     filename: str
     stream: AsyncIterator[bytes]
     row_count: int
+
+
+@dataclass(frozen=True)
+class DeleteDependencyEdge:
+    parent_schema: str
+    parent_table: str
+    parent_column: str
+    child_schema: str
+    child_table: str
+    child_column: str
+
+
+@dataclass
+class DeletePlanEntry:
+    schema_name: str
+    table_name: str
+    pk_columns: list[str]
+    pk: dict[str, Any]
+    row: dict[str, Any]
+    depth: int
 
 
 _table_metadata_cache: dict[tuple[Any, ...], tuple[float, TableMetadata]] = {}
@@ -625,6 +668,34 @@ async def _get_user_role_id(db: AsyncSession, *, user_id: str | None) -> str | N
     return str(role_id) if role_id is not None else None
 
 
+async def _get_user_role_context(
+    db: AsyncSession,
+    *,
+    user_id: str | None,
+) -> dict[str, str] | None:
+    if not user_id:
+        return None
+
+    query = text(
+        """
+        SELECT r.id AS role_id, r.code AS role_code
+        FROM auth.user_roles ur
+        JOIN auth.roles r ON r.id = ur.role_id
+        WHERE ur.user_id = :user_id
+        ORDER BY ur.granted_at DESC NULLS LAST
+        LIMIT 1
+        """
+    )
+    result = await db.execute(query, {"user_id": user_id})
+    row = result.mappings().first()
+    if not row:
+        return None
+    return {
+        "role_id": str(row["role_id"]),
+        "role_code": str(row["role_code"] or ""),
+    }
+
+
 async def _resolve_role_tables_columns(
     db: AsyncSession,
 ) -> dict[str, str] | None:
@@ -721,6 +792,78 @@ async def _get_foreign_key_metadata(
             "referenced_column": _normalize_identifier(row["referenced_column"]).lower(),
         }
     return metadata
+
+
+async def _get_reverse_foreign_key_edges(
+    db: AsyncSession,
+    *,
+    schema_name: str,
+) -> list[DeleteDependencyEdge]:
+    query = text(
+        """
+        SELECT
+            ccu.table_schema AS parent_schema,
+            ccu.table_name AS parent_table,
+            ccu.column_name AS parent_column,
+            kcu.table_schema AS child_schema,
+            kcu.table_name AS child_table,
+            kcu.column_name AS child_column
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+         AND tc.table_name = kcu.table_name
+        JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+         AND tc.table_schema = ccu.table_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND ccu.table_schema = :schema_name
+          AND kcu.table_schema = :schema_name
+        """
+    )
+    result = await db.execute(query, {"schema_name": schema_name})
+    return [
+        DeleteDependencyEdge(
+            parent_schema=_normalize_identifier(row["parent_schema"]).lower(),
+            parent_table=_normalize_identifier(row["parent_table"]).lower(),
+            parent_column=_normalize_identifier(row["parent_column"]),
+            child_schema=_normalize_identifier(row["child_schema"]).lower(),
+            child_table=_normalize_identifier(row["child_table"]).lower(),
+            child_column=_normalize_identifier(row["child_column"]),
+        )
+        for row in result.mappings().all()
+    ]
+
+
+async def _get_primary_key_columns(
+    db: AsyncSession,
+    *,
+    schema_name: str,
+    table_name: str,
+) -> list[str]:
+    query = text(
+        """
+        SELECT kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+         AND tc.table_name = kcu.table_name
+        WHERE tc.table_schema = :schema_name
+          AND tc.table_name = :table_name
+          AND tc.constraint_type = 'PRIMARY KEY'
+        ORDER BY kcu.ordinal_position
+        """
+    )
+    result = await db.execute(
+        query,
+        {"schema_name": schema_name, "table_name": table_name},
+    )
+    return [
+        _normalize_identifier(row["column_name"])
+        for row in result.mappings().all()
+        if row.get("column_name")
+    ]
 
 
 async def _find_existing_table(
@@ -1236,6 +1379,592 @@ class DataViewerService:
         if not updated_order:
             raise RowNotFoundError(order_ref["referenced_table"])
 
+
+    async def preview_delete_row(
+        self,
+        *,
+        table_id: str,
+        pk: dict[str, Any],
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        allowlist = await self._get_allowlist_map(user_id=user_id)
+        table_config = allowlist.get(table_id)
+        if not table_config:
+            raise TableNotConfiguredError(table_id)
+
+        metadata = await self._get_table_metadata(table_config)
+        if not metadata.has_pk:
+            raise NoPkDefinedError(table_id)
+        if not metadata.can_delete:
+            raise TableNotDeletableError(table_id)
+
+        normalized_pk = self._validate_pk_payload(pk, metadata)
+        entries = await self._build_delete_plan_entries(
+            metadata=metadata,
+            normalized_pk=normalized_pk,
+        )
+        return self._serialize_delete_plan(
+            table_id=table_id,
+            normalized_pk=normalized_pk,
+            entries=entries,
+            allowlist=allowlist,
+        )
+
+    async def delete_row(
+        self,
+        *,
+        table_id: str,
+        pk: dict[str, Any],
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        allowlist = await self._get_allowlist_map(user_id=user_id)
+        table_config = allowlist.get(table_id)
+        if not table_config:
+            raise TableNotConfiguredError(table_id)
+
+        metadata = await self._get_table_metadata(table_config)
+        if not metadata.has_pk:
+            raise NoPkDefinedError(table_id)
+        if not metadata.can_delete:
+            raise TableNotDeletableError(table_id)
+
+        normalized_pk = self._validate_pk_payload(pk, metadata)
+        entries = await self._build_delete_plan_entries(
+            metadata=metadata,
+            normalized_pk=normalized_pk,
+        )
+        plan = self._serialize_delete_plan(
+            table_id=table_id,
+            normalized_pk=normalized_pk,
+            entries=entries,
+            allowlist=allowlist,
+        )
+
+        try:
+            await self.db.execute(
+                text(f"SET LOCAL statement_timeout = {int(DATA_VIEWER_MUTATION_TIMEOUT_MS)}")
+            )
+
+            deleted_by_table: dict[tuple[str, str], int] = {}
+            for entry in sorted(entries, key=lambda item: item.depth, reverse=True):
+                deleted_rows = await self._delete_plan_entry(entry)
+                table_key = (entry.schema_name.lower(), entry.table_name.lower())
+                deleted_by_table[table_key] = deleted_by_table.get(table_key, 0) + deleted_rows
+
+            await self.db.commit()
+        except IntegrityError as error:
+            await self.db.rollback()
+            raise DataIntegrityConstraintError(
+                "No se pudo eliminar porque existen dependencias no cubiertas por el plan."
+            ) from error
+        except DataViewerError:
+            await self.db.rollback()
+            raise
+        except Exception as error:
+            await self.db.rollback()
+            raise DBCommunicationError(f"Error eliminando fila en DataViewer: {error}") from error
+
+        deleted_tables = [
+            {
+                "schema": schema_name,
+                "table": table_name,
+                "row_count": count,
+            }
+            for (schema_name, table_name), count in sorted(deleted_by_table.items())
+        ]
+
+        return {
+            "status": "success",
+            "deleted_rows": sum(deleted_by_table.values()),
+            "deleted_tables": deleted_tables,
+            "plan": plan,
+        }
+
+    async def _build_delete_plan_entries(
+        self,
+        *,
+        metadata: TableMetadata,
+        normalized_pk: dict[str, Any],
+    ) -> list[DeletePlanEntry]:
+        root_row = await self._fetch_physical_row_by_pk(
+            schema_name=metadata.config.schema_name,
+            table_name=metadata.config.table_name,
+            pk_values=normalized_pk,
+        )
+        if not root_row:
+            raise RowNotFoundError(metadata.config.table_id)
+
+        root_entry = DeletePlanEntry(
+            schema_name=metadata.config.schema_name,
+            table_name=metadata.config.table_name,
+            pk_columns=metadata.pk_columns,
+            pk={column: root_row.get(column) for column in metadata.pk_columns},
+            row=root_row,
+            depth=0,
+        )
+
+        edges = await self._get_delete_dependency_edges(schema_name=metadata.config.schema_name)
+        edges_by_parent: dict[tuple[str, str], list[DeleteDependencyEdge]] = {}
+        for edge in edges:
+            parent_key = (edge.parent_schema.lower(), edge.parent_table.lower())
+            edges_by_parent.setdefault(parent_key, []).append(edge)
+
+        entries: list[DeletePlanEntry] = []
+        pending: list[DeletePlanEntry] = [root_entry]
+        seen = {self._delete_entry_identity(root_entry)}
+
+        while pending:
+            current = pending.pop()
+            entries.append(current)
+            if len(entries) > MAX_DELETE_CASCADE_ROWS:
+                raise DeleteCascadeTooLargeError(MAX_DELETE_CASCADE_ROWS)
+
+            parent_key = (current.schema_name.lower(), current.table_name.lower())
+            for edge in edges_by_parent.get(parent_key, []):
+                parent_value = current.row.get(edge.parent_column)
+                if parent_value is None:
+                    continue
+
+                child_entries = await self._fetch_delete_child_entries(
+                    edge=edge,
+                    parent_value=parent_value,
+                    depth=current.depth + 1,
+                    remaining_limit=MAX_DELETE_CASCADE_ROWS - len(entries) - len(pending),
+                )
+                for child_entry in child_entries:
+                    identity = self._delete_entry_identity(child_entry)
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    pending.append(child_entry)
+
+        return entries
+
+    async def _get_delete_dependency_edges(
+        self,
+        *,
+        schema_name: str,
+    ) -> list[DeleteDependencyEdge]:
+        edges = await _get_reverse_foreign_key_edges(
+            self.db,
+            schema_name=schema_name,
+        )
+        edge_keys = {
+            (
+                edge.parent_schema.lower(),
+                edge.parent_table.lower(),
+                edge.parent_column.lower(),
+                edge.child_schema.lower(),
+                edge.child_table.lower(),
+                edge.child_column.lower(),
+            )
+            for edge in edges
+        }
+
+        existing_tables = await self._get_existing_data_tables()
+        column_cache: dict[str, list[dict[str, Any]]] = {}
+
+        async def get_columns(table_name: str) -> list[dict[str, Any]]:
+            normalized_table = table_name.lower()
+            if normalized_table not in column_cache:
+                column_cache[normalized_table] = await _get_table_columns(
+                    self.db,
+                    schema_name=schema_name,
+                    table_name=normalized_table,
+                )
+            return column_cache[normalized_table]
+
+        async def has_column(table_name: str, column_name: str) -> bool:
+            columns = await get_columns(table_name)
+            return any(
+                _normalize_identifier(column["column_name"]).lower() == column_name.lower()
+                for column in columns
+                if column.get("column_name")
+            )
+
+        async def choose_column(
+            table_name: str,
+            candidates: tuple[str, ...],
+        ) -> str | None:
+            return _choose_existing_column(await get_columns(table_name), candidates)
+
+        def add_edge(
+            *,
+            parent_table: str,
+            parent_column: str,
+            child_table: str,
+            child_column: str,
+        ) -> None:
+            edge = DeleteDependencyEdge(
+                parent_schema=schema_name,
+                parent_table=parent_table.lower(),
+                parent_column=parent_column,
+                child_schema=schema_name,
+                child_table=child_table.lower(),
+                child_column=child_column,
+            )
+            key = (
+                edge.parent_schema.lower(),
+                edge.parent_table.lower(),
+                edge.parent_column.lower(),
+                edge.child_schema.lower(),
+                edge.child_table.lower(),
+                edge.child_column.lower(),
+            )
+            if key in edge_keys:
+                return
+            edge_keys.add(key)
+            edges.append(edge)
+
+        for parent_table in sorted(existing_tables):
+            parent_id_column = await choose_column(
+                parent_table,
+                (
+                    "id",
+                    f"id_{parent_table}",
+                    f"{parent_table}_id",
+                ),
+            )
+            if not parent_id_column:
+                continue
+
+            parent_variants = {
+                parent_table,
+                parent_table.rstrip("s"),
+                parent_table.replace("_", ""),
+            }
+            generic_candidates = tuple(
+                candidate
+                for variant in parent_variants
+                for candidate in (
+                    f"id_{variant}",
+                    f"{variant}_id",
+                )
+            )
+
+            for child_table in sorted(existing_tables):
+                if child_table == parent_table:
+                    continue
+                child_column = await choose_column(child_table, generic_candidates)
+                if child_column:
+                    add_edge(
+                        parent_table=parent_table,
+                        parent_column=parent_id_column,
+                        child_table=child_table,
+                        child_column=child_column,
+                    )
+
+        if "producto" in existing_tables:
+            product_columns = await get_columns("producto")
+            for product_column, catalog_table in PRODUCT_COMPONENT_REFERENCE_TABLES.items():
+                if (
+                    catalog_table in existing_tables
+                    and await has_column("producto", product_column)
+                ):
+                    catalog_id = await choose_column(catalog_table, ("id", product_column))
+                    if catalog_id:
+                        add_edge(
+                            parent_table=catalog_table,
+                            parent_column=catalog_id,
+                            child_table="producto",
+                            child_column=product_column,
+                        )
+
+            product_value_column = _choose_existing_column(
+                product_columns,
+                PRODUCT_VALUE_COLUMN_PRIORITY,
+            )
+            if product_value_column and "ordencompra" in existing_tables:
+                order_product_column = await choose_column(
+                    "ordencompra",
+                    ORDER_PRODUCT_COLUMN_PRIORITY,
+                )
+                if order_product_column:
+                    add_edge(
+                        parent_table="producto",
+                        parent_column=product_value_column,
+                        child_table="ordencompra",
+                        child_column=order_product_column,
+                    )
+
+        if "ordencompra" in existing_tables and "item" in existing_tables:
+            order_value_column = await choose_column(
+                "ordencompra",
+                ("id", "id_orden_compra", "ordencompra_id", "orden_compra_id", "oc"),
+            )
+            item_order_column = await choose_column("item", ITEM_ORDER_COLUMN_PRIORITY)
+            if order_value_column and item_order_column:
+                add_edge(
+                    parent_table="ordencompra",
+                    parent_column=order_value_column,
+                    child_table="item",
+                    child_column=item_order_column,
+                )
+
+        if "item" in existing_tables and "ordenproceso" in existing_tables:
+            item_columns = await get_columns("item")
+            order_process_item_column = await choose_column(
+                "ordenproceso",
+                ITEM_REFERENCE_COLUMN_PRIORITY,
+            )
+            if order_process_item_column:
+                if order_process_item_column.lower() in {"item_legado", "id_item_legado"}:
+                    item_value_column = _choose_existing_column(
+                        item_columns,
+                        ("item_legado", "id", "id_item", "item_id"),
+                    )
+                else:
+                    item_value_column = _choose_existing_column(
+                        item_columns,
+                        ("id", order_process_item_column.lower(), "item_legado"),
+                    )
+                if item_value_column:
+                    add_edge(
+                        parent_table="item",
+                        parent_column=item_value_column,
+                        child_table="ordenproceso",
+                        child_column=order_process_item_column,
+                    )
+
+        if "proceso" in existing_tables and "ordenproceso" in existing_tables:
+            process_id_column = await choose_column("proceso", ("id", "id_proceso", "proceso_id"))
+            process_child_column = await choose_column(
+                "ordenproceso",
+                ORDER_PROCESS_PROCESS_COLUMN_PRIORITY,
+            )
+            if process_id_column and process_child_column:
+                add_edge(
+                    parent_table="proceso",
+                    parent_column=process_id_column,
+                    child_table="ordenproceso",
+                    child_column=process_child_column,
+                )
+
+        if "empleado" in existing_tables and "ordenproceso" in existing_tables:
+            employee_id_column = await choose_column("empleado", ("id", "id_empleado", "empleado_id"))
+            employee_child_column = await choose_column(
+                "ordenproceso",
+                ("id_empleado", "empleado_id", "id_persona", "persona_id"),
+            )
+            if employee_id_column and employee_child_column:
+                add_edge(
+                    parent_table="empleado",
+                    parent_column=employee_id_column,
+                    child_table="ordenproceso",
+                    child_column=employee_child_column,
+                )
+
+        return edges
+
+    async def _fetch_physical_row_by_pk(
+        self,
+        *,
+        schema_name: str,
+        table_name: str,
+        pk_values: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        columns = await _get_table_columns(
+            self.db,
+            schema_name=schema_name,
+            table_name=table_name,
+        )
+        if not columns:
+            return None
+
+        select_sql = ", ".join(
+            _quote_identifier(_normalize_identifier(column["column_name"]))
+            for column in columns
+            if column.get("column_name")
+        )
+        if not select_sql:
+            return None
+
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
+        for index, (column_name, value) in enumerate(pk_values.items()):
+            key = f"pk_{index}"
+            where_clauses.append(f"{_quote_identifier(column_name)} IS NOT DISTINCT FROM :{key}")
+            params[key] = value
+
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT {select_sql}
+                FROM {_quote_identifier(schema_name)}.{_quote_identifier(table_name)}
+                WHERE {" AND ".join(where_clauses)}
+                LIMIT 1
+                """
+            ),
+            params,
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+    async def _fetch_delete_child_entries(
+        self,
+        *,
+        edge: DeleteDependencyEdge,
+        parent_value: Any,
+        depth: int,
+        remaining_limit: int,
+    ) -> list[DeletePlanEntry]:
+        if remaining_limit <= 0:
+            raise DeleteCascadeTooLargeError(MAX_DELETE_CASCADE_ROWS)
+
+        pk_columns = await _get_primary_key_columns(
+            self.db,
+            schema_name=edge.child_schema,
+            table_name=edge.child_table,
+        )
+        if not pk_columns:
+            raise DataIntegrityConstraintError(
+                "No se puede calcular la eliminacion en cadena porque "
+                f"{edge.child_schema}.{edge.child_table} no tiene llave primaria."
+            )
+
+        columns = await _get_table_columns(
+            self.db,
+            schema_name=edge.child_schema,
+            table_name=edge.child_table,
+        )
+        select_sql = ", ".join(
+            _quote_identifier(_normalize_identifier(column["column_name"]))
+            for column in columns
+            if column.get("column_name")
+        )
+        if not select_sql:
+            return []
+
+        order_sql = ", ".join(_quote_identifier(column) for column in pk_columns)
+        result = await self.db.execute(
+            text(
+                f"""
+                SELECT {select_sql}
+                FROM {_quote_identifier(edge.child_schema)}.{_quote_identifier(edge.child_table)}
+                WHERE TRIM({_quote_identifier(edge.child_column)}::text) = TRIM(CAST(:parent_value AS text))
+                ORDER BY {order_sql}
+                LIMIT :limit
+                """
+            ),
+            {
+                "parent_value": str(parent_value),
+                "limit": remaining_limit + 1,
+            },
+        )
+        rows = [dict(row) for row in result.mappings().all()]
+        if len(rows) > remaining_limit:
+            raise DeleteCascadeTooLargeError(MAX_DELETE_CASCADE_ROWS)
+
+        return [
+            DeletePlanEntry(
+                schema_name=edge.child_schema,
+                table_name=edge.child_table,
+                pk_columns=pk_columns,
+                pk={column: row.get(column) for column in pk_columns},
+                row=row,
+                depth=depth,
+            )
+            for row in rows
+        ]
+
+    async def _delete_plan_entry(self, entry: DeletePlanEntry) -> int:
+        where_clauses: list[str] = []
+        params: dict[str, Any] = {}
+        for index, column_name in enumerate(entry.pk_columns):
+            key = f"pk_{index}"
+            where_clauses.append(f"{_quote_identifier(column_name)} IS NOT DISTINCT FROM :{key}")
+            params[key] = entry.pk.get(column_name)
+
+        result = await self.db.execute(
+            text(
+                f"""
+                DELETE FROM {_quote_identifier(entry.schema_name)}.{_quote_identifier(entry.table_name)}
+                WHERE {" AND ".join(where_clauses)}
+                """
+            ),
+            params,
+        )
+        return int(result.rowcount or 0)
+
+    @staticmethod
+    def _delete_entry_identity(entry: DeletePlanEntry) -> tuple[Any, ...]:
+        return (
+            entry.schema_name.lower(),
+            entry.table_name.lower(),
+            tuple(
+                (column.lower(), str(entry.pk.get(column)))
+                for column in entry.pk_columns
+            ),
+        )
+
+    def _serialize_delete_plan(
+        self,
+        *,
+        table_id: str,
+        normalized_pk: dict[str, Any],
+        entries: list[DeletePlanEntry],
+        allowlist: dict[str, TableConfig],
+    ) -> dict[str, Any]:
+        config_by_table: dict[tuple[str, str], TableConfig] = {}
+        for config in allowlist.values():
+            key = (config.schema_name.lower(), config.table_name.lower())
+            config_by_table.setdefault(key, config)
+
+        grouped: dict[tuple[str, str], list[DeletePlanEntry]] = {}
+        for entry in entries:
+            key = (entry.schema_name.lower(), entry.table_name.lower())
+            grouped.setdefault(key, []).append(entry)
+
+        tables_payload: list[dict[str, Any]] = []
+        for (schema_name, table_name), table_entries in sorted(grouped.items()):
+            config = config_by_table.get((schema_name, table_name))
+            sample_rows = [
+                {
+                    "pk": sample.pk,
+                    "label": self._delete_row_label(sample.row, sample.pk),
+                }
+                for sample in table_entries[:DELETE_PREVIEW_SAMPLE_LIMIT]
+            ]
+            tables_payload.append(
+                {
+                    "schema": schema_name,
+                    "table": table_name,
+                    "table_id": config.table_id if config else table_name,
+                    "display_name": (
+                        config.display_name
+                        if config and config.display_name
+                        else table_name.replace("_", " ").title()
+                    ),
+                    "row_count": len(table_entries),
+                    "sample_rows": sample_rows,
+                }
+            )
+
+        return {
+            "table_id": table_id,
+            "pk": normalized_pk,
+            "total_rows": len(entries),
+            "max_rows": MAX_DELETE_CASCADE_ROWS,
+            "tables": tables_payload,
+        }
+
+    @staticmethod
+    def _delete_row_label(row: dict[str, Any], pk: dict[str, Any]) -> str:
+        for column_name in (
+            "nombre",
+            "item_legado",
+            "oc_cliente",
+            "detalle",
+            "sku",
+            "referencia",
+            "id",
+        ):
+            value = row.get(column_name)
+            if value is not None and str(value).strip():
+                return f"{column_name}: {value}"
+
+        pk_label = ", ".join(f"{column}={value}" for column, value in pk.items())
+        return pk_label or "Fila sin etiqueta"
 
 
     async def patch_row(
@@ -2496,11 +3225,17 @@ class DataViewerService:
             )
 
         role_permissions_by_table: dict[str, dict[str, bool]] = {}
+        is_admin_role = False
         if user_id:
             try:
-                role_id = await _get_user_role_id(self.db, user_id=user_id)
+                role_context = await _get_user_role_context(self.db, user_id=user_id)
+                role_id = role_context["role_id"] if role_context else None
+                is_admin_role = bool(
+                    role_context
+                    and role_context["role_code"].strip().upper() == "ADMIN"
+                )
                 role_tables_columns = await _resolve_role_tables_columns(self.db)
-                if role_id and role_tables_columns:
+                if role_id and role_tables_columns and not is_admin_role:
                     visible_column = role_tables_columns["visible"].replace('"', '""')
                     edit_column = role_tables_columns["edit"].replace('"', '""')
 
@@ -2522,13 +3257,14 @@ class DataViewerService:
                         str(row["table_id"]).strip(): {
                             "visible": bool(row["is_visible"]),
                             "can_edit": bool(row["can_edit"]),
+                            "can_delete": False,
                             "can_release_order_process": False,
                         }
                         for row in role_permissions_result.mappings().all()
                         if row.get("table_id") is not None
                     }
 
-                if role_id:
+                if role_id and not is_admin_role:
                     data_viewer_permissions_available = await self.db.execute(
                         text(
                             """
@@ -2560,12 +3296,18 @@ class DataViewerService:
                             if "can_release_order_process" in data_viewer_columns
                             else "false AS can_release_order_process"
                         )
+                        delete_select = (
+                            "COALESCE(can_delete, false) AS can_delete"
+                            if "can_delete" in data_viewer_columns
+                            else "false AS can_delete"
+                        )
                         data_viewer_permissions_query = text(
                             f"""
                             SELECT
                                 CAST(table_id AS TEXT) AS table_id,
                                 COALESCE(visible, false) AS is_visible,
                                 COALESCE(can_edit, false) AS can_edit,
+                                {delete_select},
                                 {release_select}
                             FROM workspace.role_data_viewer_tables
                             WHERE role_id = :role_id
@@ -2580,6 +3322,7 @@ class DataViewerService:
                                 str(row["table_id"]).strip(): {
                                     "visible": bool(row["is_visible"]),
                                     "can_edit": bool(row["can_edit"]),
+                                    "can_delete": bool(row["can_delete"]),
                                     "can_release_order_process": bool(
                                         row["can_release_order_process"]
                                     ),
@@ -2646,7 +3389,14 @@ class DataViewerService:
                     else _to_optional_bool(row.get("can_update"))
                 ),
                 can_insert=_to_optional_bool(row.get("can_insert")),
-                can_delete=_to_optional_bool(row.get("can_delete")),
+                can_delete=(
+                    True
+                    if is_admin_role
+                    else
+                    role_permissions.get("can_delete", False)
+                    if role_permissions is not None
+                    else _to_optional_bool(row.get("can_delete"))
+                ),
                 can_release_order_process=(
                     role_permissions.get("can_release_order_process", False)
                     if role_permissions is not None
@@ -2822,6 +3572,7 @@ class DataViewerService:
                     continue
                 if not role_permissions["can_edit"]:
                     table_config.can_update = False
+                table_config.can_delete = role_permissions.get("can_delete", False)
                 table_config.can_release_order_process = role_permissions.get(
                     "can_release_order_process",
                     False,

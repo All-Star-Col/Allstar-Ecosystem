@@ -126,12 +126,18 @@ app.include_router(
 
 @app.on_event("startup")
 async def startup():
-    scheduler.start()
-    logger.debug("[Scheduler] Iniciado - ejecutara /trigger/production cada 10 minutos")
+    if engine is None:
+        logger.warning("[Scheduler] No iniciado porque la base de datos no esta configurada")
+        return
+    if not scheduler.running:
+        scheduler.start()
+        logger.debug("[Scheduler] Iniciado - ejecutara /trigger/production cada 240 minutos")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    scheduler.shutdown()
-    await engine.dispose()
+    if scheduler.running:
+        scheduler.shutdown()
+    if engine is not None:
+        await engine.dispose()
     logger.info("[Scheduler] Detenido")

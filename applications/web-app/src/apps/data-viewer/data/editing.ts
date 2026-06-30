@@ -62,11 +62,17 @@ export function getQueryColumnKeys(
         return visibleColumns;
     }
 
-    if (table.can_update !== true) {
+    const needsPkForActions =
+        table.can_delete === true || table.can_release_order_process === true;
+
+    if (table.can_update !== true && !needsPkForActions) {
         return visibleColumns;
     }
 
-    const editableColumns = getEditableColumns(table).map((column) => column.name);
+    const editableColumns =
+        table.can_update === true
+            ? getEditableColumns(table).map((column) => column.name)
+            : [];
     const pkColumns = table.pk_columns ?? [];
     const allColumns = [...visibleColumns, ...editableColumns, ...pkColumns];
 
