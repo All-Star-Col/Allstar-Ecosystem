@@ -33,9 +33,14 @@ export default function BomPage()
   // Datos cargados
   const [items, setItems] = useState([]);
   const [bomRows, setBomRows] = useState([]);
+  const [piezasRows, setPiezasRows] = useState([]);
+  const [subitems, setSubitems] = useState([]);
 
   // Formulario BOM
   const [bomForm, setBomForm] = useState(initialBomForm);
+  const [viewMode, setViewMode] = useState('bom');
+  const [subitemId, setSubitemId] = useState('');
+  const [subitemNombre, setSubitemNombre] = useState('');
 
   // Colapsar secciones
   const [showItemsSection, setShowItemsSection] = useState(true);
@@ -190,6 +195,53 @@ export default function BomPage()
     }
   };
 
+  const cargarSubitems = async (idItem) =>
+  {
+    if (!idItem)
+    {
+      setSubitems([]);
+      setSubitemId('');
+      return;
+    }
+    try
+    {
+      const data = await api.bom.listarSubitems({ item_id: idItem });
+      setSubitems(data);
+      setSubitemId((prev) =>
+      {
+        if (!prev) return '';
+        if (prev === '__sin_sub_item__') return prev;
+        return data.some((row) => String(row.id) === String(prev)) ? prev : '';
+      });
+    }
+    catch (error)
+    {
+      showToast(error.message, 'error');
+    }
+  };
+
+  const cargarPiezas = async (idItem, idSubitem = '') =>
+  {
+    if (!idItem)
+    {
+      setPiezasRows([]);
+      return;
+    }
+    try
+    {
+      const data = await api.bom.listarPiezas({
+        item_id: idItem,
+        sub_item_id: idSubitem && idSubitem !== '__sin_sub_item__' ? idSubitem : null,
+        sin_sub_item: idSubitem === '__sin_sub_item__',
+      });
+      setPiezasRows(data);
+    }
+    catch (error)
+    {
+      showToast(error.message, 'error');
+    }
+  };
+
   useEffect(() =>
   {
     cargarCatalogos();
@@ -206,11 +258,24 @@ export default function BomPage()
 
   useEffect(() =>
   {
-    cargarBom(itemId);
     setBomForm((prev) => ({ ...initialBomForm, item_id: itemId }));
     setShowCopiarBom(false);
     setSeleccionCopia([]);
-  }, [itemId]);
+    setSubitemId('');
+    setPiezasRows([]);
+    if (viewMode === 'bom') {
+      cargarBom(itemId);
+    } else {
+      cargarSubitems(itemId);
+      cargarPiezas(itemId);
+    }
+  }, [itemId, viewMode]);
+
+  useEffect(() =>
+  {
+    if (viewMode !== 'piezas') return;
+    cargarPiezas(itemId, subitemId);
+  }, [subitemId]);
 
   useEffect(() =>
   {
@@ -341,6 +406,60 @@ export default function BomPage()
     );
   };
 
+  const seleccionarItemModo = (id, mode) =>
+  {
+    setItemId(String(id));
+    setViewMode(mode);
+  };
+
+  const crearSubitem = async (event) =>
+  {
+    event.preventDefault();
+    if (!itemId)
+    {
+      showToast('Selecciona un ítem para crear sub items.', 'error');
+      return;
+    }
+    if (!subitemNombre.trim())
+    {
+      showToast('Escribe el nombre del sub item.', 'error');
+      return;
+    }
+
+    try
+    {
+      const created = await api.bom.crearSubitem({ item_id: itemId, nombre: subitemNombre });
+      setSubitemNombre('');
+      await cargarSubitems(itemId);
+      setSubitemId(String(created.id));
+      showToast('Sub item creado.');
+    }
+    catch (error)
+    {
+      showToast(error.message, 'error');
+    }
+  };
+
+  const asignarPiezaSubitem = async (piezaId, nextSubitemId) =>
+  {
+    if (!itemId) return;
+    try
+    {
+      await api.bom.asignarSubitemPieza({
+        pieza_mueble_id: piezaId,
+        item_id: itemId,
+        sub_item_id: nextSubitemId || null,
+      });
+      await cargarSubitems(itemId);
+      await cargarPiezas(itemId, subitemId);
+      showToast('Pieza actualizada.');
+    }
+    catch (error)
+    {
+      showToast(error.message, 'error');
+    }
+  };
+
   return (
     <div className="stack">
       <section className="grid grid-2">
@@ -434,7 +553,7 @@ export default function BomPage()
                                 <thead>
                                   <tr>
                                     <th>Ítem</th>
-                                    <th>Piso / Apto</th>
+                                    <th>Tipología / Apto</th>
                                     <th>Estado</th>
                                     <th>Lote asignado</th>
                                     <th>BOM</th>
@@ -445,9 +564,9 @@ export default function BomPage()
                                     <tr key={it.id} className={String(itemId) === String(it.id) ? 'selected-row' : ''}>
                                       <td>{it.nombre}</td>
                                       <td>
-                                        {it.piso != null ? `P${it.piso}` : ''}
-                                        {it.piso != null && it.apartamento ? ' · ' : ''}
-                                        {it.apartamento || (it.piso == null ? '-' : '')}
+                                        {(it.tipologia ?? it.piso) ? `${it.tipologia ?? it.piso}` : ''}
+                                        {(it.tipologia ?? it.piso) && it.apartamento ? ' · ' : ''}
+                                        {it.apartamento || (!(it.tipologia ?? it.piso) ? '-' : '')}
                                       </td>
                                       <td>
                                         <StatusPill value={it.estado} />
@@ -461,14 +580,24 @@ export default function BomPage()
                                         />
                                       </td>
                                       <td>
-                                        <button
-                                          type="button"
-                                          className="small ghost"
-                                          onClick={() => setItemId(String(it.id))}
-                                          disabled={!proyectoId}
-                                        >
-                                          Ver BOM
-                                        </button>
+                                        <div className="row wrap">
+                                          <button
+                                            type="button"
+                                            className="small ghost"
+                                            onClick={() => seleccionarItemModo(it.id, 'bom')}
+                                            disabled={!proyectoId}
+                                          >
+                                            Ver BOM
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="small ghost"
+                                            onClick={() => seleccionarItemModo(it.id, 'piezas')}
+                                            disabled={!proyectoId}
+                                          >
+                                            Ver piezas del mueble
+                                          </button>
+                                        </div>
                                       </td>
                                     </tr>
                                   ))}
@@ -510,17 +639,19 @@ export default function BomPage()
           <div className="panel-header">
             <h3>
               {itemSeleccionado
-                ? `BOM · ${itemSeleccionado.nombre}`
-                : 'Materiales del BOM'}
+                ? `${viewMode === 'piezas' ? 'Piezas' : 'BOM'} · ${itemSeleccionado.nombre}`
+                : viewMode === 'piezas' ? 'Piezas del mueble' : 'Materiales del BOM'}
             </h3>
             <CollapseToggle
               collapsed={!showBomSection}
               onToggle={() => setShowBomSection((v) => !v)}
-              label="Materiales"
+              label={viewMode === 'piezas' ? 'Piezas' : 'Materiales'}
             />
           </div>
           {showBomSection && (
             <>
+              {viewMode === 'bom' ? (
+              <>
               <form className="form-grid compact bom-material-form" onSubmit={guardarBom}>
                 <div className="field" style={{ minWidth: 0 }}>
                   <label>{dbLabel('material_id')}</label>
@@ -623,7 +754,7 @@ export default function BomPage()
                             onChange={() => toggleCopiaItem(String(it.id))}
                           />
                           {it.nombre}
-                          {it.piso != null ? ` · P${it.piso}` : ''}
+                          {(it.tipologia ?? it.piso) ? ` · ${it.tipologia ?? it.piso}` : ''}
                           {it.apartamento ? ` · ${it.apartamento}` : ''}
                         </label>
                       ))}
@@ -639,6 +770,111 @@ export default function BomPage()
                     </div>
                   )}
                 </div>
+              )}
+              </>
+              ) : (
+              <>
+                <form
+                  className="form-grid compact"
+                  style={{ gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginBottom: 10 }}
+                  onSubmit={crearSubitem}
+                >
+                  <div className="field" style={{ minWidth: 0 }}>
+                    <label>Sub item</label>
+                    <input
+                      value={subitemNombre}
+                      onChange={(e) => setSubitemNombre(e.target.value)}
+                      placeholder="Nombre del sub item"
+                      disabled={!itemId}
+                    />
+                  </div>
+                  <div className="row" style={{ justifyContent: 'flex-start' }}>
+                    <button type="submit" className="small" disabled={!itemId}>
+                      Crear sub item
+                    </button>
+                  </div>
+                </form>
+
+                <div className="row wrap" style={{ margin: '10px 0' }}>
+                  <button
+                    type="button"
+                    className={`small ${!subitemId ? '' : 'ghost'}`}
+                    onClick={() => setSubitemId('')}
+                    disabled={!itemId}
+                  >
+                    Todas las piezas
+                  </button>
+                  <button
+                    type="button"
+                    className={`small ${subitemId === '__sin_sub_item__' ? '' : 'ghost'}`}
+                    onClick={() => setSubitemId('__sin_sub_item__')}
+                    disabled={!itemId}
+                  >
+                    Sin sub item
+                  </button>
+                  {subitems.map((subitem) => (
+                    <button
+                      key={subitem.id}
+                      type="button"
+                      className={`small ${String(subitemId) === String(subitem.id) ? '' : 'ghost'}`}
+                      onClick={() => setSubitemId(String(subitem.id))}
+                    >
+                      {subitem.nombre}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Sub item</th>
+                        <th>Pieza</th>
+                        <th>Cantidad</th>
+                        <th>Material</th>
+                        <th>Largo</th>
+                        <th>Ancho</th>
+                        <th>Espesor</th>
+                        <th>Llegada</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                        {piezasRows.map((row) => (
+                          <tr key={row.id}>
+                          <td>
+                            <select
+                              className="select-light"
+                              value={row.sub_item_id ? String(row.sub_item_id) : ''}
+                              onChange={(e) => asignarPiezaSubitem(row.id, e.target.value)}
+                            >
+                              <option value="">Sin sub item</option>
+                              {subitems.map((subitem) => (
+                                <option key={subitem.id} value={String(subitem.id)}>
+                                  {subitem.nombre}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>{row.pieza || row.nombre || `Pieza ${row.id}`}</td>
+                          <td>{row.cantidad ?? '-'}</td>
+                          <td>{row.material || '-'}</td>
+                          <td>{row.largo_mm ?? '-'}</td>
+                          <td>{row.ancho_mm ?? '-'}</td>
+                          <td>{row.espesor_mm ?? '-'}</td>
+                          <td>{row.llegada ? 'Sí' : 'No'}</td>
+                        </tr>
+                      ))}
+                      {!piezasRows.length && (
+                        <tr>
+                          <td colSpan={8}>
+                            {itemId ? 'Sin piezas registradas para este ítem.' : 'Selecciona un ítem para ver sus piezas.'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
               )}
             </>
           )}

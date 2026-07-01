@@ -1,4 +1,7 @@
 from datetime import date, datetime
+from io import BytesIO
+import re
+import unicodedata
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +26,79 @@ def _norm(value):
         return None
     text = str(value).strip()
     return text or None
+
+
+def _text_or_none(value) -> str | None:
+    value = clean(value)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_key(value) -> str:
+    text = str(value or "").strip().lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    text = text.replace("milimetros", "mm").replace("milimetro", "mm")
+    text = re.sub(r"\b(\d+)\s*mm\b", r"\1", text)
+    text = re.sub(r"[^a-z0-9]+", "", text)
+    return text
+
+
+def _split_description(value: str | None) -> list[str]:
+    return [part.strip() for part in re.split(r"[-|]", str(value or "")) if part and part.strip()]
+
+
+def _parse_material_from_quote(tipo: str | None, descripcion: str | None) -> dict:
+    categoria = _normalize_material_category(tipo)
+    parts = _split_description(descripcion)
+    raw = str(descripcion or "").strip()
+
+    if categoria == "tablero":
+        calibre = None
+        material = parts[0] if parts else raw
+        sustrato = parts[1] if len(parts) > 1 else None
+        if parts:
+            last = parts[-1]
+            match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:mm)?$", last, re.IGNORECASE)
+            if match:
+                calibre = f"{match.group(1).replace(',', '.')} mm"
+        return {
+            "categoria": "tablero",
+            "nombre": raw,
+            "material": material,
+            "sustrato": sustrato,
+            "calibre": calibre,
+            "unidad_medida": "m2",
+        }
+
+    if categoria == "canto":
+        sustrato = parts[0] if parts else raw
+        proveedor = parts[1] if len(parts) > 1 else None
+        return {
+            "categoria": "canto",
+            "nombre": raw,
+            "sustrato": sustrato,
+            "proveedor": proveedor,
+            "unidad_medida": "m",
+        }
+
+    return {
+        "categoria": "herraje",
+        "nombre": raw,
+        "referencia": raw,
+        "unidad_medida": "unidad",
+    }
+
+
+def _normalize_material_category(value: str | None) -> str:
+    normalized = _normalize_key(value)
+    if "tablero" in normalized:
+        return "tablero"
+    if "canto" in normalized:
+        return "canto"
+    return "herraje"
 
 
 def _calibre_con_mm(value):
@@ -169,27 +245,21 @@ async def listar_items_por_proyecto(db: AsyncSession, payload: dict | None = Non
         db,
         """SELECT ip.id, ip.proyecto_id, ip.lote_id,
                   l.nombre AS lote,
-                  ip.nombre, ip.piso, ip.apartamento, ip.estado
+                  ip.nombre, ip.tipologia, ip.tipologia AS piso, ip.apartamento, ip.estado
            FROM items_proyecto ip
            LEFT JOIN lotes l ON l.id = ip.lote_id
            WHERE ip.proyecto_id = $1
-           ORDER BY ip.nombre ASC, ip.piso ASC NULLS LAST, ip.id ASC""",
+           ORDER BY ip.nombre ASC, ip.tipologia ASC NULLS LAST, ip.id ASC""",
         [proyecto_id],
     )
 
 
 async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    piso_raw = clean(payload.get("piso"))
-    try:
-        piso = int(piso_raw) if piso_raw is not None else None
-    except (TypeError, ValueError) as exc:
-        raise AppError("Valor inválido para piso.", 400, "VALIDATION") from exc
-
     data = {
         "proyecto_id": _int_or_none(payload.get("proyecto_id"), "proyecto_id"),
         "nombre": clean(payload.get("nombre")),
-        "piso": piso,
+        "tipologia": _text_or_none(payload.get("tipologia")) or _text_or_none(payload.get("piso")),
         "apartamento": clean(payload.get("apartamento")),
     }
 
@@ -199,10 +269,10 @@ async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
     async with db.begin():
         rows = await execute(
             db,
-            """INSERT INTO items_proyecto (proyecto_id, nombre, piso, apartamento)
+            """INSERT INTO items_proyecto (proyecto_id, nombre, tipologia, apartamento)
                VALUES ($1, $2, $3, $4)
                RETURNING id""",
-            [data["proyecto_id"], data["nombre"], data["piso"], data["apartamento"]],
+            [data["proyecto_id"], data["nombre"], data["tipologia"], data["apartamento"]],
         )
 
     return {"id": rows[0]["id"], "creado": True}
@@ -210,16 +280,10 @@ async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def actualizar_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
-    piso_raw = clean(payload.get("piso"))
-    try:
-        piso = int(piso_raw) if piso_raw is not None else None
-    except (TypeError, ValueError) as exc:
-        raise AppError("Valor inválido para piso.", 400, "VALIDATION") from exc
-
     data = {
         "id": _int_or_none(payload.get("id"), "id"),
         "nombre": clean(payload.get("nombre")),
-        "piso": piso,
+        "tipologia": _text_or_none(payload.get("tipologia")) or _text_or_none(payload.get("piso")),
         "apartamento": clean(payload.get("apartamento")),
     }
 
@@ -231,11 +295,11 @@ async def actualizar_item(db: AsyncSession, payload: dict | None = None) -> dict
             db,
             """UPDATE items_proyecto
                SET nombre = $1,
-                   piso = $2,
+                   tipologia = $2,
                    apartamento = $3
                WHERE id = $4
                RETURNING id""",
-            [data["nombre"], data["piso"], data["apartamento"], data["id"]],
+            [data["nombre"], data["tipologia"], data["apartamento"], data["id"]],
         )
 
     if not rows:
@@ -447,6 +511,189 @@ async def eliminar_material_bom(db: AsyncSession, payload: dict | None = None) -
     return {"ok": True}
 
 
+async def _table_exists(db: AsyncSession, table_name: str) -> bool:
+    row = await fetch_one(db, "SELECT to_regclass($1) AS table_ref", [table_name])
+    return bool(row and row.get("table_ref"))
+
+
+async def ensure_subitems_schema(db: AsyncSession) -> None:
+    await execute(
+        db,
+        """
+        CREATE TABLE IF NOT EXISTS subitems_mueble (
+            id BIGSERIAL PRIMARY KEY,
+            item_id INTEGER NOT NULL REFERENCES items_proyecto(id) ON DELETE CASCADE,
+            nombre TEXT NOT NULL,
+            activo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+    await execute(
+        db,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_subitems_mueble_item_nombre_activo
+        ON subitems_mueble (item_id, LOWER(TRIM(nombre)))
+        WHERE activo = TRUE
+        """,
+    )
+
+    if await _table_exists(db, "piezas_mueble"):
+        await execute(
+            db,
+            """
+            ALTER TABLE piezas_mueble
+            ADD COLUMN IF NOT EXISTS sub_item_id BIGINT REFERENCES subitems_mueble(id) ON DELETE SET NULL
+            """,
+        )
+        await execute(
+            db,
+            """
+            CREATE INDEX IF NOT EXISTS idx_piezas_mueble_sub_item_id
+            ON piezas_mueble (sub_item_id)
+            """,
+        )
+
+    await db.commit()
+
+
+async def listar_subitems_por_item(db: AsyncSession, payload: dict | None = None) -> list[dict]:
+    payload = payload or {}
+    item_id = _int_or_none(payload.get("item_id"), "item_id")
+    if not item_id:
+        return []
+
+    await ensure_subitems_schema(db)
+    return await fetch_all(
+        db,
+        """SELECT id, item_id, nombre, activo, created_at, updated_at
+           FROM subitems_mueble
+           WHERE item_id = $1
+             AND activo = TRUE
+           ORDER BY nombre ASC, id ASC""",
+        [item_id],
+    )
+
+
+async def crear_subitem(db: AsyncSession, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    item_id = _int_or_none(payload.get("item_id"), "item_id")
+    nombre = _text_or_none(payload.get("nombre"))
+    if not item_id or not nombre:
+        raise AppError("Item y nombre del sub item son obligatorios.", 400, "VALIDATION")
+
+    await ensure_subitems_schema(db)
+    async with db.begin():
+        item = await fetch_one(db, "SELECT id FROM items_proyecto WHERE id = $1", [item_id])
+        if not item:
+            raise AppError("Item no encontrado.", 404, "NOT_FOUND")
+        existing = await fetch_one(
+            db,
+            """SELECT id, item_id, nombre, activo, created_at, updated_at
+               FROM subitems_mueble
+               WHERE item_id = $1
+                 AND activo = TRUE
+                 AND LOWER(TRIM(nombre)) = LOWER(TRIM($2))
+               LIMIT 1""",
+            [item_id, nombre],
+        )
+        if existing:
+            rows = await execute(
+                db,
+                """UPDATE subitems_mueble
+                   SET nombre = $1,
+                       updated_at = NOW()
+                   WHERE id = $2
+                   RETURNING id, item_id, nombre, activo, created_at, updated_at""",
+                [nombre, existing["id"]],
+            )
+        else:
+            rows = await execute(
+                db,
+                """INSERT INTO subitems_mueble (item_id, nombre, activo, created_at, updated_at)
+                   VALUES ($1, $2, TRUE, NOW(), NOW())
+                   RETURNING id, item_id, nombre, activo, created_at, updated_at""",
+                [item_id, nombre],
+            )
+    return rows[0]
+
+
+async def listar_piezas_por_item(db: AsyncSession, payload: dict | None = None) -> list[dict]:
+    payload = payload or {}
+    item_id = _int_or_none(payload.get("item_id"), "item_id")
+    sub_item_id = _int_or_none(payload.get("sub_item_id"), "sub_item_id")
+    sin_sub_item = to_bool(payload.get("sin_sub_item")) if payload.get("sin_sub_item") not in (None, "") else False
+    if not item_id:
+        return []
+
+    await ensure_subitems_schema(db)
+    if not await _table_exists(db, "piezas_mueble"):
+        return []
+
+    params = [item_id]
+    where = ["pm.items_proyecto_id = $1"]
+    if sub_item_id:
+        params.append(sub_item_id)
+        where.append(f"pm.sub_item_id = ${len(params)}")
+    elif sin_sub_item:
+        where.append("pm.sub_item_id IS NULL")
+
+    return await fetch_all(
+        db,
+        f"""SELECT pm.*,
+                  sm.nombre AS sub_item_nombre
+           FROM piezas_mueble pm
+           LEFT JOIN subitems_mueble sm ON sm.id = pm.sub_item_id
+           WHERE {' AND '.join(where)}
+           ORDER BY sm.nombre ASC NULLS FIRST,
+                    pm.pieza ASC NULLS LAST,
+                    pm.id ASC""",
+        params,
+    )
+
+
+async def asignar_subitem_pieza(db: AsyncSession, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    pieza_id = _int_or_none(payload.get("pieza_mueble_id") or payload.get("id"), "pieza_mueble_id")
+    item_id = _int_or_none(payload.get("item_id"), "item_id")
+    sub_item_id = _int_or_none(payload.get("sub_item_id"), "sub_item_id")
+    if not pieza_id or not item_id:
+        raise AppError("Pieza e item son obligatorios.", 400, "VALIDATION")
+
+    await ensure_subitems_schema(db)
+    if not await _table_exists(db, "piezas_mueble"):
+        raise AppError("La tabla piezas_mueble no existe.", 404, "PIECES_TABLE_NOT_FOUND")
+
+    async with db.begin():
+        if sub_item_id:
+            subitem = await fetch_one(
+                db,
+                """SELECT id
+                   FROM subitems_mueble
+                   WHERE id = $1
+                     AND item_id = $2
+                     AND activo = TRUE""",
+                [sub_item_id, item_id],
+            )
+            if not subitem:
+                raise AppError("Sub item no encontrado para este item.", 404, "SUBITEM_NOT_FOUND")
+
+        rows = await execute(
+            db,
+            """UPDATE piezas_mueble
+               SET sub_item_id = $1
+               WHERE id = $2
+                 AND items_proyecto_id = $3
+               RETURNING id""",
+            [sub_item_id, pieza_id, item_id],
+        )
+
+    if not rows:
+        raise AppError("Pieza no encontrada para este item.", 404, "PIECE_NOT_FOUND")
+    return {"ok": True, "id": rows[0]["id"]}
+
+
 async def listar_materiales(db: AsyncSession, filters: dict | None = None) -> list[dict]:
     filters = filters or {}
 
@@ -645,6 +892,316 @@ async def guardar_material(db: AsyncSession, payload: dict | None = None) -> dic
             )
 
     return {"id": material_id, "creado": creado}
+
+
+async def _find_material_id_fuzzy(db: AsyncSession, material_data: dict) -> int | None:
+    target_names = {
+        _normalize_key(material_data.get("nombre")),
+        _normalize_key(_nombre_canonico_por_categoria(material_data)),
+        _normalize_key(material_data.get("material")),
+        _normalize_key(material_data.get("sustrato")),
+        _normalize_key(material_data.get("referencia")),
+    }
+    target_names.discard("")
+    if not target_names:
+        return None
+
+    rows = await fetch_all(
+        db,
+        """SELECT mc.id, mc.nombre, mc.categoria,
+                  mt.material, mt.sustrato AS tablero_sustrato, mt.calibre AS tablero_calibre, mt.proveedor AS tablero_proveedor,
+                  mca.sustrato AS canto_sustrato, mca.calibre AS canto_calibre, mca.proveedor AS canto_proveedor,
+                  mh.referencia AS herraje_referencia, mh.proveedor AS herraje_proveedor
+           FROM materiales_catalogo mc
+           LEFT JOIN materiales_tableros mt ON mt.material_id = mc.id
+           LEFT JOIN materiales_cantos mca ON mca.material_id = mc.id
+           LEFT JOIN materiales_herrajes mh ON mh.material_id = mc.id
+           WHERE mc.categoria = $1
+             AND mc.activo = TRUE
+           ORDER BY mc.id ASC""",
+        [material_data.get("categoria")],
+    )
+    for row in rows:
+        candidate_values = [
+            row.get("nombre"),
+            row.get("material"),
+            row.get("tablero_sustrato"),
+            row.get("tablero_calibre"),
+            row.get("tablero_proveedor"),
+            row.get("canto_sustrato"),
+            row.get("canto_calibre"),
+            row.get("canto_proveedor"),
+            row.get("herraje_referencia"),
+            row.get("herraje_proveedor"),
+        ]
+        candidate_joined = _normalize_key(" ".join(str(value or "") for value in candidate_values))
+        candidate_parts = {_normalize_key(value) for value in candidate_values if value}
+        if target_names.intersection(candidate_parts) or any(
+            target and (target in candidate_joined or candidate_joined in target)
+            for target in target_names
+        ):
+            return row["id"]
+    return None
+
+
+async def _get_or_create_quote_material(db: AsyncSession, tipo: str | None, descripcion: str | None) -> tuple[int, bool]:
+    material_data = _parse_material_from_quote(tipo, descripcion)
+    material_id = await _find_material_id_by_variant(db, material_data)
+    if not material_id:
+        material_id = await _find_material_id_fuzzy(db, material_data)
+    if material_id:
+        return material_id, False
+
+    nombre_canonico = _nombre_canonico_por_categoria(material_data)
+    unidad = material_data.get("unidad_medida") or _unidad_por_categoria(material_data.get("categoria"))
+    if not nombre_canonico or not material_data.get("categoria") or not unidad:
+        raise AppError("No fue posible homologar o crear un material de la cotizacion.", 400, "MATERIAL_VALIDATION")
+
+    rows = await execute(
+        db,
+        """INSERT INTO materiales_catalogo (nombre, categoria, unidad_medida, descripcion, activo)
+           VALUES ($1,$2,$3,$4,TRUE)
+           RETURNING id""",
+        [nombre_canonico, material_data["categoria"], unidad, material_data.get("nombre")],
+    )
+    material_id = rows[0]["id"]
+
+    if material_data["categoria"] == "tablero":
+        await execute(
+            db,
+            """INSERT INTO materiales_tableros (
+                material_id, material, sustrato, formato, calibre, costo, proveedor
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7)""",
+            [
+                material_id,
+                material_data.get("material") or nombre_canonico,
+                material_data.get("sustrato"),
+                material_data.get("formato"),
+                material_data.get("calibre"),
+                material_data.get("costo"),
+                material_data.get("proveedor"),
+            ],
+        )
+    elif material_data["categoria"] == "canto":
+        await execute(
+            db,
+            """INSERT INTO materiales_cantos (
+                material_id, sustrato, proveedor, calibre, costo
+            ) VALUES ($1,$2,$3,$4,$5)""",
+            [
+                material_id,
+                material_data.get("sustrato") or material_data.get("nombre") or nombre_canonico,
+                material_data.get("proveedor"),
+                material_data.get("calibre"),
+                material_data.get("costo"),
+            ],
+        )
+    else:
+        await execute(
+            db,
+            """INSERT INTO materiales_herrajes (
+                material_id, referencia, proveedor, costo
+            ) VALUES ($1,$2,$3,$4)""",
+            [
+                material_id,
+                material_data.get("referencia") or material_data.get("nombre") or nombre_canonico,
+                material_data.get("proveedor"),
+                material_data.get("costo"),
+            ],
+        )
+
+    return int(material_id), True
+
+
+def _header_key(value) -> str:
+    text = str(value or "").strip().lower()
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return re.sub(r"[^a-z0-9#]+", "", text)
+
+
+def _to_int_count(value) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        return int(float(str(value).replace(",", ".")))
+    except Exception:
+        return 0
+
+
+def _to_decimal_quantity(value):
+    return decimal_or_none(value)
+
+
+def _extract_quote_material_rows(file_bytes: bytes) -> list[dict]:
+    from openpyxl import load_workbook
+
+    try:
+        workbook = load_workbook(BytesIO(file_bytes), data_only=True, read_only=True)
+    except Exception as exc:
+        raise AppError("No fue posible leer el Excel de la cotizacion aprobada.", 400, "INVALID_QUOTE_FILE") from exc
+
+    required = {"#", "producto", "material", "descripcion", "cantidad"}
+    tipologia_keys = {"tipologia", "grupo"}
+
+    for sheet in workbook.worksheets:
+        for row_number, row in enumerate(sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 30), values_only=True), start=1):
+            headers = [_header_key(value) for value in row]
+            header_set = set(headers)
+            if not required.issubset(header_set) or not header_set.intersection(tipologia_keys):
+                continue
+
+            index = {header: idx for idx, header in enumerate(headers) if header}
+            tipologia_idx = index.get("tipologia", index.get("grupo"))
+            rows: list[dict] = []
+            for data_row in sheet.iter_rows(min_row=row_number + 1, values_only=True):
+                producto = _text_or_none(data_row[index["producto"]] if index["producto"] < len(data_row) else None)
+                tipologia = _text_or_none(data_row[tipologia_idx] if tipologia_idx is not None and tipologia_idx < len(data_row) else None)
+                material_tipo = _text_or_none(data_row[index["material"]] if index["material"] < len(data_row) else None)
+                descripcion = _text_or_none(data_row[index["descripcion"]] if index["descripcion"] < len(data_row) else None)
+                cantidad = _to_decimal_quantity(data_row[index["cantidad"]] if index["cantidad"] < len(data_row) else None)
+                item_count = _to_int_count(data_row[index["#"]] if index["#"] < len(data_row) else None)
+                if not producto and not tipologia and not material_tipo and not descripcion:
+                    continue
+                if not producto or not tipologia or not material_tipo or not descripcion or not cantidad or cantidad <= 0 or item_count <= 0:
+                    continue
+                rows.append(
+                    {
+                        "item_count": item_count,
+                        "producto": producto,
+                        "tipologia": tipologia,
+                        "material_tipo": material_tipo,
+                        "descripcion": descripcion,
+                        "cantidad": cantidad,
+                    }
+                )
+            if rows:
+                return rows
+
+    raise AppError(
+        "No es posible crear items automaticamente: no se encontro una hoja con columnas #, Producto, Tipologia/Grupo, Material, Descripcion y Cantidad.",
+        400,
+        "QUOTE_MATERIALS_SHEET_NOT_FOUND",
+    )
+
+
+async def crear_items_desde_cotizacion_aprobada(db: AsyncSession, payload: dict | None = None) -> dict:
+    payload = payload or {}
+    proyecto_id = _int_or_none(payload.get("proyecto_id"), "proyecto_id")
+    if not proyecto_id:
+        raise AppError("Debes seleccionar un proyecto.", 400, "VALIDATION")
+
+    from src.services.carpentry import documentos
+
+    approved_quote = await fetch_one(
+        db,
+        """SELECT id, nombre_archivo, tipo_archivo, azure_container, azure_blob_name
+           FROM documentos_proyecto
+           WHERE proyecto_id = $1
+             AND activo = TRUE
+             AND aprobado = TRUE
+             AND LOWER(etapa_nombre) LIKE '%cotiz%'
+           ORDER BY aprobado_at DESC NULLS LAST, updated_at DESC NULLS LAST, id DESC
+           LIMIT 1""",
+        [proyecto_id],
+    )
+    if not approved_quote:
+        raise AppError("Debes aprobar una cotizacion antes de crear items automaticamente.", 400, "QUOTE_APPROVAL_REQUIRED")
+    filename = str(approved_quote.get("nombre_archivo") or "").lower()
+    if not filename.endswith((".xlsx", ".xlsm", ".xltx", ".xltm")):
+        raise AppError("La cotizacion aprobada debe ser un archivo Excel para crear items automaticamente.", 400, "INVALID_QUOTE_FILE")
+
+    document_bytes, _, _ = await documentos.descargar_documento(db, int(approved_quote["id"]))
+    quote_rows = _extract_quote_material_rows(document_bytes)
+
+    grouped: dict[tuple[str, str], dict] = {}
+    for row in quote_rows:
+        key = (_normalize_key(row["producto"]), _normalize_key(row["tipologia"]))
+        current = grouped.setdefault(
+            key,
+            {
+                "producto": row["producto"],
+                "tipologia": row["tipologia"],
+                "item_count": row["item_count"],
+                "materials": [],
+            },
+        )
+        current["item_count"] = max(current["item_count"], row["item_count"])
+        current["materials"].append(row)
+
+    if db.in_transaction():
+        await db.rollback()
+
+    created_items = 0
+    created_materials = 0
+    bom_rows = 0
+    async with db.begin():
+        for group in grouped.values():
+            item_rows = await execute(
+                db,
+                """INSERT INTO items_proyecto (proyecto_id, nombre, tipologia)
+                   SELECT $1, $2, $3
+                   FROM generate_series(1, $4)
+                   RETURNING id""",
+                [proyecto_id, group["producto"], group["tipologia"], group["item_count"]],
+            )
+            item_ids = [row["id"] for row in item_rows]
+            created_items += len(item_ids)
+
+            material_totals: dict[int, dict] = {}
+            for material_row in group["materials"]:
+                material_id, material_created = await _get_or_create_quote_material(
+                    db,
+                    material_row["material_tipo"],
+                    material_row["descripcion"],
+                )
+                if material_created:
+                    created_materials += 1
+                material_totals.setdefault(
+                    material_id,
+                    {
+                        "cantidad": 0,
+                        "nota": f"{material_row['material_tipo']} - {material_row['descripcion']}",
+                    },
+                )
+                material_totals[material_id]["cantidad"] += material_row["cantidad"]
+
+            insert_item_ids = []
+            insert_material_ids = []
+            insert_quantities = []
+            insert_notes = []
+            for item_id in item_ids:
+                for material_id, material_info in material_totals.items():
+                    insert_item_ids.append(item_id)
+                    insert_material_ids.append(material_id)
+                    insert_quantities.append(material_info["cantidad"])
+                    insert_notes.append(material_info["nota"])
+
+            if insert_item_ids:
+                await execute(
+                    db,
+                    """INSERT INTO bom_items (item_id, material_id, cantidad_requerida, notas)
+                       SELECT *
+                       FROM unnest(
+                         $1::INT[],
+                         $2::INT[],
+                         $3::NUMERIC[],
+                         $4::TEXT[]
+                       ) AS src(item_id, material_id, cantidad_requerida, notas)
+                       ON CONFLICT (item_id, material_id)
+                       DO UPDATE SET cantidad_requerida = EXCLUDED.cantidad_requerida,
+                                     notas = EXCLUDED.notas""",
+                    [insert_item_ids, insert_material_ids, insert_quantities, insert_notes],
+                )
+                bom_rows += len(insert_item_ids)
+
+    return {
+        "ok": True,
+        "items_creados": created_items,
+        "materiales_creados": created_materials,
+        "bom_registros": bom_rows,
+        "grupos": len(grouped),
+    }
 
 
 async def desactivar_material(db: AsyncSession, payload: dict | None = None) -> dict:

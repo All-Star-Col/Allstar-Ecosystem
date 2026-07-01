@@ -14,6 +14,30 @@ from src.services.carpentry.common import (
 logger = get_logger(__name__)
 
 
+async def _ensure_material_requerido_schema(db: AsyncSession) -> None:
+    await execute(
+        db,
+        """CREATE TABLE IF NOT EXISTS material_requerido_lote (
+            id BIGSERIAL PRIMARY KEY,
+            lote_id INTEGER NOT NULL REFERENCES lotes(id) ON DELETE CASCADE,
+            material_id INTEGER REFERENCES materiales_catalogo(id) ON DELETE SET NULL,
+            categoria TEXT NOT NULL CHECK (categoria IN ('tablero', 'herraje')),
+            nombre TEXT NOT NULL,
+            cantidad NUMERIC(14, 3) NOT NULL CHECK (cantidad > 0),
+            unidad_medida TEXT NOT NULL,
+            notas TEXT,
+            activo BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+    )
+    await execute(
+        db,
+        """CREATE INDEX IF NOT EXISTS idx_material_requerido_lote_lote
+        ON material_requerido_lote (lote_id, activo)""",
+    )
+
+
 async def listar_stock(db: AsyncSession, filters: dict | None = None) -> list[dict]:
     filters = filters or {}
 
@@ -148,31 +172,63 @@ async def listar_movimientos(db: AsyncSession, filters: dict | None = None) -> l
 
 async def listar_necesidades(db: AsyncSession, filters: dict | None = None) -> list[dict]:
     filters = filters or {}
+    await _ensure_material_requerido_schema(db)
 
     params = []
-    clauses = []
+    clauses = ["mr.activo = TRUE"]
 
     if filters.get("proyecto_id"):
         params.append(filters["proyecto_id"])
-        clauses.append(f"vnm.proyecto_id = ${len(params)}")
+        clauses.append(f"l.proyecto_id = ${len(params)}")
 
     if filters.get("lote_id"):
         params.append(filters["lote_id"])
-        clauses.append(f"vnm.lote_id = ${len(params)}")
+        clauses.append(f"mr.lote_id = ${len(params)}")
 
     if filters.get("solo_faltantes") is True or filters.get("solo_faltantes") == "true":
-        clauses.append("vnm.material_disponible = FALSE")
+        clauses.append(
+            """COALESCE(stock.cantidad_en_bodega, 0) < (
+                SELECT COALESCE(SUM(req.cantidad), 0)
+                FROM material_requerido_lote req
+                WHERE req.activo = TRUE
+                  AND req.lote_id = mr.lote_id
+                  AND COALESCE(req.material_id, -1) = COALESCE(mr.material_id, -1)
+                  AND UPPER(TRIM(req.nombre)) = UPPER(TRIM(mr.nombre))
+                  AND req.categoria = mr.categoria
+                  AND req.unidad_medida = mr.unidad_medida
+            )"""
+        )
 
-    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    where_sql = f"WHERE {' AND '.join(clauses)}"
 
     return await fetch_all(
         db,
-        f"""SELECT vnm.proyecto_id, vnm.proyecto, vnm.lote_id, vnm.lote,
-                  vnm.material_id, vnm.material, vnm.categoria, vnm.unidad_medida,
-                  vnm.cantidad_requerida, vnm.cantidad_en_bodega,
-                  vnm.cantidad_pendiente, vnm.material_disponible
-           FROM vista_necesidades_materiales vnm
+        f"""WITH stock AS (
+                SELECT material_id, SUM(cantidad_disponible) AS cantidad_en_bodega
+                FROM inventario
+                GROUP BY material_id
+           )
+           SELECT l.proyecto_id,
+                  p.nombre AS proyecto,
+                  mr.lote_id,
+                  l.nombre AS lote,
+                  mr.material_id,
+                  COALESCE(mc.nombre, mr.nombre) AS material,
+                  mr.categoria,
+                  mr.unidad_medida,
+                  SUM(mr.cantidad) AS cantidad_requerida,
+                  COALESCE(MAX(stock.cantidad_en_bodega), 0) AS cantidad_en_bodega,
+                  GREATEST(SUM(mr.cantidad) - COALESCE(MAX(stock.cantidad_en_bodega), 0), 0) AS cantidad_pendiente,
+                  COALESCE(MAX(stock.cantidad_en_bodega), 0) >= SUM(mr.cantidad) AS material_disponible
+           FROM material_requerido_lote mr
+           JOIN lotes l ON l.id = mr.lote_id
+           JOIN proyectos p ON p.id = l.proyecto_id
+           LEFT JOIN materiales_catalogo mc ON mc.id = mr.material_id
+           LEFT JOIN stock ON stock.material_id = mr.material_id
            {where_sql}
-           ORDER BY vnm.proyecto, vnm.lote, vnm.material""",
+           GROUP BY l.proyecto_id, p.nombre, mr.lote_id, l.nombre,
+                    mr.material_id, COALESCE(mc.nombre, mr.nombre),
+                    mr.categoria, mr.unidad_medida
+           ORDER BY p.nombre, l.nombre, COALESCE(mc.nombre, mr.nombre)""",
         params,
     )

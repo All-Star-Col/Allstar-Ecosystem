@@ -6,9 +6,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from azure.storage.blob import BlobServiceClient, ContentSettings
+from azure.storage.blob import ContentSettings
 
 from src.core.config import settings
+from src.services.azure_storage import get_blob_service_client as get_configured_blob_service_client
 
 
 # ============================================================
@@ -68,11 +69,6 @@ _MANUAL_ENV: dict[str, str] = {}
 # CONFIGURACIÓN AZURE BLOB
 # ============================================================
 
-AZURE_STORAGE_CONNECTION_STRING = (
-    os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-    or settings.AZURE_STORAGE_CONNECTION_STRING
-)
-
 AZURE_STORAGE_CONTAINER_ACTAS = (
     os.getenv("AZURE_STORAGE_CONTAINER_ACTAS")
     or settings.AZURE_STORAGE_CONTAINER_ACTAS
@@ -80,16 +76,8 @@ AZURE_STORAGE_CONTAINER_ACTAS = (
 )
 
 
-def get_blob_service_client() -> BlobServiceClient:
-    if not AZURE_STORAGE_CONNECTION_STRING:
-        raise RuntimeError(
-            "No está configurada la variable AZURE_STORAGE_CONNECTION_STRING. "
-            "Debe agregarla en el archivo .env o en las variables de entorno."
-        )
-
-    return BlobServiceClient.from_connection_string(
-        AZURE_STORAGE_CONNECTION_STRING
-    )
+def get_blob_service_client():
+    return get_configured_blob_service_client()
 
 
 def calcular_sha256(data: bytes) -> str:

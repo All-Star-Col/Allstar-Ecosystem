@@ -59,8 +59,9 @@ function clearCarpentryCache() {
 async function request(path, options = {}) {
   const token = getToken();
   const normalizedToken = token && token.startsWith('Bearer ') ? token : token ? `Bearer ${token}` : '';
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(options.headers || {}),
     ...(normalizedToken ? { Authorization: normalizedToken } : {}),
   };
@@ -76,14 +77,72 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     const detail = body?.detail || {};
-    const message = detail.message || body?.message || response.statusText || 'Error en solicitud HTTP';
+    const message = detail.message || detail.mensaje || body?.message || body?.mensaje || response.statusText || 'Error en solicitud HTTP';
     const error = new Error(message);
-    error.code = detail.code || body?.code || `HTTP_${response.status}`;
+    error.code = detail.code || detail.error || body?.code || body?.error || `HTTP_${response.status}`;
     error.status = response.status;
     throw error;
   }
 
   return body;
+}
+
+function filenameFromContentDisposition(header, fallback) {
+  const value = String(header || '');
+  const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].replace(/"/g, ''));
+    } catch {
+      return utf8Match[1].replace(/"/g, '');
+    }
+  }
+
+  const asciiMatch = value.match(/filename="?([^";]+)"?/i);
+  return asciiMatch?.[1] || fallback || `documento_${new Date().toISOString().slice(0, 10)}`;
+}
+
+async function fetchFile(path, { disposition = 'inline', fallbackName } = {}) {
+  const token = getToken();
+  const normalizedToken = token && token.startsWith('Bearer ') ? token : token ? `Bearer ${token}` : '';
+  const separator = path.includes('?') ? '&' : '?';
+  const response = await fetch(`${API_BASE_URL}${path}${separator}disposition=${encodeURIComponent(disposition)}`, {
+    credentials: 'include',
+    headers: normalizedToken ? { Authorization: normalizedToken } : {},
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    const body = contentType.includes('application/json') ? await response.json() : await response.text();
+    const detail = body?.detail || {};
+    const message = detail.message || detail.mensaje || body?.message || body?.mensaje || response.statusText || 'Error descargando archivo';
+    const error = new Error(message);
+    error.code = detail.code || detail.error || body?.code || body?.error || `HTTP_${response.status}`;
+    error.status = response.status;
+    throw error;
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(response.headers.get('content-disposition'), fallbackName),
+  };
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function openBlobInNewTab(blob) {
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener,noreferrer');
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 async function invoke(action, payload = {}, options = {}) {
@@ -168,12 +227,19 @@ export const api = {
     iniciarProceso: (payload) => mutate('lotes.proceso.iniciar', payload),
     avanzarProceso: (payload) => mutate('lotes.proceso.avanzar', payload),
     listarItems: (payload) => invoke('lotes.listarItems', payload),
+    documentosOrdenCorte: (payload) => invoke('lotes.documentosOrdenCorte', payload),
+    previsualizarOrdenCorte: (payload) => invoke('lotes.ordenCorte.previsualizar', payload),
+    crearDesdeOrdenCorte: (payload) => mutate('lotes.ordenCorte.crear', payload),
+    listarMaterialRequerido: (payload) => invoke('lotes.materialRequerido.listar', payload),
+    guardarMaterialRequerido: (payload) => mutate('lotes.materialRequerido.guardar', payload),
+    eliminarMaterialRequerido: (payload) => mutate('lotes.materialRequerido.eliminar', payload),
   },
 
   items: {
     listarPorProyecto: (payload) => invoke('items.listarPorProyecto', payload),
     crear: (payload) => mutate('items.crear', payload),
     crearBulk: (payload) => mutate('items.crearBulk', payload),
+    crearDesdeCotizacionAprobada: (payload) => mutate('items.crearDesdeCotizacionAprobada', payload),
     actualizar: (payload) => mutate('items.actualizar', payload),
     eliminar: (payload) => mutate('items.eliminar', payload),
     asignarLote: (payload) => mutate('items.asignarLote', payload),
@@ -185,6 +251,10 @@ export const api = {
     listarPorItem: (payload) => invoke('bom.listarPorItem', payload),
     guardarMaterial: (payload) => mutate('bom.guardarMaterial', payload),
     eliminarMaterial: (payload) => mutate('bom.eliminarMaterial', payload),
+    listarSubitems: (payload) => invoke('bom.subitems.listar', payload),
+    crearSubitem: (payload) => mutate('bom.subitems.crear', payload),
+    listarPiezas: (payload) => invoke('bom.piezas.listar', payload),
+    asignarSubitemPieza: (payload) => mutate('bom.piezas.asignarSubitem', payload),
   },
 
   materiales: {
@@ -224,6 +294,55 @@ export const api = {
     bloqueos: (filters) => invoke('reportes.bloqueos', filters),
     avance: (filters) => invoke('reportes.avance', filters),
     exportarCsv: (payload) => invoke('reportes.exportarCsv', payload),
+  },
+
+  documentos: {
+    listar: (payload) => invoke('documentos.listar', payload),
+    aprobarCotizacion: (payload) => mutate('documentos.cotizacion.aprobar', payload),
+    subir: async ({ proyecto_id, proyecto_etapa_id, etapa_id, titulo, descripcion, archivo }) => {
+      const formData = new FormData();
+      formData.append('proyecto_id', String(proyecto_id));
+      if (proyecto_etapa_id) formData.append('proyecto_etapa_id', String(proyecto_etapa_id));
+      if (etapa_id) formData.append('etapa_id', String(etapa_id));
+      if (titulo) formData.append('titulo', titulo);
+      if (descripcion) formData.append('descripcion', descripcion);
+      formData.append('archivo', archivo);
+
+      const data = await request('/documents/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      clearCarpentryCache();
+      return data;
+    },
+    visualizar: async (documento) => {
+      const { blob } = await fetchFile(
+        `${CARPENTRY_API_PATH}/documents/${documento.id}/file`,
+        { disposition: 'inline', fallbackName: documento.nombre_archivo },
+      );
+      openBlobInNewTab(blob);
+    },
+    descargar: async (documento) => {
+      const { blob, filename } = await fetchFile(
+        `${CARPENTRY_API_PATH}/documents/${documento.id}/file`,
+        { disposition: 'attachment', fallbackName: documento.nombre_archivo },
+      );
+      triggerBlobDownload(blob, filename);
+    },
+    visualizarActaRecepcion: async (acta) => {
+      const { blob } = await fetchFile(
+        `/tablet/carpentry/actas-entrega-cliente/${acta.id}/pdf`,
+        { disposition: 'inline', fallbackName: acta.nombre_archivo },
+      );
+      openBlobInNewTab(blob);
+    },
+    descargarActaRecepcion: async (acta) => {
+      const { blob, filename } = await fetchFile(
+        `/tablet/carpentry/actas-entrega-cliente/${acta.id}/pdf`,
+        { disposition: 'attachment', fallbackName: acta.nombre_archivo },
+      );
+      triggerBlobDownload(blob, filename);
+    },
   },
 
   cache: {

@@ -82,6 +82,26 @@ const initialProcesoEdicion = {
   notas: '',
 };
 
+const initialOrdenCorteForm = {
+  documento_id: '',
+  fecha_entrega_prog: '',
+  prioridad: 2,
+  detalle: '',
+};
+
+const initialMaterialRequeridoForm = {
+  id: null,
+  lote_id: '',
+  material_id: '',
+  categoria: 'tablero',
+  nombre: '',
+  cantidad: '',
+  unidad_medida: 'm2',
+  notas: '',
+};
+
+const SIN_ALERTAS = [];
+
 function toDateStr(value) {
   if (value == null || value === '') return '';
 
@@ -133,6 +153,17 @@ export default function LotesPage() {
   const [maquinas, setMaquinas] = useState([]);
   const [lotes, setLotes] = useState([]);
   const [loteForm, setLoteForm] = useState(initialLote);
+  const [documentosCorte, setDocumentosCorte] = useState([]);
+  const [ordenCortePreview, setOrdenCortePreview] = useState(null);
+  const [ordenCorteRows, setOrdenCorteRows] = useState([]);
+  const [ordenCorteForm, setOrdenCorteForm] = useState(initialOrdenCorteForm);
+  const [ordenCorteLoadingId, setOrdenCorteLoadingId] = useState(null);
+  const [ordenCorteSaving, setOrdenCorteSaving] = useState(false);
+  const [materialLote, setMaterialLote] = useState(null);
+  const [materialesRequeridos, setMaterialesRequeridos] = useState([]);
+  const [materialRequeridoForm, setMaterialRequeridoForm] = useState(initialMaterialRequeridoForm);
+  const [materialesCatalogo, setMaterialesCatalogo] = useState([]);
+  const [showMaterialPanel, setShowMaterialPanel] = useState(false);
 
   const [detalle, setDetalle] = useState(null);
   const [seleccionadoId, setSeleccionadoId] = useState(null);
@@ -142,7 +173,6 @@ export default function LotesPage() {
   const [showGestion, setShowGestion] = useState(true);
   const [showLinea, setShowLinea] = useState(true);
   const [showItems, setShowItems] = useState(true);
-  const [showVerificacion, setShowVerificacion] = useState(true);
   const [procesoCambiando, setProcesoCambiando] = useState(false);
   const [editandoLote, setEditandoLote] = useState(false);
   const animTimeout = useRef(null);
@@ -193,6 +223,31 @@ export default function LotesPage() {
     [maquinasProceso]
   );
 
+  const ordenCorteItemsOptions = useMemo(
+    () => (ordenCortePreview?.items || []).map((item) => ({
+      value: String(item.id),
+      label: item.label,
+      item,
+    })),
+    [ordenCortePreview]
+  );
+
+  const ordenCorteTieneAlertas = useMemo(
+    () => ordenCorteRows.some((row) => row.incluir !== false && (!row.item_id || !Number(row.cantidad) || Number(row.cantidad) <= 0)),
+    [ordenCorteRows]
+  );
+
+  const materialesCatalogoOptions = useMemo(
+    () => materialesCatalogo
+      .filter((material) => ['tablero', 'herraje'].includes(material.categoria))
+      .map((material) => ({
+        value: String(material.id),
+        label: `${material.nombre} · ${material.categoria}`,
+        material,
+      })),
+    [materialesCatalogo]
+  );
+
   const cargarCatalogos = async () => {
     try {
       const [proyectosData, procesosData, personasData, maquinasData] = await Promise.all([
@@ -219,6 +274,34 @@ export default function LotesPage() {
     }
   };
 
+  const cargarDocumentosCorte = async () => {
+    try {
+      const data = await api.lotes.documentosOrdenCorte({});
+      setDocumentosCorte(data || []);
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  };
+
+  const cargarMaterialesCatalogo = async () => {
+    try {
+      const data = await api.materiales.listar({ activo: 'true' });
+      setMaterialesCatalogo((data || []).filter((material) => ['tablero', 'herraje'].includes(material.categoria)));
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  };
+
+  const cargarMaterialRequerido = async (loteId) => {
+    if (!loteId) return;
+    try {
+      const data = await api.lotes.listarMaterialRequerido({ lote_id: loteId });
+      setMaterialesRequeridos(data || []);
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  };
+
   const cargarDetalle = async (id) => {
     if (!id) {
       setDetalle(null);
@@ -239,6 +322,8 @@ export default function LotesPage() {
 
   useEffect(() => {
     cargarCatalogos();
+    cargarDocumentosCorte();
+    cargarMaterialesCatalogo();
   }, []);
 
   useEffect(() => {
@@ -355,6 +440,169 @@ export default function LotesPage() {
       await api.lotes.iniciarProceso({ lote_id: detalle.lote.id });
       showToast('Producción iniciada.');
       await Promise.all([cargarDetalle(seleccionadoId), cargarLotes()]);
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  };
+
+  const previsualizarOrdenCorte = async (documento) => {
+    try {
+      setOrdenCorteLoadingId(documento.id);
+      const data = await api.lotes.previsualizarOrdenCorte({ documento_id: documento.id });
+      setOrdenCortePreview(data);
+      setOrdenCorteRows(data.rows || []);
+      setOrdenCorteForm({
+        ...initialOrdenCorteForm,
+        documento_id: documento.id,
+      });
+      showToast('Orden de corte leida. Revisa la previsualizacion.');
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setOrdenCorteLoadingId(null);
+    }
+  };
+
+  const actualizarFilaOrdenCorte = (rowId, changes) => {
+    setOrdenCorteRows((rows) => rows.map((row) => {
+      if (row.row_id !== rowId) return row;
+      const next = { ...row, ...changes };
+      const issues = [];
+      if (next.incluir !== false) {
+        if (!next.item_id) issues.push('ITEM_NO_ENCONTRADO');
+        if (!Number(next.cantidad) || Number(next.cantidad) <= 0) issues.push('CANTIDAD_INVALIDA');
+      }
+      next.issues = issues;
+      return next;
+    }));
+  };
+
+  const seleccionarItemOrdenCorte = (rowId, value) => {
+    const option = ordenCorteItemsOptions.find((item) => String(item.value) === String(value));
+    actualizarFilaOrdenCorte(rowId, {
+      item_id: option?.item?.id || '',
+      item_nombre: option?.item?.nombre || '',
+      apartamento: option?.item?.apartamento || '',
+    });
+  };
+
+  const duplicarFilaOrdenCorte = (rowId) => {
+    setOrdenCorteRows((rows) => {
+      const source = rows.find((row) => row.row_id === rowId);
+      if (!source) return rows;
+      const nextId = Math.max(0, ...rows.map((row) => Number(row.row_id) || 0)) + 1;
+      const index = rows.findIndex((row) => row.row_id === rowId);
+      const copy = {
+        ...source,
+        row_id: nextId,
+        apartamento: '',
+        item_id: '',
+        item_nombre: '',
+        cantidad: '',
+        issues: ['ITEM_NO_ENCONTRADO', 'CANTIDAD_INVALIDA'],
+      };
+      return [...rows.slice(0, index + 1), copy, ...rows.slice(index + 1)];
+    });
+  };
+
+  const crearLoteOrdenCorte = async () => {
+    if (!ordenCortePreview || !ordenCorteForm.documento_id) return;
+    if (!ordenCorteForm.fecha_entrega_prog || !ordenCorteForm.prioridad) {
+      showToast('Fecha de entrega programada y prioridad son obligatorias.', 'error');
+      return;
+    }
+    if (ordenCorteTieneAlertas) {
+      showToast('Corrige u omite las filas con alerta antes de crear el lote.', 'error');
+      return;
+    }
+
+    try {
+      setOrdenCorteSaving(true);
+      const result = await api.lotes.crearDesdeOrdenCorte({
+        ...ordenCorteForm,
+        rows: ordenCorteRows,
+      });
+      showToast(`Lote creado con ${result.piezas_creadas || 0} piezas.`);
+      setOrdenCortePreview(null);
+      setOrdenCorteRows([]);
+      setOrdenCorteForm(initialOrdenCorteForm);
+      await Promise.all([cargarLotes(), cargarDocumentosCorte()]);
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setOrdenCorteSaving(false);
+    }
+  };
+
+  const abrirMaterialLote = async (lote) => {
+    setMaterialLote(lote);
+    setShowMaterialPanel(true);
+    setMaterialRequeridoForm({
+      ...initialMaterialRequeridoForm,
+      lote_id: lote.id,
+    });
+    await cargarMaterialRequerido(lote.id);
+  };
+
+  const seleccionarMaterialCatalogo = (value) => {
+    const option = materialesCatalogoOptions.find((item) => String(item.value) === String(value));
+    const material = option?.material;
+    setMaterialRequeridoForm((prev) => ({
+      ...prev,
+      material_id: value || '',
+      categoria: material?.categoria || prev.categoria,
+      nombre: material?.nombre || prev.nombre,
+      unidad_medida: material?.unidad_medida || prev.unidad_medida,
+    }));
+  };
+
+  const cambiarCategoriaMaterialRequerido = (categoria) => {
+    setMaterialRequeridoForm((prev) => ({
+      ...prev,
+      categoria,
+      material_id: '',
+      unidad_medida: categoria === 'tablero' ? 'm2' : 'unidad',
+    }));
+  };
+
+  const guardarMaterialRequerido = async (e) => {
+    e.preventDefault();
+    if (!materialLote?.id) return;
+    try {
+      await api.lotes.guardarMaterialRequerido({
+        ...materialRequeridoForm,
+        lote_id: materialLote.id,
+      });
+      showToast('Material requerido guardado.');
+      setMaterialRequeridoForm({
+        ...initialMaterialRequeridoForm,
+        lote_id: materialLote.id,
+      });
+      await cargarMaterialRequerido(materialLote.id);
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  };
+
+  const editarMaterialRequerido = (row) => {
+    setMaterialRequeridoForm({
+      id: row.id,
+      lote_id: row.lote_id,
+      material_id: row.material_id ? String(row.material_id) : '',
+      categoria: row.categoria || 'tablero',
+      nombre: row.nombre || '',
+      cantidad: row.cantidad || '',
+      unidad_medida: row.unidad_medida || (row.categoria === 'tablero' ? 'm2' : 'unidad'),
+      notas: row.notas || '',
+    });
+  };
+
+  const eliminarMaterialRequerido = async (id) => {
+    if (!window.confirm('¿Quitar este material requerido del lote?')) return;
+    try {
+      await api.lotes.eliminarMaterialRequerido({ id });
+      showToast('Material requerido quitado.');
+      await cargarMaterialRequerido(materialLote?.id);
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -535,6 +783,224 @@ export default function LotesPage() {
                 />
               </div>
             </div>
+
+            <div className="stack" style={{ marginBottom: 20 }}>
+              <div className="panel-subheader">
+                <div>
+                  <h4>Documentos de ordenes de corte</h4>
+                  <p>Selecciona un documento para crear un lote automatico con previsualizacion de piezas.</p>
+                </div>
+                <button type="button" className="small ghost" onClick={cargarDocumentosCorte}>
+                  Actualizar
+                </button>
+              </div>
+              <div className="table-wrap compact-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Documento</th>
+                      <th>Proyecto</th>
+                      <th>Etapa</th>
+                      <th>Fecha</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {documentosCorte.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>No hay documentos de ordenes de corte cargados.</td>
+                      </tr>
+                    ) : documentosCorte.map((doc) => (
+                      <tr key={doc.id}>
+                        <td>
+                          <strong>{doc.nombre_archivo || doc.titulo}</strong>
+                          <br />
+                          <small>{doc.titulo}</small>
+                        </td>
+                        <td>{doc.proyecto}</td>
+                        <td>{doc.etapa_nombre}</td>
+                        <td>{formatFecha(doc.created_at)}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="small"
+                            disabled={ordenCorteLoadingId === doc.id}
+                            onClick={() => previsualizarOrdenCorte(doc)}
+                          >
+                            {ordenCorteLoadingId === doc.id ? 'Leyendo...' : 'Crear lote automatico'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {ordenCortePreview && (
+                <div className="catalog-table-block">
+                  <div className="panel-subheader">
+                    <div>
+                      <h4>Previsualizacion de orden de corte</h4>
+                      <p>
+                        {ordenCortePreview.documento?.nombre_archivo} · {ordenCorteRows.length} piezas ·{' '}
+                        {(ordenCortePreview.resumen?.con_alertas || 0)} con alerta
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="small ghost"
+                      onClick={() => {
+                        setOrdenCortePreview(null);
+                        setOrdenCorteRows([]);
+                        setOrdenCorteForm(initialOrdenCorteForm);
+                      }}
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+
+                  <div className="form-grid compact">
+                    <div className="field">
+                      <label>Fecha inicio prog</label>
+                      <input type="date" value={ordenCortePreview.fecha_inicio_prog || ''} disabled />
+                    </div>
+                    <div className="field">
+                      <label>Fecha entrega prog *</label>
+                      <input
+                        type="date"
+                        value={ordenCorteForm.fecha_entrega_prog}
+                        onChange={(e) => setOrdenCorteForm((p) => ({ ...p, fecha_entrega_prog: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Prioridad *</label>
+                      <select
+                        value={ordenCorteForm.prioridad}
+                        style={prioridadStyle(ordenCorteForm.prioridad)}
+                        onChange={(e) => setOrdenCorteForm((p) => ({ ...p, prioridad: Number(e.target.value) }))}
+                      >
+                        <option value={1}>Alta</option>
+                        <option value={2}>Media</option>
+                        <option value={3}>Baja</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>Detalle</label>
+                      <input
+                        value={ordenCorteForm.detalle}
+                        onChange={(e) => setOrdenCorteForm((p) => ({ ...p, detalle: e.target.value }))}
+                        placeholder="Opcional"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="table-wrap cut-order-preview">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Estado</th>
+                          <th>Apto</th>
+                          <th>Item</th>
+                          <th>Pieza</th>
+                          <th>Cant.</th>
+                          <th>Medidas</th>
+                          <th>Material</th>
+                          <th>Referencia / sub item</th>
+                          <th>Accion</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ordenCorteRows.map((row) => {
+                          const issues = row.issues || SIN_ALERTAS;
+                          return (
+                            <tr key={row.row_id} className={row.incluir === false ? 'row-muted' : ''}>
+                              <td>
+                                {row.incluir === false ? (
+                                  <span className="pill pill-gray">Omitida</span>
+                                ) : issues.length ? (
+                                  <span className="pill pill-yellow">Revisar</span>
+                                ) : (
+                                  <span className="pill pill-green">Lista</span>
+                                )}
+                              </td>
+                              <td>
+                                <input
+                                  value={row.apartamento || ''}
+                                  onChange={(e) => actualizarFilaOrdenCorte(row.row_id, { apartamento: e.target.value })}
+                                />
+                              </td>
+                              <td style={{ minWidth: 260 }}>
+                                <SearchableSelect
+                                  options={ordenCorteItemsOptions}
+                                  value={row.item_id ? String(row.item_id) : ''}
+                                  onChange={(v) => seleccionarItemOrdenCorte(row.row_id, v)}
+                                  placeholder="Corregir item..."
+                                />
+                                <small>{row.item_nombre || 'Sin item relacionado'}</small>
+                              </td>
+                              <td>{row.pieza}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={row.cantidad ?? ''}
+                                  onChange={(e) => actualizarFilaOrdenCorte(row.row_id, { cantidad: e.target.value })}
+                                />
+                              </td>
+                              <td>
+                                {[row.largo_mm, row.ancho_mm, row.espesor_mm].filter(Boolean).join(' x ') || '-'}
+                              </td>
+                              <td>{row.material || '-'}</td>
+                              <td>
+                                <input
+                                  value={row.subitem_nombre || ''}
+                                  onChange={(e) => actualizarFilaOrdenCorte(row.row_id, { subitem_nombre: e.target.value })}
+                                  placeholder="Sin sub item"
+                                />
+                              </td>
+                              <td>
+                                <div className="row">
+                                  <button
+                                    type="button"
+                                    className="small ghost"
+                                    onClick={() => duplicarFilaOrdenCorte(row.row_id)}
+                                  >
+                                    Duplicar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={row.incluir === false ? 'small' : 'small ghost'}
+                                    onClick={() => actualizarFilaOrdenCorte(row.row_id, { incluir: row.incluir === false })}
+                                  >
+                                    {row.incluir === false ? 'Incluir' : 'Omitir'}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="row actions-row">
+                    <button
+                      type="button"
+                      className="save-btn"
+                      disabled={ordenCorteSaving || ordenCorteTieneAlertas}
+                      onClick={crearLoteOrdenCorte}
+                    >
+                      {ordenCorteSaving ? 'Creando lote...' : 'Crear lote y piezas'}
+                    </button>
+                    {ordenCorteTieneAlertas && (
+                      <span className="error">Corrige u omite las filas con alerta.</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         )}
         {showGestion && (vista === 'tabla' ? (
@@ -544,7 +1010,6 @@ export default function LotesPage() {
                 <tr>
                   <th>Nombre</th>
                   <th>Proyecto</th>
-                  <th>Material</th>
                   <th>Estado</th>
                   <th>Proceso</th>
                   <th>Prioridad</th>
@@ -558,7 +1023,6 @@ export default function LotesPage() {
                   <tr key={l.id} className={seleccionadoId === l.id ? 'selected-row' : ''}>
                     <td>{l.nombre}</td>
                     <td>{l.proyecto}</td>
-                    <td>{l.material_ref || '-'}</td>
                     <td>
                       <StatusPill value={l.estado} />
                     </td>
@@ -586,6 +1050,9 @@ export default function LotesPage() {
                         <button className="small ghost" onClick={() => editarLote(l)}>
                           Editar
                         </button>
+                        <button className="small ghost" onClick={() => abrirMaterialLote(l)}>
+                          Material
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -611,6 +1078,140 @@ export default function LotesPage() {
           </div>
         ))}
       </section>
+
+      {showMaterialPanel && materialLote && (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <h3>Material requerido · {materialLote.nombre}</h3>
+              <p className="muted">Registra tableros y herrajes requeridos para este lote. Cantos se gestionara desde tablet.</p>
+            </div>
+            <button
+              type="button"
+              className="small ghost"
+              onClick={() => {
+                setShowMaterialPanel(false);
+                setMaterialLote(null);
+                setMaterialesRequeridos([]);
+                setMaterialRequeridoForm(initialMaterialRequeridoForm);
+              }}
+            >
+              Cerrar
+            </button>
+          </div>
+
+          <form className="form-grid compact material-required-form" onSubmit={guardarMaterialRequerido}>
+            <div className="field">
+              <label>Categoria</label>
+              <select
+                value={materialRequeridoForm.categoria}
+                onChange={(e) => cambiarCategoriaMaterialRequerido(e.target.value)}
+              >
+                <option value="tablero">Tablero</option>
+                <option value="herraje">Herraje</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>Material existente</label>
+              <SearchableSelect
+                options={materialesCatalogoOptions.filter((item) => item.material.categoria === materialRequeridoForm.categoria)}
+                value={materialRequeridoForm.material_id}
+                onChange={seleccionarMaterialCatalogo}
+                placeholder="Buscar material..."
+              />
+            </div>
+            <div className="field">
+              <label>Nombre</label>
+              <input
+                value={materialRequeridoForm.nombre}
+                onChange={(e) => setMaterialRequeridoForm((p) => ({ ...p, nombre: e.target.value, material_id: '' }))}
+                placeholder="Nombre del material"
+                required
+              />
+            </div>
+            <div className="field">
+              <label>Cantidad</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={materialRequeridoForm.cantidad}
+                onChange={(e) => setMaterialRequeridoForm((p) => ({ ...p, cantidad: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="field">
+              <label>Unidad</label>
+              <input
+                value={materialRequeridoForm.unidad_medida}
+                onChange={(e) => setMaterialRequeridoForm((p) => ({ ...p, unidad_medida: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="field">
+              <label>Detalle</label>
+              <input
+                value={materialRequeridoForm.notas}
+                onChange={(e) => setMaterialRequeridoForm((p) => ({ ...p, notas: e.target.value }))}
+                placeholder="Opcional"
+              />
+            </div>
+            <div className="row actions-row">
+              <button type="submit" className="save-btn">
+                {materialRequeridoForm.id ? 'Actualizar material' : 'Agregar material'}
+              </button>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setMaterialRequeridoForm({ ...initialMaterialRequeridoForm, lote_id: materialLote.id })}
+              >
+                Limpiar
+              </button>
+            </div>
+          </form>
+
+          <div className="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Categoria</th>
+                  <th>Material</th>
+                  <th>Cantidad</th>
+                  <th>Unidad</th>
+                  <th>Detalle</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {materialesRequeridos.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.categoria}</td>
+                    <td>{row.nombre}</td>
+                    <td>{row.cantidad}</td>
+                    <td>{formatUnidadMedida(row.unidad_medida)}</td>
+                    <td>{row.notas || '-'}</td>
+                    <td>
+                      <div className="row">
+                        <button type="button" className="small ghost" onClick={() => editarMaterialRequerido(row)}>
+                          Editar
+                        </button>
+                        <button type="button" className="small ghost" onClick={() => eliminarMaterialRequerido(row.id)}>
+                          Quitar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!materialesRequeridos.length && (
+                  <tr>
+                    <td colSpan={6}>No hay material requerido registrado para este lote.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {detalle && (
         <section className="stack">
@@ -730,7 +1331,7 @@ export default function LotesPage() {
             )}
           </article>
 
-          <section className="grid grid-2">
+          <section>
             <article className="panel">
               <div className="panel-header">
                 <h3>Ítems del lote</h3>
@@ -748,7 +1349,7 @@ export default function LotesPage() {
                     <thead>
                       <tr>
                         <th>Nombre</th>
-                        <th>Piso</th>
+                        <th>Tipología</th>
                         <th>Apartamento</th>
                         <th>Estado</th>
                       </tr>
@@ -757,7 +1358,7 @@ export default function LotesPage() {
                       {detalle.items.map((it) => (
                         <tr key={it.id}>
                           <td>{it.nombre}</td>
-                          <td>{it.piso ?? '-'}</td>
+                          <td>{it.tipologia ?? it.piso ?? '-'}</td>
                           <td>{it.apartamento || '-'}</td>
                           <td><StatusPill value={it.estado} /></td>
                         </tr>
@@ -773,58 +1374,6 @@ export default function LotesPage() {
               )}
             </article>
 
-            <article className="panel">
-              <div className="panel-header">
-                <h3>Verificación de materiales</h3>
-                <CollapseToggle collapsed={!showVerificacion} onToggle={() => setShowVerificacion((v) => !v)} label="Materiales" />
-              </div>
-              {showVerificacion && (
-                <>
-                  <p className={detalle.materialCompleto ? 'ok' : 'error'}>
-                    {detalle.materialCompleto
-                      ? 'Material completo - lote puede iniciar producción'
-                      : 'Faltan materiales para este lote'}
-                  </p>
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Material</th>
-                          <th>Categoría</th>
-                          <th>Unidad</th>
-                          <th>Requerida</th>
-                          <th>En bodega</th>
-                          <th>Pendiente</th>
-                          <th>Disponible</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detalle.necesidadesMateriales.map((m) => (
-                          <tr key={`${m.material}-${m.categoria}`}>
-                            <td>{m.material}</td>
-                            <td>{m.categoria}</td>
-                            <td>{formatUnidadMedida(m.unidad_medida)}</td>
-                            <td>{m.cantidad_requerida}</td>
-                            <td>{m.cantidad_en_bodega}</td>
-                            <td>{m.cantidad_pendiente}</td>
-                            <td>
-                              <span className={`pill ${m.material_disponible ? 'pill-green' : 'pill-red'}`}>
-                                {m.material_disponible ? 'Sí' : 'No'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                        {!detalle.necesidadesMateriales.length && (
-                          <tr>
-                            <td colSpan={7}>Aún no hay BOM para calcular necesidades.</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-            </article>
           </section>
         </section>
       )}

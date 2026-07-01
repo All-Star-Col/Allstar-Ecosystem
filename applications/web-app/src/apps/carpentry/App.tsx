@@ -12,14 +12,12 @@ type CarpentryToastState = {
     type: CarpentryToastType;
 } | null;
 
-const DashboardPage = lazy(() => import("./pages/DashboardPage.jsx"));
 const ProyectosPage = lazy(() => import("./pages/ProyectosPage.jsx"));
 const LotesPage = lazy(() => import("./pages/LotesPage.jsx"));
 const BomPage = lazy(() => import("./pages/BomPage.jsx"));
+const DocumentosPage = lazy(() => import("./pages/DocumentosPage.jsx"));
 const InventarioPage = lazy(() => import("./pages/InventarioPage.jsx"));
-const ProduccionPage = lazy(() => import("./pages/ProduccionPage.jsx"));
 const RecursosPage = lazy(() => import("./pages/RecursosPage.jsx"));
-const ReportesPage = lazy(() => import("./pages/ReportesPage.jsx"));
 const CatalogoMaterialesPage = lazy(() => import("./pages/CatalogoMaterialesPage.jsx"));
 
 export default function CarpentryApp() {
@@ -59,15 +57,14 @@ export default function CarpentryApp() {
           <ShellLayout>
             <Suspense fallback={<div className="panel">Cargando módulo...</div>}>
               <Routes>
-                <Route index element={<DashboardPage />} />
+                <Route index element={<Navigate to="proyectos" replace />} />
                 <Route path="proyectos" element={<ProyectosPage />} />
                 <Route path="lotes" element={<LotesPage />} />
                 <Route path="bom" element={<BomPage />} />
+                <Route path="documentos" element={<DocumentosPage />} />
                 <Route path="inventario" element={<InventarioPage />} />
-                <Route path="produccion" element={<ProduccionPage />} />
                 <Route path="recursos" element={<RecursosPage />} />
                 <Route path="catalogo" element={<CatalogoMaterialesPage />} />
-                <Route path="reportes" element={<ReportesPage />} />
                 <Route path="*" element={<Navigate to="." replace />} />
               </Routes>
             </Suspense>

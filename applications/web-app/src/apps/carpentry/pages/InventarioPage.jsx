@@ -19,7 +19,6 @@ const initialMovimiento = {
   notas: '',
 };
 
-const HISTORIAL_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [20, 50, 100];
 
 function PaginationControls({
@@ -88,20 +87,9 @@ export default function InventarioPage() {
   const [stockPageSize, setStockPageSize] = useState(20);
   const [showStockSection, setShowStockSection] = useState(true);
   const [showRegistroSection, setShowRegistroSection] = useState(true);
-  const [showHistorialSection, setShowHistorialSection] = useState(false);
   const [showNecesidadesSection, setShowNecesidadesSection] = useState(true);
 
   const [movimiento, setMovimiento] = useState(initialMovimiento);
-  const [movimientosFiltros, setMovimientosFiltros] = useState({
-    material_id: '',
-    tipo: '',
-    proyecto_id: '',
-    lote_id: '',
-    desde: '',
-    hasta: '',
-  });
-  const [movimientos, setMovimientos] = useState([]);
-  const [movimientosPage, setMovimientosPage] = useState(1);
 
   const [necesidadesFiltros, setNecesidadesFiltros] = useState({ proyecto_id: '', lote_id: '', solo_faltantes: true });
   const [necesidades, setNecesidades] = useState([]);
@@ -112,10 +100,6 @@ export default function InventarioPage() {
   const [proyectos, setProyectos] = useState([]);
   const [lotes, setLotes] = useState([]);
   const [personas, setPersonas] = useState([]);
-  const materialOptions = useMemo(
-    () => materiales.map((m) => ({ value: m.id, label: m.nombre })),
-    [materiales]
-  );
 
   const registroMaterialOptions = useMemo(() => {
     const cat = movimiento.categoria;
@@ -173,15 +157,6 @@ export default function InventarioPage() {
     }
   };
 
-  const cargarMovimientos = async () => {
-    try {
-      const data = await api.inventario.movimientos(movimientosFiltros);
-      setMovimientos(data);
-    } catch (error) {
-      showToast(error.message, 'error');
-    }
-  };
-
   const cargarNecesidades = async () => {
     try {
       const data = await api.inventario.necesidades(necesidadesFiltros);
@@ -204,14 +179,6 @@ export default function InventarioPage() {
   }, [stockFiltros, stockPageSize]);
 
   useEffect(() => {
-    cargarMovimientos();
-  }, [movimientosFiltros]);
-
-  useEffect(() => {
-    setMovimientosPage(1);
-  }, [movimientosFiltros]);
-
-  useEffect(() => {
     cargarNecesidades();
   }, [necesidadesFiltros]);
 
@@ -220,7 +187,6 @@ export default function InventarioPage() {
   }, [necesidadesFiltros, necesidadesPageSize]);
 
   const stockTotalPages = Math.max(1, Math.ceil(stock.length / stockPageSize));
-  const movimientosTotalPages = Math.max(1, Math.ceil(movimientos.length / HISTORIAL_PAGE_SIZE));
   const necesidadesTotalPages = Math.max(1, Math.ceil(necesidades.length / necesidadesPageSize));
 
   useEffect(() => {
@@ -228,17 +194,9 @@ export default function InventarioPage() {
   }, [stockTotalPages]);
 
   useEffect(() => {
-    setMovimientosPage((page) => Math.min(page, movimientosTotalPages));
-  }, [movimientosTotalPages]);
-
-  useEffect(() => {
     setNecesidadesPage((page) => Math.min(page, necesidadesTotalPages));
   }, [necesidadesTotalPages]);
 
-  const movimientosVisible = movimientos.slice(
-    (movimientosPage - 1) * HISTORIAL_PAGE_SIZE,
-    movimientosPage * HISTORIAL_PAGE_SIZE
-  );
   const stockVisible = stock.slice((stockPage - 1) * stockPageSize, stockPage * stockPageSize);
   const necesidadesVisible = necesidades.slice(
     (necesidadesPage - 1) * necesidadesPageSize,
@@ -255,7 +213,7 @@ export default function InventarioPage() {
       await api.inventario.guardarMovimiento(movimiento);
       showToast('Movimiento registrado.');
       setMovimiento(initialMovimiento);
-      await Promise.all([cargarStock(), cargarMovimientos(), cargarNecesidades()]);
+      await Promise.all([cargarStock(), cargarNecesidades()]);
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -364,7 +322,7 @@ export default function InventarioPage() {
           )}
         </section>
 
-      <section className="grid grid-2 inventory-dual-grid">
+      <section className="grid inventory-dual-grid">
         <article className={`panel inventory-panel ${showRegistroSection ? '' : 'inventory-panel-collapsed'}`}>
           <div className="panel-header">
             <h3>Registrar entrada / ajuste</h3>
@@ -447,97 +405,7 @@ export default function InventarioPage() {
           )}
         </article>
 
-        <article className={`panel inventory-panel ${showHistorialSection ? '' : 'inventory-panel-collapsed'}`}>
-          <div className="panel-header">
-            <h3>Historial de movimientos</h3>
-            <button
-              type="button"
-              className="items-grupo-toggle"
-              data-collapsed={!showHistorialSection}
-              onClick={() => setShowHistorialSection((v) => !v)}
-              title={showHistorialSection ? 'Comprimir historial' : 'Mostrar historial'}
-              aria-label={showHistorialSection ? 'Comprimir historial' : 'Mostrar historial'}
-              aria-expanded={showHistorialSection}
-            >
-              ☰
-            </button>
-          </div>
-          {showHistorialSection && (
-            <>
-              <div className="row wrap">
-                <div className="field" style={{ minWidth: 280 }}>
-                  <SearchableSelect
-                    options={[{ value: '', label: 'Material: todos' }, ...materialOptions]}
-                    value={movimientosFiltros.material_id}
-                    onChange={(v) => setMovimientosFiltros((f) => ({ ...f, material_id: v }))}
-                    placeholder="Filtrar material..."
-                  />
-                </div>
-                <select
-                  value={movimientosFiltros.tipo}
-                  onChange={(e) => setMovimientosFiltros((f) => ({ ...f, tipo: e.target.value }))}
-                >
-                  <option value="">Tipo: todos</option>
-                  <option value="entrada">entrada</option>
-                  <option value="salida">salida</option>
-                  <option value="ajuste">ajuste</option>
-                </select>
-                <input
-                  type="date"
-                  value={movimientosFiltros.desde}
-                  onChange={(e) => setMovimientosFiltros((f) => ({ ...f, desde: e.target.value }))}
-                />
-                <input
-                  type="date"
-                  value={movimientosFiltros.hasta}
-                  onChange={(e) => setMovimientosFiltros((f) => ({ ...f, hasta: e.target.value }))}
-                />
-              </div>
-              <div className="catalog-table-block">
-                <PaginationControls
-                  page={movimientosPage}
-                  totalPages={movimientosTotalPages}
-                  onPrevious={() => setMovimientosPage((page) => Math.max(1, page - 1))}
-                  onNext={() => setMovimientosPage((page) => Math.min(movimientosTotalPages, page + 1))}
-                  label={`Mostrando ${movimientos.length ? ((movimientosPage - 1) * HISTORIAL_PAGE_SIZE) + 1 : 0}-${Math.min(movimientosPage * HISTORIAL_PAGE_SIZE, movimientos.length)} de ${movimientos.length} movimientos`}
-                />
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Material</th>
-                        <th>Tipo</th>
-                        <th>Cantidad</th>
-                        <th>Proyecto</th>
-                        <th>Lote</th>
-                        <th>Referencia</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {movimientosVisible.map((m) => (
-                        <tr key={m.id}>
-                          <td>{formatFecha(m.fecha)}</td>
-                          <td>{m.material}</td>
-                          <td>{m.tipo}</td>
-                          <td>{m.cantidad}</td>
-                          <td>{m.proyecto || '-'}</td>
-                          <td>{m.lote || '-'}</td>
-                          <td>{m.referencia || '-'}</td>
-                        </tr>
-                      ))}
-                      {!movimientos.length && (
-                        <tr>
-                          <td colSpan={7}>Sin movimientos para los filtros seleccionados.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
-        </article>
+
       </section>
 
       <section className={`panel inventory-panel ${showNecesidadesSection ? '' : 'inventory-panel-collapsed'}`}>

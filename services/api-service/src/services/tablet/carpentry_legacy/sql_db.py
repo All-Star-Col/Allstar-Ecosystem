@@ -709,14 +709,14 @@ def get_tareas_proceso(
             tp.*,
             tp.id AS tarea_id,
             ip.apartamento AS item_apartamento,
-            ip.piso AS item_piso,
+            ip.tipologia AS item_piso,
             ip.nombre AS item_nombre,
             pe.nombre AS responsable_nombre,
             CASE
                 WHEN ip.nombre IS NOT NULL THEN
                     CONCAT(
                         ip.nombre,
-                        CASE WHEN ip.piso IS NOT NULL THEN CONCAT(' - Piso ', ip.piso) ELSE '' END,
+                        CASE WHEN ip.tipologia IS NOT NULL THEN CONCAT(' - Tipología ', ip.tipologia) ELSE '' END,
                         CASE WHEN ip.apartamento IS NOT NULL THEN CONCAT(' - Apto ', ip.apartamento) ELSE '' END
                     )
                 ELSE COALESCE(tp.grupo_pieza, 'Tarea general')
@@ -1368,7 +1368,7 @@ def get_muebles_lote(
             ip.id AS item_id,
             CONCAT(
                 ip.nombre,
-                CASE WHEN ip.piso IS NOT NULL THEN CONCAT(' - Piso ', ip.piso) ELSE '' END,
+                CASE WHEN ip.tipologia IS NOT NULL THEN CONCAT(' - Tipología ', ip.tipologia) ELSE '' END,
                 CASE WHEN ip.apartamento IS NOT NULL THEN CONCAT(' - Apto ', ip.apartamento) ELSE '' END
             ) AS label
         FROM {_schema_table("items_proyecto")} ip
@@ -1420,12 +1420,12 @@ def get_piezas_mueble(
         SELECT
             pm.*,
             ip.apartamento AS item_apartamento,
-            ip.piso AS item_piso,
+            ip.tipologia AS item_piso,
             ip.nombre AS item_nombre,
             ip.nombre AS mueble_nombre,
             CONCAT(
                 ip.nombre,
-                CASE WHEN ip.piso IS NOT NULL THEN CONCAT(' - Piso ', ip.piso) ELSE '' END,
+                CASE WHEN ip.tipologia IS NOT NULL THEN CONCAT(' - Tipología ', ip.tipologia) ELSE '' END,
                 CASE WHEN ip.apartamento IS NOT NULL THEN CONCAT(' - Apto ', ip.apartamento) ELSE '' END
             ) AS item_label,
             TRUE AS editable_llegada,
@@ -2144,7 +2144,7 @@ def _get_herrajes_por_lote(db, lote_id: int, lote_proceso_id: int) -> dict[int, 
 
             ip.id AS items_proyecto_id,
             ip.nombre AS item_nombre,
-            ip.piso AS item_piso,
+            ip.tipologia AS item_piso,
             ip.apartamento AS item_apartamento,
 
             mc.nombre AS material_nombre,
@@ -2327,7 +2327,7 @@ def get_muebles_instalacion(
             {
                 "item_id": item_id_int,
                 "item_nombre": mueble.get("nombre"),
-                "piso": mueble.get("piso"),
+                "piso": mueble.get("tipologia") or mueble.get("piso"),
                 "apartamento": mueble.get("apartamento"),
                 "label": mueble.get("label") or mueble.get("nombre"),
 

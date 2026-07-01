@@ -38,6 +38,13 @@ const estadoProyectoOptions =
   { value: 'finalizado', label: 'Finalizado' },
 ];
 
+const fileAccept = '.pdf,.xlsx,.xls,.csv,.doc,.docx,.png,.jpg,.jpeg';
+const initialDocumentForm = {
+  titulo: '',
+  descripcion: '',
+  archivo: null,
+};
+
 /*
   toDateInputValue():
   Convierte un valor de fecha (Date o string) a formato 'YYYY-MM-DD' para inputs tipo date.
@@ -79,6 +86,23 @@ function daysRemaining(date)
 
 function personaLabel(persona) {
   return `${persona.nombre}-${persona.area || 'SinArea'}`;
+}
+
+function normalizeStageName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isReceptionStage(value) {
+  const normalized = normalizeStageName(value);
+  return normalized.includes('acta') && normalized.includes('recepcion');
+}
+
+function isQuoteStage(value) {
+  return normalizeStageName(value).includes('cotiz');
 }
 
 function prioridadStyle(val) {
@@ -124,11 +148,15 @@ export default function ProyectosPage() {
   const [showLotes, setShowLotes] = useState(true);
   const [showItems, setShowItems] = useState(true);
   const [items, setItems] = useState([]);
-  const [itemForm, setItemForm] = useState({ id: null, nombre: '', piso: '', apartamento: '', cantidad: 1 });
+  const [itemForm, setItemForm] = useState({ id: null, nombre: '', tipologia: '', apartamento: '', cantidad: 1 });
+  const [creatingItemsFromQuote, setCreatingItemsFromQuote] = useState(false);
   const [editandoItemId, setEditandoItemId] = useState(null);
   const [editandoProyecto, setEditandoProyecto] = useState(false);
   const [colapsadosPorGrupo, setColapsadosPorGrupo] = useState({});
   const [paginaPorGrupo, setPaginaPorGrupo] = useState({});
+  const [documentStage, setDocumentStage] = useState(null);
+  const [documentForm, setDocumentForm] = useState(initialDocumentForm);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
 
   const personasResponsables = useMemo(
     () => personas.filter((p) => ['Jefatura', 'Diseño'].includes(p.area)),
@@ -317,6 +345,10 @@ export default function ProyectosPage() {
 
   const guardarEtapa = async (etapa) => {
     try {
+      if (etapa.bloqueada_por_cotizacion) {
+        showToast('Debes aprobar una cotizacion antes de modificar esta etapa.', 'error');
+        return;
+      }
       const responsableId = etapa.responsable_id ? String(etapa.responsable_id) : '';
       const esOmitida = etapa.estado === 'omitida';
 
@@ -340,11 +372,65 @@ export default function ProyectosPage() {
     }
   };
 
+  const abrirCargaDocumento = (etapa) => {
+    if (etapa.bloqueada_por_cotizacion && !isQuoteStage(etapa.etapa)) {
+      showToast('Debes aprobar una cotizacion antes de cargar documentos en esta etapa.', 'error');
+      return;
+    }
+    setDocumentStage(etapa);
+    setDocumentForm({
+      ...initialDocumentForm,
+      titulo: etapa?.etapa || '',
+    });
+  };
+
+  const cerrarCargaDocumento = () => {
+    if (uploadingDocument) return;
+    setDocumentStage(null);
+    setDocumentForm(initialDocumentForm);
+  };
+
+  const subirDocumentoEtapa = async (e) => {
+    e.preventDefault();
+    if (!seleccionadoId || !documentStage) {
+      showToast('Selecciona un proyecto y una etapa.', 'error');
+      return;
+    }
+    if (isReceptionStage(documentStage.etapa)) {
+      showToast('El acta de recepcion se genera desde la tablet.', 'error');
+      return;
+    }
+    if (!documentForm.archivo) {
+      showToast('Selecciona un archivo.', 'error');
+      return;
+    }
+
+    setUploadingDocument(true);
+    try {
+      await api.documentos.subir({
+        proyecto_id: Number(seleccionadoId),
+        proyecto_etapa_id: Number(documentStage.id),
+        etapa_id: Number(documentStage.etapa_id),
+        titulo: documentForm.titulo || documentStage.etapa,
+        descripcion: documentForm.descripcion,
+        archivo: documentForm.archivo,
+      });
+      showToast('Documento cargado.');
+      setDocumentStage(null);
+      setDocumentForm(initialDocumentForm);
+      await cargarDetalle(seleccionadoId);
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setUploadingDocument(false);
+    }
+  };
+
   const guardarItem = async (e) => {
     e.preventDefault();
     try {
       if (itemForm.id) {
-        // Edición individual — actualiza piso/apartamento/nombre del ítem
+        // Edicion individual: actualiza tipologia/apartamento/nombre del item
         await api.items.actualizar(itemForm);
         showToast('Ítem actualizado.');
       } else {
@@ -353,7 +439,7 @@ export default function ProyectosPage() {
         await api.items.crearBulk({ proyecto_id: seleccionadoId, nombre: itemForm.nombre, cantidad });
         showToast(`${cantidad} ítem(s) creado(s).`);
       }
-      setItemForm({ id: null, nombre: '', piso: '', apartamento: '', cantidad: 1 });
+      setItemForm({ id: null, nombre: '', tipologia: '', apartamento: '', cantidad: 1 });
       setEditandoItemId(null);
       await cargarItems(seleccionadoId);
     } catch (error) {
@@ -363,7 +449,25 @@ export default function ProyectosPage() {
 
   const editarItem = (it) => {
     setEditandoItemId(it.id);
-    setItemForm({ id: it.id, nombre: it.nombre, piso: it.piso ?? '', apartamento: it.apartamento ?? '' });
+    setItemForm({ id: it.id, nombre: it.nombre, tipologia: it.tipologia ?? it.piso ?? '', apartamento: it.apartamento ?? '' });
+  };
+
+  const crearItemsDesdeCotizacion = async () => {
+    if (!seleccionadoId) {
+      showToast('Selecciona un proyecto.', 'error');
+      return;
+    }
+    setCreatingItemsFromQuote(true);
+    try {
+      const result = await api.items.crearDesdeCotizacionAprobada({ proyecto_id: seleccionadoId });
+      showToast(`Items creados: ${result.items_creados || 0}. BOM: ${result.bom_registros || 0}.`);
+      await cargarItems(seleccionadoId);
+      await cargarDetalle(seleccionadoId);
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setCreatingItemsFromQuote(false);
+    }
   };
 
   const toggleGrupoItem = (nombreGrupo) =>
@@ -611,6 +715,14 @@ export default function ProyectosPage() {
           <section className="panel">
             <div className="panel-header">
               <h3>Ítems del contrato · {detalle.proyecto.nombre}</h3>
+              <button
+                type="button"
+                className="small"
+                onClick={crearItemsDesdeCotizacion}
+                disabled={creatingItemsFromQuote}
+              >
+                {creatingItemsFromQuote ? 'Creando...' : 'Crear items automaticamente con cotizacion aprobada'}
+              </button>
               <CollapseToggle
                 collapsed={!showItems}
                 onToggle={() => setShowItems((v) => !v)}
@@ -644,13 +756,11 @@ export default function ProyectosPage() {
                   {itemForm.id && (
                     <>
                       <div className="field">
-                        <label>Piso</label>
+                        <label>Tipología</label>
                         <input
-                          type="number"
-                          min={1}
-                          placeholder="Ej: 3"
-                          value={itemForm.piso}
-                          onChange={(e) => setItemForm((p) => ({ ...p, piso: e.target.value }))}
+                          placeholder="Ej: tipología 1"
+                          value={itemForm.tipologia}
+                          onChange={(e) => setItemForm((p) => ({ ...p, tipologia: e.target.value }))}
                         />
                       </div>
                       <div className="field">
@@ -672,7 +782,7 @@ export default function ProyectosPage() {
                       className="ghost"
                       onClick={() =>
                       {
-                        setItemForm({ id: null, nombre: '', piso: '', apartamento: '', cantidad: 1 });
+                        setItemForm({ id: null, nombre: '', tipologia: '', apartamento: '', cantidad: 1 });
                         setEditandoItemId(null);
                       }}
                     >
@@ -757,7 +867,7 @@ export default function ProyectosPage() {
                             <table>
                               <thead>
                                 <tr>
-                                  <th>Piso</th>
+                                  <th>Tipología</th>
                                   <th>Apartamento</th>
                                   <th>Estado</th>
                                   <th>Lote asignado</th>
@@ -767,7 +877,7 @@ export default function ProyectosPage() {
                               <tbody>
                                 {itemsPagina.map((it) => (
                                   <tr key={it.id}>
-                                    <td>{it.piso ?? '-'}</td>
+                                    <td>{it.tipologia ?? it.piso ?? '-'}</td>
                                     <td>{it.apartamento || '-'}</td>
                                     <td>
                                       <StatusPill value={it.estado} />
@@ -807,6 +917,11 @@ export default function ProyectosPage() {
             <article className={`panel project-detail-panel ${!showEtapas ? 'project-detail-panel-collapsed' : ''}`}>
               <div className="panel-header">
                 <h3>Etapas administrativas · {detalle.proyecto.nombre}</h3>
+                {detalle.cotizacion_aprobada ? (
+                  <span className="pill success">Cotizacion aprobada</span>
+                ) : (
+                  <span className="pill pill-gray">Pendiente aprobar cotizacion</span>
+                )}
                 <CollapseToggle
                   collapsed={!showEtapas}
                   onToggle={() => setShowEtapas((v) => !v)}
@@ -824,18 +939,22 @@ export default function ProyectosPage() {
                         <th>Real</th>
                         <th>Responsable</th>
                         <th>Bloqueo</th>
+                        <th>Documento</th>
                         <th>Guardar</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {detalle.etapas.map((et) => (
-                        <tr key={et.id}>
+                      {detalle.etapas.map((et) => {
+                        const etapaBloqueada = !!et.bloqueada_por_cotizacion;
+                        return (
+                        <tr key={et.id} className={etapaBloqueada ? 'row-muted' : ''}>
                           <td>{et.etapa}</td>
                           <td>
                             <select
                               className="select-light"
                               value={et.estado}
                               onChange={(e) => updateEtapaLocal(et.id, 'estado', e.target.value)}
+                              disabled={etapaBloqueada}
                             >
                               <option value="pendiente">pendiente</option>
                               <option value="en_proceso">en_proceso</option>
@@ -852,6 +971,7 @@ export default function ProyectosPage() {
                                 type="date"
                                 value={toDateInputValue(et.fecha_programada)}
                                 onChange={(e) => updateEtapaLocal(et.id, 'fecha_programada', e.target.value)}
+                                disabled={etapaBloqueada}
                               />
                             )}
                           </td>
@@ -863,6 +983,7 @@ export default function ProyectosPage() {
                                 type="date"
                                 value={toDateInputValue(et.fecha_real)}
                                 onChange={(e) => updateEtapaLocal(et.id, 'fecha_real', e.target.value)}
+                                disabled={etapaBloqueada}
                               />
                             )}
                           </td>
@@ -875,6 +996,7 @@ export default function ProyectosPage() {
                                 value={et.responsable_id || ''}
                                 onChange={(value) => updateEtapaLocal(et.id, 'responsable_id', value)}
                                 placeholder="Selecciona responsable"
+                                disabled={etapaBloqueada}
                               />
                             )}
                           </td>
@@ -884,18 +1006,29 @@ export default function ProyectosPage() {
                                 value={et.motivo_bloqueo || ''}
                                 onChange={(e) => updateEtapaLocal(et.id, 'motivo_bloqueo', e.target.value)}
                                 placeholder={dbLabel('motivo_bloqueo')}
+                                disabled={etapaBloqueada}
                               />
                             ) : (
-                              <span className="muted">-</span>
+                              <span className="muted">{etapaBloqueada ? 'Bloqueada por cotizacion' : '-'}</span>
                             )}
                           </td>
                           <td>
-                            <button type="button" className="small" onClick={() => guardarEtapa(et)}>
+                            {isReceptionStage(et.etapa) ? (
+                              <span className="muted">Tablet</span>
+                            ) : (
+                              <button type="button" className="small ghost" onClick={() => abrirCargaDocumento(et)} disabled={etapaBloqueada}>
+                                Cargar
+                              </button>
+                            )}
+                          </td>
+                          <td>
+                            <button type="button" className="small" onClick={() => guardarEtapa(et)} disabled={etapaBloqueada}>
                               Guardar
                             </button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -953,6 +1086,61 @@ export default function ProyectosPage() {
             </article>
           </section>
         </>
+      )}
+
+      {documentStage && (
+        <div className="document-upload-overlay" role="presentation" onMouseDown={cerrarCargaDocumento}>
+          <section
+            className="panel document-upload-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="document-upload-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <h3 id="document-upload-title">Cargar documento</h3>
+              <button type="button" className="ghost small" onClick={cerrarCargaDocumento} disabled={uploadingDocument}>
+                Cerrar
+              </button>
+            </div>
+            <p className="muted">Etapa: {documentStage.etapa}</p>
+            <form className="form-grid" onSubmit={subirDocumentoEtapa}>
+              <div className="field field-full">
+                <label>Titulo</label>
+                <input
+                  value={documentForm.titulo}
+                  onChange={(event) => setDocumentForm((prev) => ({ ...prev, titulo: event.target.value }))}
+                  placeholder="Nombre visible del documento"
+                />
+              </div>
+              <div className="field field-full">
+                <label>Archivo</label>
+                <input
+                  type="file"
+                  accept={fileAccept}
+                  onChange={(event) => setDocumentForm((prev) => ({ ...prev, archivo: event.target.files?.[0] || null }))}
+                  required
+                />
+              </div>
+              <div className="field field-full">
+                <label>Descripcion</label>
+                <textarea
+                  value={documentForm.descripcion}
+                  onChange={(event) => setDocumentForm((prev) => ({ ...prev, descripcion: event.target.value }))}
+                  placeholder="Observaciones internas"
+                />
+              </div>
+              <div className="row actions-row">
+                <button type="submit" disabled={uploadingDocument}>
+                  {uploadingDocument ? 'Cargando...' : 'Guardar documento'}
+                </button>
+                <button type="button" className="ghost" onClick={cerrarCargaDocumento} disabled={uploadingDocument}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
     </div>
   );

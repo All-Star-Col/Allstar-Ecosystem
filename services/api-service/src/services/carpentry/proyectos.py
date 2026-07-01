@@ -55,6 +55,39 @@ def _normalize_input(data: dict) -> dict:
     }
 
 
+async def _cotizacion_aprobada(db: AsyncSession, proyecto_id: int) -> dict | None:
+    table_exists = await fetch_one(db, "SELECT to_regclass($1) AS table_ref", ["documentos_proyecto"])
+    if not table_exists or not table_exists.get("table_ref"):
+        return None
+    approved_column = await fetch_one(
+        db,
+        """SELECT 1 AS ok
+           FROM information_schema.columns
+           WHERE table_name = 'documentos_proyecto'
+             AND column_name = 'aprobado'
+           LIMIT 1""",
+    )
+    if not approved_column:
+        return None
+
+    return await fetch_one(
+        db,
+        """SELECT id, titulo, nombre_archivo, etapa_nombre, aprobado_at, aprobado_por
+           FROM documentos_proyecto
+           WHERE proyecto_id = $1
+             AND activo = TRUE
+             AND aprobado = TRUE
+             AND LOWER(etapa_nombre) LIKE '%cotiz%'
+           ORDER BY aprobado_at DESC NULLS LAST, updated_at DESC NULLS LAST, id DESC
+           LIMIT 1""",
+        [proyecto_id],
+    )
+
+
+def _is_cotizacion_stage(stage_name: str | None) -> bool:
+    return "cotiz" in str(stage_name or "").strip().lower()
+
+
 async def listar_proyectos(db: AsyncSession, filters: dict | None = None) -> list[dict]:
     filters = filters or {}
     where_sql, values, _ = build_where(
@@ -221,6 +254,16 @@ async def obtener_proyecto_detalle(db: AsyncSession, payload: dict | None = None
            ORDER BY ec.orden ASC""",
         [proyecto_id],
     )
+    cotizacion_aprobada = await _cotizacion_aprobada(db, int(proyecto_id))
+    etapas = [
+        {
+            **etapa,
+            "bloqueada_por_cotizacion": bool(
+                not cotizacion_aprobada and not _is_cotizacion_stage(etapa.get("etapa"))
+            ),
+        }
+        for etapa in etapas
+    ]
 
     lotes = await fetch_all(
         db,
@@ -238,6 +281,7 @@ async def obtener_proyecto_detalle(db: AsyncSession, payload: dict | None = None
         "proyecto": proyecto,
         "etapas": etapas,
         "lotes": lotes,
+        "cotizacion_aprobada": cotizacion_aprobada,
     }
 
 
@@ -251,6 +295,29 @@ async def actualizar_etapa_proyecto(db: AsyncSession, payload: dict | None = Non
             400,
             "VALIDATION",
         )
+
+    etapa = await fetch_one(
+        db,
+        """SELECT pe.id, pe.proyecto_id, ec.nombre AS etapa
+           FROM proyecto_etapas pe
+           JOIN etapas_catalogo ec ON ec.id = pe.etapa_id
+           WHERE pe.id = $1""",
+        [etapa_id],
+    )
+    if not etapa:
+        raise AppError("Etapa de proyecto no encontrada.", 404, "NOT_FOUND")
+
+    if not _is_cotizacion_stage(etapa.get("etapa")):
+        approved_quote = await _cotizacion_aprobada(db, int(etapa["proyecto_id"]))
+        if not approved_quote:
+            raise AppError(
+                "Debes aprobar una cotizacion antes de modificar las demas etapas.",
+                400,
+                "QUOTE_APPROVAL_REQUIRED",
+            )
+
+    if db.in_transaction():
+        await db.rollback()
 
     async with db.begin():
         rows = await execute(

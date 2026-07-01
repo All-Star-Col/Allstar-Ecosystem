@@ -814,6 +814,24 @@
   padding: 12px;
 }
 
+.panel-subheader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.panel-subheader h4 {
+  font-size: 0.96rem;
+}
+
+.panel-subheader p {
+  margin-top: 2px;
+  color: var(--foreground-muted);
+  font-size: 0.86rem;
+}
+
 /* ═══════════════════════════════════════════
    TABLES
 ═══════════════════════════════════════════ */
@@ -827,6 +845,44 @@
   background: var(--surface);
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
+}
+
+.table-wrap.compact-table {
+  max-height: 280px;
+}
+
+.table-wrap.cut-order-preview {
+  max-height: 430px;
+}
+
+.material-required-form {
+  margin-bottom: 14px;
+}
+
+.material-required-form .searchable-select {
+  min-width: 220px;
+}
+
+.panel .muted {
+  color: var(--foreground-muted);
+  font-size: 0.9rem;
+}
+
+.cut-order-preview table {
+  min-width: 1320px;
+}
+
+.cut-order-preview input,
+.cut-order-preview select {
+  min-width: 96px;
+}
+
+.cut-order-preview td {
+  white-space: normal;
+}
+
+.cut-order-preview td:nth-child(4) {
+  min-width: 220px;
 }
 
 .carpentry-app table {
@@ -873,6 +929,63 @@
 }
 
 .clickable-row { cursor: pointer; }
+
+.row-muted td {
+  background: var(--surface-subtle);
+  color: var(--foreground-subtle);
+}
+
+.documents-data-table {
+  table-layout: fixed;
+}
+
+.documents-data-table th,
+.documents-data-table td {
+  white-space: normal;
+}
+
+.documents-actions-column {
+  width: 300px;
+  min-width: 300px;
+  text-align: center !important;
+}
+
+.documents-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.documents-actions .small {
+  min-width: 86px;
+}
+
+.documents-reception-table th:nth-child(1),
+.documents-reception-table td:nth-child(1) {
+  width: 28%;
+}
+
+.documents-reception-table th:nth-child(2),
+.documents-reception-table td:nth-child(2) {
+  width: 14%;
+}
+
+.documents-reception-table th:nth-child(3),
+.documents-reception-table td:nth-child(3) {
+  width: 12%;
+}
+
+.documents-reception-table th:nth-child(4),
+.documents-reception-table td:nth-child(4) {
+  width: 20%;
+}
+
+.documents-reception-table th:nth-child(5),
+.documents-reception-table td:nth-child(5) {
+  width: 12%;
+}
 
 .selected-row td {
   background: var(--cobalt-light) !important;
@@ -1502,6 +1615,23 @@
 .ok    { color: var(--status-ok); }
 .error { color: var(--status-danger); font-weight: 600; }
 .muted { color: var(--foreground-muted); }
+
+.document-upload-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(13, 22, 41, 0.36);
+}
+
+.document-upload-modal {
+  width: min(640px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  box-shadow: var(--shadow-lg);
+}
 .font-mono { font-family: 'JetBrains Mono', monospace; }
 
 .list {

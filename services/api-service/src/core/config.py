@@ -36,7 +36,12 @@ class Settings(BaseSettings):
     CARPENTRY_DB_SCHEMA: str = "carpentry"
     SALES_ASSISTANT_ENABLED: str = "false"
     AZURE_STORAGE_CONNECTION_STRING: str = ""
+    AZURE_STORAGE_ACCOUNT_NAME: str = ""
+    AZURE_STORAGE_ACCOUNT_KEY: str = ""
+    AZURE_STORAGE_ACCOUNT_URL: str = ""
+    AZURE_STORAGE_SAS_TOKEN: str = ""
     AZURE_STORAGE_CONTAINER_ACTAS: str = "actas-cliente-instalacion"
+    AZURE_STORAGE_CONTAINER_CARPENTRY_DOCS: str = "carpentry-docs"
     AZURE_CONTAINER_PLANOS_PROYECTO: str = "planos-proyecto"
 
     # --- ROBUSTEZ POSTGRES ---

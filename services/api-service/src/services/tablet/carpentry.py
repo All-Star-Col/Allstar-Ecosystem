@@ -11,6 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 
 from src.core.config import settings
+from src.services.azure_storage import get_blob_service_client
 
 
 def _load_sql_db():
@@ -68,15 +69,7 @@ async def call_first_available(
 
 
 def _azure_blob_service_client():
-    from azure.storage.blob import BlobServiceClient
-
-    connection_string = (
-        settings.AZURE_STORAGE_CONNECTION_STRING
-        or os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-    )
-    if not connection_string:
-        raise RuntimeError("No esta configurada AZURE_STORAGE_CONNECTION_STRING.")
-    return BlobServiceClient.from_connection_string(connection_string)
+    return get_blob_service_client()
 
 
 def _safe_filename(nombre: str) -> str:
@@ -219,17 +212,19 @@ async def download_acta_pdf(acta_id: int) -> tuple[bytes, str]:
     if not acta:
         raise RuntimeError("No se encontro el acta solicitada.")
 
+    container_name = acta.get("azure_container") or settings.AZURE_STORAGE_CONTAINER_ACTAS
     blob_name = acta.get("azure_blob_name")
     filename = acta.get("nombre_archivo") or f"acta_cliente_{acta_id}.pdf"
     if not blob_name:
         raise RuntimeError("El acta no tiene archivo asociado en Azure.")
+    if not container_name:
+        raise RuntimeError("El acta no tiene contenedor Azure asociado.")
 
-    def _download_sync() -> bytes:
-        from src.services.tablet.carpentry_legacy.azure_blob import descargar_blob_bytes
-
-        return descargar_blob_bytes(blob_name)
-
-    return await run_in_threadpool(_download_sync), filename
+    return await run_in_threadpool(
+        _download_blob_bytes_sync,
+        container_name=container_name,
+        blob_name=blob_name,
+    ), filename
 
 
 async def upload_plano_proyecto(

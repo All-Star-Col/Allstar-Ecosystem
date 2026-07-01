@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from io import BytesIO
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user
@@ -9,6 +12,7 @@ from src.db.database import get_db
 from src.schemas.carpentry import ActionInvokeRequest, ActionInvokeResponse
 from src.schemas.models import User
 from src.services.carpentry.common import AppError, map_database_error
+from src.services.carpentry import documentos as documentos_service
 from src.services.carpentry.registry import execute_action, list_actions
 
 router = APIRouter()
@@ -85,6 +89,95 @@ async def invoke_action(
             mapped.code,
             mapped.status,
             sorted(list((request.payload or {}).keys())),
+        )
+        raise HTTPException(
+            status_code=mapped.status,
+            detail={"message": mapped.message, "code": mapped.code},
+        )
+
+
+@router.post("/documents/upload")
+async def upload_document(
+    proyecto_id: int = Form(...),
+    proyecto_etapa_id: int | None = Form(None),
+    etapa_id: int | None = Form(None),
+    titulo: str | None = Form(None),
+    descripcion: str | None = Form(None),
+    archivo: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    try:
+        if db.in_transaction():
+            await db.rollback()
+        file_bytes = await archivo.read()
+        return await documentos_service.subir_documento(
+            db,
+            proyecto_id=proyecto_id,
+            proyecto_etapa_id=proyecto_etapa_id,
+            etapa_id=etapa_id,
+            titulo=titulo,
+            descripcion=descripcion,
+            filename=archivo.filename or "documento",
+            content_type=archivo.content_type,
+            file_bytes=file_bytes,
+            usuario=current_user.username,
+        )
+    except AppError as exc:
+        logger.exception(
+            "AppError subiendo documento de carpinteria | code=%s status=%s",
+            exc.code,
+            exc.status,
+        )
+        raise HTTPException(
+            status_code=exc.status,
+            detail={"message": exc.message, "code": exc.code},
+        )
+    except Exception as exc:
+        mapped = map_database_error(exc)
+        logger.exception(
+            "Error inesperado subiendo documento de carpinteria | code=%s status=%s",
+            mapped.code,
+            mapped.status,
+        )
+        raise HTTPException(
+            status_code=mapped.status,
+            detail={"message": mapped.message, "code": mapped.code},
+        )
+
+
+@router.get("/documents/{document_id}/file")
+async def download_document(
+    document_id: int,
+    disposition: str = Query("inline", pattern="^(inline|attachment)$"),
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    try:
+        if db.in_transaction():
+            await db.rollback()
+        file_bytes, filename, content_type = await documentos_service.descargar_documento(db, document_id)
+        return StreamingResponse(
+            BytesIO(file_bytes),
+            media_type=content_type,
+            headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+        )
+    except AppError as exc:
+        logger.exception(
+            "AppError descargando documento de carpinteria | code=%s status=%s",
+            exc.code,
+            exc.status,
+        )
+        raise HTTPException(
+            status_code=exc.status,
+            detail={"message": exc.message, "code": exc.code},
+        )
+    except Exception as exc:
+        mapped = map_database_error(exc)
+        logger.exception(
+            "Error inesperado descargando documento de carpinteria | code=%s status=%s",
+            mapped.code,
+            mapped.status,
         )
         raise HTTPException(
             status_code=mapped.status,

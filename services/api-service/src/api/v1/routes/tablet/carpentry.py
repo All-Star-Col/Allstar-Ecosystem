@@ -27,6 +27,7 @@ from src.schemas.tablet_carpentry import (
     GenerarTareasProcesoRequest,
     SincronizarHerrajesRequest,
 )
+from src.services.azure_storage import AzureStorageNotConfigured
 from src.services.tablet import carpentry as carpentry_service
 
 router = APIRouter()
@@ -39,6 +40,15 @@ def _body(model: Any) -> dict[str, Any]:
 def _raise_api_error(exc: Exception, message: str = "Error ejecutando API de carpinteria.") -> None:
     if isinstance(exc, HTTPException):
         raise exc
+    if isinstance(exc, AzureStorageNotConfigured):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "ok": False,
+                "mensaje": str(exc),
+                "error": "AZURE_STORAGE_NOT_CONFIGURED",
+            },
+        )
     raise HTTPException(
         status_code=500,
         detail={
@@ -593,13 +603,16 @@ async def eliminar_acta_entrega_cliente(acta_id: int) -> Any:
 
 
 @router.get("/actas-entrega-cliente/{acta_id}/pdf")
-async def descargar_acta_entrega_cliente_pdf(acta_id: int) -> StreamingResponse:
+async def descargar_acta_entrega_cliente_pdf(
+    acta_id: int,
+    disposition: str = Query("attachment", pattern="^(inline|attachment)$"),
+) -> StreamingResponse:
     try:
         pdf_bytes, filename = await carpentry_service.download_acta_pdf(acta_id)
         return StreamingResponse(
             BytesIO(pdf_bytes),
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
         )
     except Exception as exc:
         _raise_api_error(exc, "No fue posible descargar el acta desde Azure.")
