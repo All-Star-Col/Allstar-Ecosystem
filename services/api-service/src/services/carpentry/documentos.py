@@ -176,6 +176,38 @@ async def ensure_document_table(db: AsyncSession) -> None:
         )
         """,
     )
+    schema_repairs = [
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS proyecto_id INTEGER",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS proyecto_etapa_id INTEGER",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS etapa_id INTEGER",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS etapa_nombre TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS titulo TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS descripcion TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS nombre_archivo TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS tipo_archivo TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS tamano_bytes BIGINT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS azure_container TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS azure_blob_name TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS azure_blob_url TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS hash_sha256 TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS subido_por TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS aprobado BOOLEAN DEFAULT FALSE",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS aprobado_at TIMESTAMPTZ",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS aprobado_por TEXT",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS activo BOOLEAN DEFAULT TRUE",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ALTER COLUMN aprobado SET DEFAULT FALSE",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ALTER COLUMN activo SET DEFAULT TRUE",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ALTER COLUMN created_at SET DEFAULT NOW()",
+        f"ALTER TABLE {DOCUMENTS_TABLE} ALTER COLUMN updated_at SET DEFAULT NOW()",
+        f"UPDATE {DOCUMENTS_TABLE} SET aprobado = FALSE WHERE aprobado IS NULL",
+        f"UPDATE {DOCUMENTS_TABLE} SET activo = TRUE WHERE activo IS NULL",
+        f"UPDATE {DOCUMENTS_TABLE} SET created_at = NOW() WHERE created_at IS NULL",
+        f"UPDATE {DOCUMENTS_TABLE} SET updated_at = COALESCE(created_at, NOW()) WHERE updated_at IS NULL",
+    ]
+    for statement in schema_repairs:
+        await execute(db, statement)
     await execute(
         db,
         f"""
@@ -189,18 +221,6 @@ async def ensure_document_table(db: AsyncSession) -> None:
         CREATE INDEX IF NOT EXISTS idx_{DOCUMENTS_TABLE}_created_at
         ON {DOCUMENTS_TABLE} (created_at DESC)
         """,
-    )
-    await execute(
-        db,
-        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS aprobado BOOLEAN NOT NULL DEFAULT FALSE",
-    )
-    await execute(
-        db,
-        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS aprobado_at TIMESTAMPTZ",
-    )
-    await execute(
-        db,
-        f"ALTER TABLE {DOCUMENTS_TABLE} ADD COLUMN IF NOT EXISTS aprobado_por TEXT",
     )
     await db.commit()
 
