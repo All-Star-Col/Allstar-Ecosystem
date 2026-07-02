@@ -98,6 +98,19 @@ def _azure_blob_service_client():
         ) from exc
 
 
+def _azure_error_message(error: Exception) -> str:
+    error_code = getattr(error, "error_code", None)
+    status_code = getattr(error, "status_code", None)
+    detail = str(error).split("RequestId:", 1)[0].strip()
+    if str(error_code or "").lower() == "authorizationfailure" or status_code in (401, 403):
+        return (
+            "Azure Blob Storage rechazo la credencial configurada. "
+            "Revisa que AZURE_STORAGE_CONNECTION_STRING en GitHub Secrets tenga la llave activa "
+            "de la cuenta automationallstar y que no incluya comillas ni otras variables."
+        )
+    return f"No fue posible completar la operacion con Azure Blob Storage. {detail[:500]}"
+
+
 def _upload_document_sync(
     *,
     file_bytes: bytes,
@@ -106,6 +119,7 @@ def _upload_document_sync(
     proyecto_id: int,
     etapa_nombre: str,
 ) -> dict[str, str]:
+    from azure.core.exceptions import HttpResponseError
     from azure.storage.blob import ContentSettings
 
     container_name = _container_name()
@@ -120,15 +134,21 @@ def _upload_document_sync(
     container_client = service_client.get_container_client(container_name)
     try:
         container_client.create_container()
+    except HttpResponseError as exc:
+        if getattr(exc, "status_code", None) not in (409,):
+            raise AppError(_azure_error_message(exc), 503, "AZURE_STORAGE_ERROR") from exc
     except Exception:
         pass
 
     blob_client = container_client.get_blob_client(blob_name)
-    blob_client.upload_blob(
-        file_bytes,
-        overwrite=True,
-        content_settings=ContentSettings(content_type=content_type),
-    )
+    try:
+        blob_client.upload_blob(
+            file_bytes,
+            overwrite=True,
+            content_settings=ContentSettings(content_type=content_type),
+        )
+    except HttpResponseError as exc:
+        raise AppError(_azure_error_message(exc), 503, "AZURE_STORAGE_ERROR") from exc
     return {
         "container": container_name,
         "blob_name": blob_name,
@@ -137,9 +157,14 @@ def _upload_document_sync(
 
 
 def _download_blob_bytes_sync(*, container_name: str, blob_name: str) -> bytes:
+    from azure.core.exceptions import HttpResponseError
+
     service_client = _azure_blob_service_client()
     blob_client = service_client.get_blob_client(container=container_name, blob=blob_name)
-    return blob_client.download_blob().readall()
+    try:
+        return blob_client.download_blob().readall()
+    except HttpResponseError as exc:
+        raise AppError(_azure_error_message(exc), 503, "AZURE_STORAGE_ERROR") from exc
 
 
 async def _table_exists(db: AsyncSession, table_name: str) -> bool:
