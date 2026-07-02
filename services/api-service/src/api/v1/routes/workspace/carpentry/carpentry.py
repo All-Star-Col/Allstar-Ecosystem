@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 
 from io import BytesIO
+import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user
@@ -17,6 +19,46 @@ from src.services.carpentry.registry import execute_action, list_actions
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+def _safe_error_text(error: Exception, max_length: int = 900) -> str:
+    text = str(error) or repr(error)
+    redactions = [
+        (r"AccountKey=[^;'\"]+", "AccountKey=[REDACTED]"),
+        (r"postgresql\+?[^:\s]+://[^@\s]+@", "postgresql://[REDACTED]@"),
+        (r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer [REDACTED]"),
+    ]
+    for pattern, replacement in redactions:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    text = " ".join(text.split())
+    return text[:max_length]
+
+
+def _diagnostic_error_detail(error: Exception, mapped: AppError) -> dict:
+    original = getattr(error, "orig", None)
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    original_type = original.__class__.__name__ if original is not None else None
+    error_type = error.__class__.__name__
+    debug_parts = [
+        f"tipo={error_type}",
+        f"codigo={mapped.code}",
+    ]
+    if sqlstate:
+        debug_parts.append(f"sqlstate={sqlstate}")
+    if original_type:
+        debug_parts.append(f"origen={original_type}")
+    debug_parts.append(f"detalle={_safe_error_text(error)}")
+    return {
+        "message": f"{mapped.message} ({'; '.join(debug_parts)})",
+        "code": mapped.code,
+        "debug": {
+            "error_type": error_type,
+            "original_type": original_type,
+            "sqlstate": sqlstate,
+            "is_dbapi_error": isinstance(error, DBAPIError),
+            "detail": _safe_error_text(error),
+        },
+    }
 
 
 @router.get("/actions")
@@ -135,14 +177,16 @@ async def upload_document(
         )
     except Exception as exc:
         mapped = map_database_error(exc)
+        detail = _diagnostic_error_detail(exc, mapped)
         logger.exception(
-            "Error inesperado subiendo documento de carpinteria | code=%s status=%s",
+            "Error inesperado subiendo documento de carpinteria | code=%s status=%s detail=%s",
             mapped.code,
             mapped.status,
+            detail.get("debug"),
         )
         raise HTTPException(
             status_code=mapped.status,
-            detail={"message": mapped.message, "code": mapped.code},
+            detail=detail,
         )
 
 
