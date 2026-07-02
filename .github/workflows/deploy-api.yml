@@ -91,18 +91,31 @@ jobs:
           ssh-keyscan -H "${{ secrets.VM_TAILSCALE_IP }}" >> ~/.ssh/known_hosts
 
       - name: Run deploy script on VM
+        env:
+          BW_ACCESS_TOKEN_VALUE: ${{ secrets.BW_ACCESS_TOKEN }}
+          AZURE_STORAGE_CONNECTION_STRING_VALUE: ${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}
+          DOCKERHUB_USERNAME_VALUE: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN_VALUE: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          encode_secret() {
+            printf '%s' "$1" | base64 -w 0
+          }
+          BW_ACCESS_TOKEN_B64="$(encode_secret "$BW_ACCESS_TOKEN_VALUE")"
+          AZURE_STORAGE_CONNECTION_STRING_B64="$(encode_secret "$AZURE_STORAGE_CONNECTION_STRING_VALUE")"
+          DOCKERHUB_USERNAME_B64="$(encode_secret "$DOCKERHUB_USERNAME_VALUE")"
+          DOCKERHUB_TOKEN_B64="$(encode_secret "$DOCKERHUB_TOKEN_VALUE")"
+
           ssh -i /tmp/id_key \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
-            "BW_ACCESS_TOKEN='${{ secrets.BW_ACCESS_TOKEN }}' \
+            "BW_ACCESS_TOKEN=\"\$(printf '%s' '${BW_ACCESS_TOKEN_B64}' | base64 -d)\" \
             ENVIRONMENT='${{ env.ENVIRONMENT }}' \
-            AZURE_STORAGE_CONNECTION_STRING='${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}' \
+            AZURE_STORAGE_CONNECTION_STRING=\"\$(printf '%s' '${AZURE_STORAGE_CONNECTION_STRING_B64}' | base64 -d)\" \
             AZURE_STORAGE_CONTAINER_ACTAS='actas-cliente-instalacion' \
             AZURE_STORAGE_CONTAINER_CARPENTRY_DOCS='carpentry-docs' \
-            DOCKERHUB_USERNAME='${{ secrets.DOCKERHUB_USERNAME }}' \
-            DOCKERHUB_TOKEN='${{ secrets.DOCKERHUB_TOKEN }}' \
+            DOCKERHUB_USERNAME=\"\$(printf '%s' '${DOCKERHUB_USERNAME_B64}' | base64 -d)\" \
+            DOCKERHUB_TOKEN=\"\$(printf '%s' '${DOCKERHUB_TOKEN_B64}' | base64 -d)\" \
             /opt/allstar-api/deploy.sh"
 
       - name: Enforce container restart policy
