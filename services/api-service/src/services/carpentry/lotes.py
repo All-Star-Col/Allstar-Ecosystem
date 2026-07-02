@@ -349,6 +349,10 @@ async def obtener_lote_detalle(db: AsyncSession, payload: dict | None = None) ->
         [lote_id],
     )
 
+    from src.services.carpentry import bom
+
+    await bom.ensure_items_proyecto_schema(db)
+
     items = await fetch_all(
         db,
         """SELECT ip.id, ip.proyecto_id, ip.lote_id,
@@ -668,6 +672,10 @@ async def listar_items_por_lote(db: AsyncSession, payload: dict | None = None) -
 
     if not lote_id:
         return []
+
+    from src.services.carpentry import bom
+
+    await bom.ensure_items_proyecto_schema(db)
 
     return await fetch_all(
         db,
@@ -1033,6 +1041,8 @@ async def crear_lote_desde_orden_corte(db: AsyncSession, payload: dict | None = 
     item_ids.discard(None)
     if not item_ids:
         raise AppError("Debes relacionar al menos un item valido.", 400, "VALIDATION")
+
+    await bom.ensure_items_proyecto_schema(db)
 
     valid_items = await fetch_all(
         db,

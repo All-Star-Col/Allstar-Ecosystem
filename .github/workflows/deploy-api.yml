@@ -109,14 +109,29 @@ jobs:
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             "${{ secrets.VM_SSH_USER }}@${{ secrets.VM_TAILSCALE_IP }}" \
-            "BW_ACCESS_TOKEN=\"\$(printf '%s' '${BW_ACCESS_TOKEN_B64}' | base64 -d)\" \
-            ENVIRONMENT='${{ env.ENVIRONMENT }}' \
-            AZURE_STORAGE_CONNECTION_STRING=\"\$(printf '%s' '${AZURE_STORAGE_CONNECTION_STRING_B64}' | base64 -d)\" \
-            AZURE_STORAGE_CONTAINER_ACTAS='actas-cliente-instalacion' \
-            AZURE_STORAGE_CONTAINER_CARPENTRY_DOCS='carpentry-docs' \
-            DOCKERHUB_USERNAME=\"\$(printf '%s' '${DOCKERHUB_USERNAME_B64}' | base64 -d)\" \
-            DOCKERHUB_TOKEN=\"\$(printf '%s' '${DOCKERHUB_TOKEN_B64}' | base64 -d)\" \
-            /opt/allstar-api/deploy.sh"
+            "set -e
+            export BW_ACCESS_TOKEN=\"\$(printf '%s' '${BW_ACCESS_TOKEN_B64}' | base64 -d)\"
+            export ENVIRONMENT='${{ env.ENVIRONMENT }}'
+            export AZURE_STORAGE_CONNECTION_STRING=\"\$(printf '%s' '${AZURE_STORAGE_CONNECTION_STRING_B64}' | base64 -d)\"
+            export AZURE_STORAGE_CONTAINER_ACTAS='actas-cliente-instalacion'
+            export AZURE_STORAGE_CONTAINER_CARPENTRY_DOCS='carpentry-docs'
+            export DOCKERHUB_USERNAME=\"\$(printf '%s' '${DOCKERHUB_USERNAME_B64}' | base64 -d)\"
+            export DOCKERHUB_TOKEN=\"\$(printf '%s' '${DOCKERHUB_TOKEN_B64}' | base64 -d)\"
+            /opt/allstar-api/deploy.sh
+            if ! docker exec allstar-api printenv AZURE_STORAGE_CONNECTION_STRING >/dev/null 2>&1; then
+              echo 'Azure Storage env vars were not present in container; recreating container with required env.'
+              docker rm -f allstar-api >/dev/null 2>&1 || true
+              docker run -d \
+                --name allstar-api \
+                --restart unless-stopped \
+                -p 80:8000 \
+                -e ENVIRONMENT \
+                -e BW_ACCESS_TOKEN \
+                -e AZURE_STORAGE_CONNECTION_STRING \
+                -e AZURE_STORAGE_CONTAINER_ACTAS \
+                -e AZURE_STORAGE_CONTAINER_CARPENTRY_DOCS \
+                '${{ env.IMAGE_NAME }}:prod'
+            fi"
 
       - name: Enforce container restart policy
         run: |

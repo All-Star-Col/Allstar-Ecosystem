@@ -50,6 +50,36 @@ def _split_description(value: str | None) -> list[str]:
     return [part.strip() for part in re.split(r"[-|]", str(value or "")) if part and part.strip()]
 
 
+async def ensure_items_proyecto_schema(db: AsyncSession) -> None:
+    await execute(
+        db,
+        """ALTER TABLE items_proyecto
+           ADD COLUMN IF NOT EXISTS tipologia TEXT""",
+    )
+    await execute(
+        db,
+        """ALTER TABLE items_proyecto
+           ADD COLUMN IF NOT EXISTS apartamento TEXT""",
+    )
+    await execute(
+        db,
+        """DO $$
+           BEGIN
+             IF EXISTS (
+               SELECT 1
+               FROM information_schema.columns
+               WHERE table_name = 'items_proyecto'
+                 AND column_name = 'piso'
+             ) THEN
+               UPDATE items_proyecto
+               SET tipologia = COALESCE(tipologia, piso::text)
+               WHERE tipologia IS NULL
+                 AND piso IS NOT NULL;
+             END IF;
+           END $$""",
+    )
+
+
 def _parse_material_from_quote(tipo: str | None, descripcion: str | None) -> dict:
     categoria = _normalize_material_category(tipo)
     parts = _split_description(descripcion)
@@ -241,6 +271,8 @@ async def listar_items_por_proyecto(db: AsyncSession, payload: dict | None = Non
     if not proyecto_id:
         return []
 
+    await ensure_items_proyecto_schema(db)
+
     return await fetch_all(
         db,
         """SELECT ip.id, ip.proyecto_id, ip.lote_id,
@@ -256,6 +288,7 @@ async def listar_items_por_proyecto(db: AsyncSession, payload: dict | None = Non
 
 async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
+    await ensure_items_proyecto_schema(db)
     data = {
         "proyecto_id": _int_or_none(payload.get("proyecto_id"), "proyecto_id"),
         "nombre": clean(payload.get("nombre")),
@@ -280,6 +313,7 @@ async def crear_item(db: AsyncSession, payload: dict | None = None) -> dict:
 
 async def actualizar_item(db: AsyncSession, payload: dict | None = None) -> dict:
     payload = payload or {}
+    await ensure_items_proyecto_schema(db)
     data = {
         "id": _int_or_none(payload.get("id"), "id"),
         "nombre": clean(payload.get("nombre")),
