@@ -17,7 +17,7 @@ from src.services.carpentry.common import AppError, clean, execute, fetch_all, f
 
 logger = get_logger(__name__)
 
-DOCUMENTS_TABLE = "documentos_proyecto"
+DOCUMENTS_TABLE = "documentos_proyecto_archivos"
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 RECEPTION_STAGE_WORDS = ("acta", "recepcion")
 ALLOWED_EXTENSIONS = {

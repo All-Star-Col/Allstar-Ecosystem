@@ -56,24 +56,29 @@ def _normalize_input(data: dict) -> dict:
 
 
 async def _cotizacion_aprobada(db: AsyncSession, proyecto_id: int) -> dict | None:
-    table_exists = await fetch_one(db, "SELECT to_regclass($1) AS table_ref", ["documentos_proyecto"])
+    from src.services.carpentry import documentos
+
+    await documentos.ensure_document_table(db)
+    table_exists = await fetch_one(db, "SELECT to_regclass($1) AS table_ref", [documentos.DOCUMENTS_TABLE])
     if not table_exists or not table_exists.get("table_ref"):
         return None
     approved_column = await fetch_one(
         db,
         """SELECT 1 AS ok
            FROM information_schema.columns
-           WHERE table_name = 'documentos_proyecto'
+           WHERE table_schema = current_schema()
+             AND table_name = $1
              AND column_name = 'aprobado'
            LIMIT 1""",
+        [documentos.DOCUMENTS_TABLE],
     )
     if not approved_column:
         return None
 
     return await fetch_one(
         db,
-        """SELECT id, titulo, nombre_archivo, etapa_nombre, aprobado_at, aprobado_por
-           FROM documentos_proyecto
+        f"""SELECT id, titulo, nombre_archivo, etapa_nombre, aprobado_at, aprobado_por
+           FROM {documentos.DOCUMENTS_TABLE}
            WHERE proyecto_id = $1
              AND activo = TRUE
              AND aprobado = TRUE

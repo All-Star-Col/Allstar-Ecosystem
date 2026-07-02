@@ -1127,10 +1127,11 @@ async def crear_items_desde_cotizacion_aprobada(db: AsyncSession, payload: dict 
 
     from src.services.carpentry import documentos
 
+    await documentos.ensure_document_table(db)
     approved_quote = await fetch_one(
         db,
-        """SELECT id, nombre_archivo, tipo_archivo, azure_container, azure_blob_name
-           FROM documentos_proyecto
+        f"""SELECT id, nombre_archivo, tipo_archivo, azure_container, azure_blob_name
+           FROM {documentos.DOCUMENTS_TABLE}
            WHERE proyecto_id = $1
              AND activo = TRUE
              AND aprobado = TRUE
