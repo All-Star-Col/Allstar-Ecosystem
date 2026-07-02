@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from src.core.config import settings
@@ -12,7 +13,7 @@ class AzureStorageNotConfigured(RuntimeError):
 
 def _config_value(name: str) -> str:
     value = getattr(settings, name, "") or os.getenv(name) or ""
-    return str(value).strip()
+    return str(value).strip().strip("\"'")
 
 
 def _first_config_value(*names: str) -> str:
@@ -23,10 +24,34 @@ def _first_config_value(*names: str) -> str:
     return ""
 
 
+def _clean_connection_string(value: str) -> str:
+    text = str(value or "").strip().strip("\"'")
+    if not text:
+        return ""
+
+    # Secrets are sometimes pasted as dotenv blocks. Keep only the connection string
+    # and ignore following AZURE_STORAGE_* assignments.
+    if "AZURE_STORAGE_CONNECTION_STRING=" in text:
+        text = text.split("AZURE_STORAGE_CONNECTION_STRING=", 1)[1].strip()
+    text = text.replace("\r", "\n")
+    text = text.split("\n", 1)[0].strip().strip("\"'")
+
+    match = re.search(
+        r"(DefaultEndpointsProtocol=.*?EndpointSuffix=[^;\"'\s]+)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip().strip(";").strip()
+
+    return text.strip().strip(";").strip()
+
+
 def get_blob_service_client() -> Any:
     from azure.storage.blob import BlobServiceClient
 
     connection_string = _first_config_value("AZURE_STORAGE_CONNECTION_STRING")
+    connection_string = _clean_connection_string(connection_string)
     if connection_string:
         return BlobServiceClient.from_connection_string(connection_string)
 
