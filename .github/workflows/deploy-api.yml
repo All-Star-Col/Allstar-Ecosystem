@@ -69,6 +69,10 @@ jobs:
           tailscale status
           tailscale ping -c 3 ${{ secrets.VM_TAILSCALE_IP }} || true
 
+      - name: add SSH connection
+        run: |
+          sudo tailscale set --ssh
+
       - name: Write SSH private key
         run: |
           echo "${{ secrets.VM_SSH_PRIVATE_KEY }}" > /tmp/id_key
