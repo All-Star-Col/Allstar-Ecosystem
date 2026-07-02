@@ -268,6 +268,12 @@ def map_database_error(error: Exception) -> AppError:
                 400,
                 "DB_FK",
             )
+        if code == "23502":
+            return AppError(
+                "Falta un dato obligatorio para guardar el registro.",
+                400,
+                "DB_NOT_NULL",
+            )
         if code == "23514":
             return AppError(
                 "Los datos no cumplen las reglas de validación de la base de datos.",

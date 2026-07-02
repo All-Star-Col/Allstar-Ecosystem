@@ -211,6 +211,31 @@ async def ensure_document_table(db: AsyncSession) -> None:
     await execute(
         db,
         f"""
+        DO $$
+        DECLARE
+            legacy_column RECORD;
+        BEGIN
+            FOR legacy_column IN
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = '{DOCUMENTS_TABLE}'
+                  AND is_nullable = 'NO'
+                  AND column_default IS NULL
+                  AND column_name <> 'id'
+            LOOP
+                EXECUTE format(
+                    'ALTER TABLE %I ALTER COLUMN %I DROP NOT NULL',
+                    '{DOCUMENTS_TABLE}',
+                    legacy_column.column_name
+                );
+            END LOOP;
+        END $$;
+        """,
+    )
+    await execute(
+        db,
+        f"""
         CREATE INDEX IF NOT EXISTS idx_{DOCUMENTS_TABLE}_proyecto_etapa
         ON {DOCUMENTS_TABLE} (proyecto_id, etapa_id, activo)
         """,
